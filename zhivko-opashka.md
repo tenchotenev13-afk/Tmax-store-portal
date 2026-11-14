@@ -14,6 +14,14 @@
 
 ## Чака изпращане
 
+(в базата от миграцията revaluation_approve, revaluation-approve-schema.sql, версия 20261114203015, приложена 14.11.2026)
+- 13.11 · revaluation_submissions.approved_at — timestamptz, NULL, без default
+- 13.11 · revaluation_submissions.approved_by — text, NULL, без default
+- 13.11 · revaluation_submissions.return_note — text, NULL, без default
+- 13.11 · revaluation_submissions.returned_at — timestamptz, NULL, без default
+- 13.11 · revaluation_submissions.returned_by — text, NULL, без default
+- 13.11 · revaluation_submissions.status — нова стойност на статус 'approved'
+
 (в базата от миграцията minusi_co_comment, minusi-co-comment-schema.sql, версия 20261109102704, приложена 09.11.2026)
 - 09.11 · minus_movements.co_comment — text, NULL, без default (коментар на офиса)
 

@@ -22,7 +22,7 @@ const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, realClick, ok, section, report, dayOffset, ticks, fire, guard } = H;
 
 const CAMP = { id: 'c-1', title: 'Задължителна преоценка 11.2026', kind: 'mandatory', starts_on: dayOffset(-1), ends_on: dayOffset(1), default_pct: 50, status: 'open' };
-const SUBS = [{ id: 's-sh', campaign_id: 'c-1', store_name: 'Шумен', status: 'submitted', no_items: false }];
+const SUBS = [{ id: 's-sh', campaign_id: 'c-1', store_name: 'Шумен', status: 'approved', no_items: false }];
 /* Двата реда са БЕЗ записани розови полета — предложенията ги пълнят. */
 const ITEMS = [
   { id: 'i-1', submission_id: 's-sh', campaign_id: 'c-1', store_name: 'Шумен', sort_order: 1, sap_code: '97638', product_name: 'В КАТАЛОГА',

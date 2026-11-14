@@ -45,7 +45,7 @@ function roundTrip(X, wb) {
 function fmt(X, cell) { return cell && cell.t === 'n' && cell.z ? X.SSF.format(cell.z, cell.v) : null; }
 
 const CAMP = { id: 'c-1', title: 'Тест', kind: 'mandatory', starts_on: dayOffset(-2), ends_on: dayOffset(2), default_pct: 50, status: 'open' };
-const SUB = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'submitted', no_items: false, submitted_at: new Date().toISOString(), default_pct: null };
+const SUB = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'approved', no_items: false, submitted_at: new Date().toISOString(), default_pct: null };
 const ITEM = { id: 'i-1', submission_id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', sort_order: 1, sap_code: '14557', product_name: 'ЛАМПА',
   unit: 'бр.', qty: 2, std_price: 120, discount_pct: 50, proposed_price: 60, store_comment: 'стар модел', new_sap_code: '8014557', sale_price: 69.99, co_qty: 2 };
 const ADMIN = { email: 'e.gurova@temax.bg', display_name: 'Елица Гюрова', role: 'admin', store_name: 'Централен офис' };

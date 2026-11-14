@@ -12,6 +12,10 @@
    · admin / accounting — отваря и затваря кампании; бланките само чете
      (отключване и колоните на ЦО са етап 3);
    · supply — само чете.
+   От 13.11.2026 подадената бланка минава през одобрение от регионалния на
+   обекта (draft → submitted = чака регионалния → approved → processed;
+   обект без регионален: draft → approved). Виж rvSubmitRoute / rvRegApprove /
+   rvRegReturn и rvCoReady.
    is_regional НЕ идва с логина (auth-login връща само id, email, store_name,
    role, display_name, assigned_stores, active — проверено на живо v19,
    12.10.2026), затова се чете от users при всяко отваряне на таба.
@@ -167,8 +171,9 @@ function rvCanEdit(){
   var c = rvCampaign();
   if(!c || !rvStore || !rvCampaignOpenNow(c) || !rvStoreOn(rvStore)) return false;
   /* Обработена бланка (етап 3а) е заключена за всички — промяна само след
-     „Отключи бланката“ от ЦО. */
-  if(rvSub && rvSub.status === 'processed') return false;
+     „Отключи бланката“ от ЦО. Одобрената от регионалния (13.11.2026) — също:
+     тя е при Контролинг. */
+  if(rvSub && (rvSub.status === 'processed' || rvSub.status === 'approved')) return false;
   if(rvIsRegionalFor(rvStore)) return true;
   if(rvIsStoreUser() && currentUser.store_name === rvStore) return !rvSub || rvSub.status === 'draft';
   return false;
@@ -211,10 +216,13 @@ function loadRevaluation(){
       : sbGet('users', 'email=eq.' + encodeURIComponent(currentUser.email || '') + '&select=is_regional,assigned_stores'),
     sbGet('stores', 'select=name&order=name.asc'),
     rvIsCoViewer() ? rvLoadCodes() : Promise.resolve([]),
-    rvIsStoreUser() ? sbGet('revaluation_submissions', 'store_name=eq.' + encodeURIComponent(currentUser.store_name || '') + '&status=in.(submitted,processed)&select=campaign_id') : Promise.resolve([]),
+    rvIsStoreUser() ? sbGet('revaluation_submissions', 'store_name=eq.' + encodeURIComponent(currentUser.store_name || '') + '&status=in.(submitted,approved,processed)&select=campaign_id') : Promise.resolve([]),
     /* Кои обекти са включени — rvCanEdit / rvCoCanUnlock / списъкът го ползват. */
-    rvStoresReady || Promise.resolve()
+    rvStoresReady || Promise.resolve(),
+    /* Одобряващите от списъка — за бутоните „Одобри" / „Върни"; паднало четене = празен списък. */
+    sbGet('app_settings', 'key=eq.' + RV_APPROVERS_KEY + '&select=key,value', true).catch(function(){ return []; })
   ]).then(function(r){
+    rvApprovers = rvApproversRow(r[6]);
     rvMyCampaignIds = {};
     (Array.isArray(r[4]) ? r[4] : []).forEach(function(s){ rvMyCampaignIds[s.campaign_id] = true; });
     rvCampaigns = rvSortCampaigns(Array.isArray(r[0]) ? r[0] : []);
@@ -263,10 +271,11 @@ function rvStatusBadge(){
   var st = 'background:#f1f5f9;color:#475569;';
   var txt = 'Няма бланка';
   if(rvSub){
-    if(rvSub.no_items){ txt = 'Нямат за преоценка' + (rvSub.submitted_at ? ' · ' + rvFmtTs(rvSub.submitted_at) : ''); st = 'background:#f5f3ff;color:#6d28d9;'; }
-    else if(rvSub.status === 'submitted'){ txt = 'Подадена ' + rvFmtTs(rvSub.submitted_at); st = 'background:#dcfce7;color:#166534;'; }
+    if(rvSub.no_items){ txt = 'Нямат за преоценка' + (rvSub.submitted_at ? ' · ' + rvFmtTs(rvSub.submitted_at) : '') + (rvSub.status === 'submitted' ? ' · чака регионалния' : ''); st = 'background:#f5f3ff;color:#6d28d9;'; }
+    else if(rvSub.status === 'submitted'){ txt = 'Подадена ' + rvFmtTs(rvSub.submitted_at) + ' · чака регионалния'; st = 'background:#ffedd5;color:#9a3412;'; }
+    else if(rvSub.status === 'approved'){ txt = 'Одобрена ' + rvFmtTs(rvSub.approved_at) + (rvSub.approved_by ? ' · ' + rvSub.approved_by : ''); st = 'background:#dcfce7;color:#166534;'; }
     else if(rvSub.status === 'processed'){ txt = 'Обработена ' + rvFmtTs(rvSub.processed_at); st = 'background:#dbeafe;color:#1e40af;'; }
-    else { txt = 'Чернова'; st = 'background:#fef9c3;color:#854d0e;'; }
+    else { txt = rvReturnedNow() ? 'Върната — чернова' : 'Чернова'; st = 'background:#fef9c3;color:#854d0e;'; }
   }
   return '<span id="rv-status" style="' + st + 'border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;">' + esc(txt) + '</span>';
 }
@@ -333,6 +342,14 @@ function rvRender(){
   h += '</div>';
   h += '<div style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-bottom:8px;">' +
     'Не се подават артикули от проверка на срокове или за връщане към доставчик. Кабели/гофри/маркучи/мрежи под 1 л.м. и мушама под 0,5 л.м. са брак, не преоценка.</div>';
+  if(rvReturnedNow()){
+    h += '<div id="rv-return-shown" style="font-size:13px;color:#9a3412;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 10px;margin-bottom:8px;">↩ Върната от ' +
+      esc(rvSub.returned_by || 'регионалния') + (rvSub.returned_at ? ' · ' + esc(rvFmtTs(rvSub.returned_at)) : '') + ': <b>' + esc(rvSub.return_note) + '</b></div>';
+  }
+  if(rvSub && rvSub.status === 'submitted'){
+    h += '<div id="rv-wait-reg" style="font-size:12px;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:6px 10px;margin-bottom:8px;">' +
+      'Чака одобрение от регионалния на обекта' + (rvIsCoViewer() ? ' — Контролинг обработва бланката след одобрението.' : '.') + '</div>';
+  }
   if(rvImportFails.length){
     h += '<div id="rv-import-fails" style="font-size:12px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-bottom:8px;">⚠ Не са записани: ' + esc(rvImportFails.join(', ')) + '</div>';
   }
@@ -345,6 +362,7 @@ function rvRender(){
   }
   h += '<button class="btn-sm" onclick="rvExport()">' + (rvIsCoViewer() ? '📥 Excel — този обект' : '📥 Изтегли моята бланка') + '</button>';
   if(!rvIsCoViewer() && rvSub && rvSub.status === 'processed' && rvItems.length) h += '<button class="btn-sm" onclick="rvCopyCodes()">📋 Копирай новите кодове</button>';
+  h += rvRegButtonsHtml();
   h += rvCoButtonsHtml();
   if(canSub){
     h += '<button class="btn-sm" onclick="rvSubmit()" style="background:#16a34a;color:#fff;">✅ Подай</button>';
@@ -730,20 +748,146 @@ function rvSubmit(){
   rvItems.forEach(function(it){ var p = rvRowProblems(it); if(p.length){ rvBad[it.id] = p; n++; } });
   if(n){ rvRender(); toast(n + ' ' + (n === 1 ? 'ред не минава' : 'реда не минават') + ' — маркирани са, бланката НЕ е подадена', '#dc2626'); return Promise.resolve(false); }
   if(!confirm('Подаване на ' + rvItems.length + ' реда? След подаване обектът не може да редактира.')) return Promise.resolve(false);
-  var patch = { status: 'submitted', no_items: false, submitted_at: new Date().toISOString(), submitted_by: currentUser.display_name || currentUser.email };
+  var n0 = rvItems.length;
+  return rvSubmitRoute().then(function(route){
+    if(!route) return false;
+    var patch = rvSubmitPatch({ status: 'submitted', no_items: false, submitted_at: new Date().toISOString(), submitted_by: currentUser.display_name || currentUser.email }, route);
+    return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
+      if(!res.ok){ toast('Бланката не е подадена: ' + sbErrMsg(res), '#dc2626'); return false; }
+      Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
+      toast(route.regs.length ? 'Бланката е подадена — чака одобрение от регионалния' : 'Бланката е подадена');
+      rvRender();
+      return rvNotify('подадени ' + n0 + ' реда', route).then(function(){ return true; });
+    });
+  });
+}
+/* ─── Одобрение от регионалния (13.11.2026, Тенчо по искане на Теодор) ────
+   Регионален на обект = активен потребител с is_regional и обекта в
+   assigned_stores — всяка роля. „Подай" при обект с регионален → 'submitted'
+   (= чака регионалния); без регионален → направо 'approved' с approved_by
+   'без регионален'. Контролинг обработва САМО 'approved' (rvCoCanEdit,
+   rvCoReady). Регионалният: „✅ Одобри" — по всяко време; „↩ Върни на обекта"
+   — само в дните на кампанията (като „Отключи"), със задължителен коментар →
+   'draft' + return_note, който обектът вижда над таблицата. Регионалните се
+   четат НАНОВО при подаване — паднала заявка = бланката НЕ се подава
+   (иначе обект с регионален би минал като „без регионален").
+   Одобряващи от списък (13.11.2026, решение на Тенчо — вместо да стане
+   регионален, което стеснява admin в 8 модула): app_settings
+   'revaluation_approvers' = JSON {"<обект>": ["<имейл>", …]}. Одобряващ за
+   обект = регионалният му ИЛИ имейл от списъка за обекта — за бутоните
+   „Одобри" / „Върни", за известието при „Подай" и за „без регионален" (само
+   ако няма нито едното, нито другото). Правото да ПИШЕ в бланката (rvCanEdit)
+   остава само за регионалния. Липсващ ключ / празно / невалиден JSON = празен
+   списък; паднало четене при „Подай" = бланката НЕ се подава. */
+var RV_NO_REGIONAL = 'без регионален';
+var RV_USERS_Q = 'active=eq.true&select=email,display_name,notify_groups,is_regional,assigned_stores,role,store_name,active';
+var RV_RETURN_NO = 'Връщане — само в дните на кампанията (и при включен обект)';
+var RV_APPROVERS_KEY = 'revaluation_approvers';
+var rvApprovers = {};  /* обект → [имейли, малки букви]; зарежда се с таба */
+function rvParseApprovers(v){
+  var out = {}, o = null;
+  if(v == null || v === '') return out;
+  if(typeof v === 'string'){ try { o = JSON.parse(v); } catch(e){ return {}; } }
+  else o = v;
+  if(!o || typeof o !== 'object' || Array.isArray(o)) return {};
+  Object.keys(o).forEach(function(store){
+    if(!Array.isArray(o[store])) return;
+    var list = o[store].filter(function(x){ return typeof x === 'string' && x.trim(); }).map(function(x){ return x.trim().toLowerCase(); });
+    if(list.length) out[store] = list;
+  });
+  return out;
+}
+function rvApproversRow(rows){
+  var row = (Array.isArray(rows) ? rows : []).filter(function(r){ return r && r.key === RV_APPROVERS_KEY; })[0];
+  return rvParseApprovers(row && row.value);
+}
+function rvApproverEmails(store, map){ return ((map || rvApprovers)[store] || []).slice(); }
+function rvIsApproverFor(store){
+  if(rvIsRegionalFor(store)) return true;
+  var me = String((currentUser && currentUser.email) || '').trim().toLowerCase();
+  return !!me && rvApproverEmails(store).indexOf(me) >= 0;
+}
+/* Регионалните + одобряващите от списъка. Имейл от списъка без активен
+   потребител остава като получател само на имейл (без push). */
+function rvRegionalsOf(users, store, approvers){
+  var list = (users || []).filter(function(u){
+    return u && u.active !== false && u.is_regional === true && !!store && rvParseList(u.assigned_stores).indexOf(store) >= 0;
+  });
+  var emails = rvApproverEmails(store, approvers || {});
+  emails.forEach(function(em){
+    var u = (users || []).filter(function(x){ return x && x.active !== false && String(x.email || '').trim().toLowerCase() === em; })[0];
+    list.push(u || { email: em, display_name: null });
+  });
+  return rvDedupe(list);
+}
+function rvSubmitRoute(){
+  return Promise.all([sbGetOk('users', RV_USERS_Q), sbGetOk('app_settings', 'key=eq.' + RV_APPROVERS_KEY + '&select=key,value')]).then(function(r){
+    if(!r[0].ok || !r[1].ok){ toast('Регионалните / одобряващите не се прочетоха — бланката НЕ е подадена, опитай пак', '#dc2626'); return null; }
+    rvApprovers = rvApproversRow(r[1].rows);
+    return { users: r[0].rows, regs: rvRegionalsOf(r[0].rows, rvStore, rvApprovers) };
+  });
+}
+function rvSubmitPatch(patch, route){
+  if(route.regs.length){ patch.approved_at = null; patch.approved_by = null; }
+  else { patch.status = 'approved'; patch.approved_at = patch.submitted_at; patch.approved_by = RV_NO_REGIONAL; }
+  return patch;
+}
+/* Върната бележка се показва, докато бланката е чернова след връщането —
+   „Отключи" от ЦО след това (reopened_at по-късно) я скрива. */
+function rvReturnedNow(){
+  if(!rvSub || rvSub.status !== 'draft' || !rvSub.return_note || !rvSub.returned_at) return false;
+  return !rvSub.reopened_at || String(rvSub.returned_at) > String(rvSub.reopened_at);
+}
+function rvRegCanAct(){ return !!rvSub && rvSub.status === 'submitted' && rvIsApproverFor(rvStore); }
+function rvRegCanReturn(){ return rvRegCanAct() && rvStoreOn(rvStore) && rvCampaignOpenNow(rvCampaign()); }
+function rvRegButtonsHtml(){
+  if(!rvRegCanAct()) return '';
+  var h = '<button class="btn-sm" onclick="rvRegApprove()" style="background:#16a34a;color:#fff;">✅ Одобри</button>';
+  if(rvRegCanReturn()){
+    h += '<input id="rv-return-note" type="text" placeholder="Защо се връща (задължително)" style="width:220px;">' +
+      '<button class="btn-sm" onclick="rvRegReturn()">↩ Върни на обекта</button>';
+  } else {
+    h += '<button class="btn-sm" onclick="rvRegReturn()" disabled title="' + escAttr(RV_RETURN_NO) + '">↩ Върни на обекта</button>';
+  }
+  return h;
+}
+function rvRegApprove(){
+  if(!rvRegCanAct()) return Promise.resolve(false);
+  if(!confirm('Одобряване на бланката на ' + rvStore + '? Тя отива в Контролинг за обработка.')) return Promise.resolve(false);
+  var patch = { status: 'approved', approved_at: new Date().toISOString(), approved_by: currentUser.display_name || currentUser.email };
   return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
-    if(!res.ok){ toast('Бланката не е подадена: ' + sbErrMsg(res), '#dc2626'); return false; }
+    if(!res.ok){ toast('Бланката не е одобрена: ' + sbErrMsg(res), '#dc2626'); return false; }
     Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
-    toast('Бланката е подадена');
+    toast('Одобрена: ' + rvStore);
     rvRender();
-    return rvNotify('подадени ' + rvItems.length + ' реда').then(function(){ return true; });
+    return rvNotifyApproved().then(function(){ return true; });
+  });
+}
+function rvRegReturn(){
+  if(!rvRegCanAct()) return Promise.resolve(false);
+  if(!rvRegCanReturn()){ toast(RV_RETURN_NO, '#dc2626'); return Promise.resolve(false); }
+  var note = v('rv-return-note');
+  if(!note){ toast('Напиши защо връщаш бланката — коментарът е задължителен. Нищо не е върнато.', '#dc2626'); return Promise.resolve(false); }
+  if(!confirm('Връщане на бланката на ' + rvStore + ' за поправка?')) return Promise.resolve(false);
+  /* no_items: false — върната „нямат" става обикновена чернова (като „Отключи"). */
+  var patch = { status: 'draft', no_items: false, return_note: note, returned_at: new Date().toISOString(), returned_by: currentUser.display_name || currentUser.email,
+    approved_at: null, approved_by: null };
+  return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
+    if(!res.ok){ toast('Бланката не е върната: ' + sbErrMsg(res), '#dc2626'); return false; }
+    Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
+    toast('Върната на обекта: ' + rvStore);
+    rvRender();
+    return rvNotifyReturned(note).then(function(){ return true; });
   });
 }
 function rvNoItems(){
   if(!rvCanSubmit()) return Promise.resolve(false);
   if(rvItems.length){ toast('Бланката има ' + rvItems.length + ' реда — изтрий ги или ги подай', '#dc2626'); return Promise.resolve(false); }
   if(!confirm('Отбелязване „нямаме за преоценка" за ' + rvStore + '?')) return Promise.resolve(false);
-  var patch = { status: 'submitted', no_items: true, submitted_at: new Date().toISOString(), submitted_by: currentUser.display_name || currentUser.email };
+  return rvSubmitRoute().then(function(route){ return route ? rvNoItemsWrite(route) : false; });
+}
+function rvNoItemsWrite(route){
+  var patch = rvSubmitPatch({ status: 'submitted', no_items: true, submitted_at: new Date().toISOString(), submitted_by: currentUser.display_name || currentUser.email }, route);
   var write = rvSub
     ? sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
         if(res.ok) Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
@@ -754,9 +898,9 @@ function rvNoItems(){
     if(!ok){ rvRender(); return false; }
     /* Конфликт при създаването → rvEnsureSub е прочела чужда бланка, без patch-а. */
     if(!rvSub.no_items){ toast('Бланката вече съществува — опитай пак', '#dc2626'); rvRender(); return false; }
-    toast('Отбелязано: нямат за преоценка');
+    toast('Отбелязано: нямат за преоценка' + (route.regs.length ? ' — чака одобрение от регионалния' : ''));
     rvRender();
-    return rvNotify('нямат за преоценка').then(function(){ return true; });
+    return rvNotify('нямат за преоценка', route).then(function(){ return true; });
   });
 }
 
@@ -766,37 +910,88 @@ function rvNoItems(){
    'controlling' — сменена, за да се реши поименно кой получава подадените
    бланки (Администрация → Групи). Провалено известие не отменя подаването,
    но се казва с жълт toast. */
-function rvRecipients(users, store){
+/* От 13.11.2026 (одобрение от регионалния):
+   · „Подай" → САМО регионалните на обекта; обект без регионален → групата
+     'revaluation', както досега (rvRecipients);
+   · „Одобри" → групата 'revaluation' (rvNotifyApproved);
+   · „Върни" → управителят и складът на обекта (rvNotifyReturned).
+   Всяко е имейл + push. sendEmail стои във всяка функция поотделно — таблицата
+   „Кой какво получава" (admin.js, WHO_BROWSER_MAILS) брои по функция. */
+function rvDedupe(list){
   var out = [], seen = {};
-  (users || []).forEach(function(u){
-    var groups = typeof notifyGroupsOf === 'function' ? notifyGroupsOf(u) : rvParseList(u.notify_groups);
-    var hit = groups.indexOf('revaluation') >= 0 || (u.is_regional && rvParseList(u.assigned_stores).indexOf(store) >= 0);
-    var key = u.email || u.display_name;
-    if(hit && key && !seen[key]){ seen[key] = 1; out.push(u); }
-  });
+  (list || []).forEach(function(u){ var key = u && (u.email || u.display_name); if(key && !seen[key]){ seen[key] = 1; out.push(u); } });
   return out;
 }
-function rvNotify(what){
+function rvGroupUsers(users){
+  return rvDedupe((users || []).filter(function(u){
+    var groups = typeof notifyGroupsOf === 'function' ? notifyGroupsOf(u) : rvParseList(u.notify_groups);
+    return groups.indexOf('revaluation') >= 0;
+  }));
+}
+function rvRecipients(users, store, approvers){
+  var regs = rvRegionalsOf(users, store, approvers || rvApprovers);
+  return regs.length ? rvDedupe(regs) : rvGroupUsers(users);
+}
+function rvStoreStaff(users, store){
+  return rvDedupe((users || []).filter(function(u){
+    return u && u.active !== false && u.store_name === store && (u.role === 'manager' || u.role === 'sklad');
+  }));
+}
+/* push + имейл вече тръгнали → жълт toast, ако нещо липсва. */
+function rvNoticeResult(rec, jobs, warn){
+  if(!rec.length) return Promise.resolve(warn('няма получатели на известието'));
+  return Promise.all(jobs).then(function(r){
+    var bad = [];
+    if(!r[0] || !r[0].ok) bad.push('push');
+    if(!r[1] || !r[1].ok) bad.push('имейл');
+    if(bad.length) return warn('известието не тръгна (' + bad.join(', ') + ')');
+    return true;
+  });
+}
+function rvPush(rec, text){
+  var names = rec.map(function(u){ return u.display_name; }).filter(Boolean);
+  return names.length && typeof pushToPeople === 'function' ? pushToPeople(names, 'Преоценка', text) : Promise.resolve({ ok: false });
+}
+function rvEmails(rec){ return rec.map(function(u){ return u.email; }).filter(Boolean); }
+function rvNotify(what, route){
   var c = rvCampaign();
-  var text = 'Преоценка · ' + rvStore + ' · ' + (c ? c.title : '') + ': ' + what;
+  var text = 'Преоценка · ' + rvStore + ' · ' + (c ? c.title : '') + ': ' + what + (route && route.regs.length ? ' — чака одобрение' : '');
   var warn = function(msg){ toast('Подадено, но ' + msg, '#d97706'); return false; };
-  return sbGet('users', 'active=eq.true&select=email,display_name,notify_groups,is_regional,assigned_stores', true).then(function(users){
-    var rec = rvRecipients(users, rvStore);
-    if(!rec.length) return warn('няма получатели на известието');
-    var names = rec.map(function(u){ return u.display_name; }).filter(Boolean);
-    var emails = rec.map(function(u){ return u.email; }).filter(Boolean);
-    var html = '<p>' + esc(text) + '</p><p>Подаде: ' + esc(currentUser.display_name || currentUser.email) + '</p>';
-    var jobs = [
-      typeof pushToPeople === 'function' ? pushToPeople(names, 'Преоценка', text) : Promise.resolve({ ok: false }),
-      typeof sendEmail === 'function' && emails.length ? sendEmail(emails, text, html) : Promise.resolve({ ok: false })
-    ];
-    return Promise.all(jobs).then(function(r){
-      var bad = [];
-      if(!r[0] || !r[0].ok) bad.push('push');
-      if(!r[1] || !r[1].ok) bad.push('имейл');
-      if(bad.length) return warn('известието не тръгна (' + bad.join(', ') + ')');
-      return true;
-    });
+  var rec = rvRecipients(route ? route.users : [], rvStore, rvApprovers);
+  var emails = rvEmails(rec);
+  var html = '<p>' + esc(text) + '</p><p>Подаде: ' + esc(currentUser.display_name || currentUser.email) + '</p>' +
+    (route && route.regs.length ? '<p>Одобри или върни бланката в портала: Ревизии и преоценка → Преоценка.</p>' : '');
+  var jobs = rec.length ? [rvPush(rec, text),
+    typeof sendEmail === 'function' && emails.length ? sendEmail(emails, text, html) : Promise.resolve({ ok: false })] : [];
+  return rvNoticeResult(rec, jobs, warn).catch(function(e){ return warn('известието не тръгна (' + ((e && e.message) || e) + ')'); });
+}
+function rvNotifyApproved(){
+  var c = rvCampaign(), store = rvStore;
+  var text = 'Преоценка · ' + store + ' · ' + (c ? c.title : '') + ': одобрена от регионалния';
+  var warn = function(msg){ toast('Одобрено, но ' + msg, '#d97706'); return false; };
+  return sbGetOk('users', RV_USERS_Q).then(function(res){
+    if(!res.ok) return warn('получателите не се прочетоха');
+    var rec = rvGroupUsers(res.rows);
+    var emails = rvEmails(rec);
+    var html = '<p>' + esc(text) + '</p><p>Одобри: ' + esc(currentUser.display_name || currentUser.email) + '</p>';
+    var jobs = rec.length ? [rvPush(rec, text),
+      typeof sendEmail === 'function' && emails.length ? sendEmail(emails, text, html) : Promise.resolve({ ok: false })] : [];
+    return rvNoticeResult(rec, jobs, warn);
+  }).catch(function(e){ return warn('известието не тръгна (' + ((e && e.message) || e) + ')'); });
+}
+function rvNotifyReturned(note){
+  var c = rvCampaign(), store = rvStore;
+  var text = 'Преоценка · ' + store + ' · ' + (c ? c.title : '') + ': върната за поправка';
+  var warn = function(msg){ toast('Върнато, но ' + msg, '#d97706'); return false; };
+  return sbGetOk('users', RV_USERS_Q).then(function(res){
+    if(!res.ok) return warn('получателите не се прочетоха');
+    var rec = rvStoreStaff(res.rows, store);
+    var emails = rvEmails(rec);
+    var html = '<p>' + esc(text) + '</p><p>Коментар: <b>' + esc(note) + '</b></p><p>Върна: ' + esc(currentUser.display_name || currentUser.email) +
+      '</p><p>Поправи и подай пак в портала: Ревизии и преоценка → Преоценка.</p>';
+    var jobs = rec.length ? [rvPush(rec, text + ' — ' + note),
+      typeof sendEmail === 'function' && emails.length ? sendEmail(emails, text, html) : Promise.resolve({ ok: false })] : [];
+    return rvNoticeResult(rec, jobs, warn);
   }).catch(function(e){ return warn('известието не тръгна (' + ((e && e.message) || e) + ')'); });
 }
 
@@ -911,11 +1106,15 @@ function rvCoProposal(it){
   if(it.co_qty == null && it.qty != null) p.co_qty = rvRound3(Number(it.qty));
   return p;
 }
+/* Бланка, която Контролинг обработва: одобрена от регионалния (или без
+   регионален) или вече обработена. 'submitted' = чака регионалния → само
+   четене, без розови колони и без файловете за SAP (13.11.2026). */
+function rvCoReady(){ return !!rvSub && (rvSub.status === 'approved' || rvSub.status === 'processed'); }
 function rvShowPink(){
-  if(rvIsCoViewer()) return !!rvSub && !rvSub.no_items;
+  if(rvIsCoViewer()) return rvCoReady() && !rvSub.no_items;
   return !!rvSub && rvSub.status === 'processed';
 }
-function rvCoCanEdit(){ return rvIsCO() && !!rvSub && rvSub.status === 'submitted' && !rvSub.no_items; }
+function rvCoCanEdit(){ return rvIsCO() && !!rvSub && rvSub.status === 'approved' && !rvSub.no_items; }
 
 /* ─── Списък на обектите ───────────────────────────────── */
 function rvLoadOverview(){
@@ -947,14 +1146,16 @@ function rvLoadOverview(){
 }
 function rvCoStatus(sub){
   if(!sub) return { txt: 'не е подала', key: 'none' };
-  if(sub.no_items) return { txt: 'нямат' + (sub.submitted_at ? ' · ' + fmtDate(String(sub.submitted_at).slice(0, 10)).slice(0, 5) : ''), key: 'no' };
+  if(sub.no_items) return { txt: 'нямат' + (sub.submitted_at ? ' · ' + fmtDate(String(sub.submitted_at).slice(0, 10)).slice(0, 5) : '') + (sub.status === 'submitted' ? ' · чака регионален' : ''), key: sub.status === 'submitted' ? 'waiting' : 'no' };
   if(sub.status === 'processed') return { txt: 'обработена ' + fmtDate(String(sub.processed_at || '').slice(0, 10)).slice(0, 5), key: 'processed' };
-  if(sub.status === 'submitted') return { txt: 'подадена ' + fmtDate(String(sub.submitted_at || '').slice(0, 10)).slice(0, 5), key: 'submitted' };
+  if(sub.status === 'approved') return { txt: 'одобрена ' + fmtDate(String(sub.approved_at || sub.submitted_at || '').slice(0, 10)).slice(0, 5), key: 'approved' };
+  if(sub.status === 'submitted') return { txt: 'чака регионален · подадена ' + fmtDate(String(sub.submitted_at || '').slice(0, 10)).slice(0, 5), key: 'waiting' };
   return { txt: 'чернова', key: 'draft' };
 }
+var RV_ST_COL = { none: '#94a3b8', no: '#6d28d9', processed: '#1e40af', approved: '#166534', waiting: '#9a3412', draft: '#854d0e' };
 function rvOverviewHtml(){
-  var COL = { none: '#94a3b8', no: '#6d28d9', processed: '#1e40af', submitted: '#166534', draft: '#854d0e' };
-  var tally = { none: 0, no: 0, processed: 0, submitted: 0, draft: 0 };
+  var COL = RV_ST_COL;
+  var tally = { none: 0, no: 0, processed: 0, approved: 0, waiting: 0, draft: 0 };
   var rows = rvCoRows.map(function(r){
     var st = rvCoStatus(r.sub);
     tally[st.key]++;
@@ -962,8 +1163,8 @@ function rvOverviewHtml(){
       '<td style="color:' + COL[st.key] + ';font-weight:600;">' + esc(st.txt) + '</td><td>' + (r.sub && !r.sub.no_items ? r.n : '') + '</td>' +
       '<td>' + (r.sub ? '<button class="btn-sm" data-s="' + escAttr(r.store) + '" onclick="rvCoOpenStore(this.dataset.s)">Отвори</button>' : '') + '</td></tr>';
   }).join('');
-  return '<div class="card"><div id="rv-co-tally" style="font-size:12px;color:#475569;margin-bottom:8px;">подадени ' + tally.submitted +
-    ' · обработени ' + tally.processed + ' · нямат ' + tally.no + ' · чернова ' + tally.draft + ' · не са подали ' + tally.none + '</div>' +
+  return '<div class="card"><div id="rv-co-tally" style="font-size:12px;color:#475569;margin-bottom:8px;">чакат регионален ' + tally.waiting +
+    ' · одобрени ' + tally.approved + ' · обработени ' + tally.processed + ' · нямат ' + tally.no + ' · чернова ' + tally.draft + ' · не са подали ' + tally.none + '</div>' +
     '<div class="tbl-wrap tbl-compact"><table><thead><tr><th>Обект</th><th>Статус</th><th>Редове</th><th></th></tr></thead><tbody id="rv-co-rows">' +
     (rows || '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Няма обекти.</td></tr>') + '</tbody></table></div></div>';
 }
@@ -1042,11 +1243,11 @@ function rvCoButtonsHtml(){
   if(!rvIsCoViewer() || !rvSub) return '';
   var h = '';
   if(!rvIsCO()) return h;
-  if(!rvSub.no_items && rvItems.length){
+  if(!rvSub.no_items && rvItems.length && rvCoReady()){
     h += '<label style="font-size:12px;color:#64748b;margin-left:6px;">Валидна от</label><input id="rv-vk-from" type="date" value="' + today() + '">' +
       '<button class="btn-sm" onclick="rvVk11()">📄 VK11 — ' + esc(rvStore) + '</button>';
     /* MM41 и прехвърлянето — по бланката на обекта (30.10.2026, Елица). */
-    if(!rvRegionalAcc() && (rvSub.status === 'submitted' || rvSub.status === 'processed')){
+    if(!rvRegionalAcc()){
       h += '<button class="btn-sm" onclick="rvMm41()">⬇ MM41</button>' +
         '<button class="btn-sm" onclick="rvMm41Done()">✔ Кодовете са създадени в SAP</button>';
     }
@@ -1055,8 +1256,8 @@ function rvCoButtonsHtml(){
   if(rvCoCanEdit() && rvItems.some(function(it){ return Object.keys(rvCoProposal(it)).length > 0; })){
     h += '<button class="btn-sm" onclick="rvCoAcceptAll()">✔ Приеми предложените за всички</button>';
   }
-  if(rvSub.status === 'submitted') h += '<button class="btn-sm" onclick="rvCoDone()" style="background:#16a34a;color:#fff;">✅ Готово за обект</button>';
-  if(rvSub.status === 'submitted' || rvSub.status === 'processed'){
+  if(rvSub.status === 'approved') h += '<button class="btn-sm" onclick="rvCoDone()" style="background:#16a34a;color:#fff;">✅ Готово за обект</button>';
+  if(rvSub.status === 'submitted' || rvSub.status === 'approved' || rvSub.status === 'processed'){
     h += rvCoCanUnlock()
       ? '<button class="btn-sm" onclick="rvCoUnlock()">🔓 Отключи бланката</button>'
       : '<button class="btn-sm" onclick="rvCoUnlock()" disabled title="' + escAttr(RV_UNLOCK_NO) + '">🔓 Отключи бланката</button>';
@@ -1067,7 +1268,7 @@ function rvCoButtonsHtml(){
 var RV_UNLOCK_NO = 'Обектът не може да подаде наново — кампанията е извън прозореца или Преоценка е скрита за този обект';
 function rvCoCanUnlock(){ return rvStoreOn(rvStore) && rvCampaignOpenNow(rvCampaign()); }
 function rvCoDone(){
-  if(!rvIsCO() || !rvSub || rvSub.status !== 'submitted') return Promise.resolve(false);
+  if(!rvIsCO() || !rvSub || rvSub.status !== 'approved') return Promise.resolve(false);
   rvBad = {};
   var n = 0;
   if(!rvSub.no_items){
@@ -1095,11 +1296,13 @@ function rvCoDone(){
   });
 }
 function rvCoUnlock(){
-  if(!rvIsCO() || !rvSub || (rvSub.status !== 'submitted' && rvSub.status !== 'processed')) return Promise.resolve(false);
+  if(!rvIsCO() || !rvSub || ['submitted', 'approved', 'processed'].indexOf(rvSub.status) < 0) return Promise.resolve(false);
   if(!rvCoCanUnlock()){ toast(RV_UNLOCK_NO, '#dc2626'); return Promise.resolve(false); }
   if(!confirm('Отключване на бланката на ' + rvStore + '? Обектът пак ще може да редактира и да подаде наново.')) return Promise.resolve(false);
-  /* no_items: false — бланка „нямат" става обикновена чернова (19.10.2026). */
-  var patch = { status: 'draft', no_items: false, reopened_at: new Date().toISOString(), reopened_by: currentUser.display_name || currentUser.email, processed_at: null, processed_by: null };
+  /* no_items: false — бланка „нямат" става обикновена чернова (19.10.2026).
+     approved_* се чистят — новото подаване пак минава през регионалния. */
+  var patch = { status: 'draft', no_items: false, reopened_at: new Date().toISOString(), reopened_by: currentUser.display_name || currentUser.email, processed_at: null, processed_by: null,
+    approved_at: null, approved_by: null };
   return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
     if(!res.ok){ toast('Бланката не е отключена: ' + sbErrMsg(res), '#dc2626'); return false; }
     Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
@@ -1198,15 +1401,21 @@ function rvExportCampaign(){
     sbGetAll('revaluation_items', 'campaign_id=eq.' + c.id + '&select=*&order=store_name.asc,sort_order.asc,id.asc')
   ]).then(function(r){
     if(!r[0].ok || r[1].partial){ toast('Данните за износа са непълни — Excel НЕ е направен', '#dc2626'); return false; }
-    var subs = {};
-    r[0].rows.forEach(function(s){ if(!s.no_items && (s.status === 'submitted' || s.status === 'processed')) subs[s.id] = s; });
+    /* Само одобрените и обработените — чакащите регионалния не са за Контролинг (13.11.2026). */
+    var subs = {}, waiting = 0;
+    r[0].rows.forEach(function(s){
+      if(s.no_items) return;
+      if(s.status === 'approved' || s.status === 'processed') subs[s.id] = s;
+      else if(s.status === 'submitted') waiting++;
+    });
+    var waitTxt = waiting ? ' · ' + waiting + (waiting === 1 ? ' бланка чака' : ' бланки чакат') + ' регионалния — не са включени' : '';
     var byStore = {}, order = [];
     r[1].forEach(function(it){
       if(!subs[it.submission_id]) return;
       if(!byStore[it.store_name]){ byStore[it.store_name] = []; order.push(it.store_name); }
       byStore[it.store_name].push(it);
     });
-    if(!order.length){ toast('Няма подадени бланки с редове', '#dc2626'); return false; }
+    if(!order.length){ toast('Няма одобрени бланки с редове' + waitTxt, '#dc2626'); return false; }
     return new Promise(function(resolve){
       rvWithXlsx(function(){
         var wb = XLSX.utils.book_new();
@@ -1231,6 +1440,7 @@ function rvExportCampaign(){
         total.push(last);
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(total), 'Общо');
         XLSX.writeFile(wb, 'preocenka-kampania-' + (c.starts_on || today()) + '.xlsx');
+        if(waitTxt) toast('Excel — кампания' + waitTxt, '#d97706');
         resolve(true);
       });
     });
@@ -1563,7 +1773,7 @@ function rvMm41Collect(){
   ]).then(function(r){
     if(!r[0].ok || r[1].partial || r[2].partial) return { ok: false };
     var s = r[0].rows[0];
-    if(!s || s.no_items || (s.status !== 'submitted' && s.status !== 'processed')) return { ok: true, rows: [] };
+    if(!s || s.no_items || (s.status !== 'approved' && s.status !== 'processed')) return { ok: true, rows: [] };
     var cand = r[1].filter(function(it){
       var code = String(it.new_sap_code || '').trim();
       return code && !rvIsRepeat(it.sap_code) && !rvCodes[code];
@@ -1645,7 +1855,7 @@ function rvVk11Aoa(items, fromIso, store){
   }));
 }
 function rvVk11(){
-  if(!rvIsCO() || !rvSub) return false;
+  if(!rvIsCO() || !rvCoReady()) return false;
   var fromIso = v('rv-vk-from') || today();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(fromIso)){ toast('Невалидна дата „Валидна от"', '#dc2626'); return false; }
   var aoa = rvVk11Aoa(rvSub.no_items ? [] : rvItems, fromIso, rvStore);
@@ -1679,7 +1889,7 @@ function rvTransferAoa(items, plant){
   }));
 }
 function rvTransfer(){
-  if(!rvIsCO() || !rvSub) return Promise.resolve(false);
+  if(!rvIsCO() || !rvCoReady()) return Promise.resolve(false);
   var aoa = rvTransferAoa(rvSub.no_items ? [] : rvItems, '');
   if(aoa.length < 2){ toast('Няма редове с преоценен код и прехвърлено количество — файлът НЕ е направен', '#dc2626'); return Promise.resolve(false); }
   var store = rvStore;
@@ -1719,7 +1929,7 @@ function rvHistOpenView(){
   var seq = ++rvHistSeq;
   rvHistSubs = null;
   return Promise.all([
-    sbGetAll('revaluation_submissions', 'select=id,campaign_id,store_name,status,no_items,submitted_at,processed_at,processed_by&order=store_name.asc,id.asc'),
+    sbGetAll('revaluation_submissions', 'select=id,campaign_id,store_name,status,no_items,submitted_at,approved_at,approved_by,processed_at,processed_by&order=store_name.asc,id.asc'),
     sbGetAll('revaluation_items', 'select=id,submission_id&order=id.asc')
   ]).then(function(r){
     if(seq !== rvHistSeq) return false;
@@ -1754,7 +1964,7 @@ function rvHistCampaignState(c){
 }
 function rvHistHtml(){
   if(!rvHistSubs) return '<div class="card" id="rv-hist" style="color:#94a3b8;">⏳ Зареждане на историята…</div>';
-  var COL = { none: '#94a3b8', no: '#6d28d9', processed: '#1e40af', submitted: '#166534', draft: '#854d0e' };
+  var COL = RV_ST_COL;
   var subsBy = {};
   rvHistSubs.forEach(function(sb){ (subsBy[sb.campaign_id] = subsBy[sb.campaign_id] || []).push(sb); });
   var ROW = 'cursor:pointer;padding:4px 6px;border-radius:6px;';

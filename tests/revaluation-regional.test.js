@@ -18,9 +18,9 @@ const { boot, realClick, btn, ok, guard, section, report, ticks, dayOffset } = H
 
 const CAMP = { id: 'c-1', title: 'Октомври', kind: 'mandatory', starts_on: dayOffset(-2), ends_on: dayOffset(2), default_pct: 50, status: 'open' };
 const SUBS = [
-  { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'submitted', no_items: false, submitted_at: new Date().toISOString() },
+  { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'approved', no_items: false, submitted_at: new Date().toISOString() },
   { id: 's-2', campaign_id: 'c-1', store_name: 'Шумен', status: 'processed', no_items: false, submitted_at: new Date().toISOString(), processed_at: new Date().toISOString() },
-  { id: 's-3', campaign_id: 'c-1', store_name: 'Добрич', status: 'submitted', no_items: false, submitted_at: new Date().toISOString() }
+  { id: 's-3', campaign_id: 'c-1', store_name: 'Добрич', status: 'approved', no_items: false, submitted_at: new Date().toISOString() }
 ];
 const ITEMS = [
   { id: 'i-1', submission_id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', sap_code: '14557', product_name: 'ЛАМПА', qty: 1, std_price: 10, proposed_price: 5, sort_order: 1 },

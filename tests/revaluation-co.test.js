@@ -26,7 +26,7 @@ const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, realClick, fire, btn, ok, guard, section, report, dayOffset, ticks } = H;
 
 const CAMP = { id: 'c-1', title: 'Тестова преоценка Кърджали 10.2026', kind: 'mandatory', starts_on: dayOffset(-3), ends_on: dayOffset(5), default_pct: 50, status: 'open' };
-const SUB = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'submitted', no_items: false, submitted_at: new Date().toISOString(), default_pct: null };
+const SUB = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'approved', no_items: false, submitted_at: new Date().toISOString(), default_pct: null };
 const ITEMS = [
   { id: 'i-1', submission_id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', sort_order: 1, sap_code: '14557', product_name: 'ЛАМПА', unit: 'бр.', qty: 2, std_price: 120, discount_pct: 50, proposed_price: 60, store_comment: 'стар модел' },
   { id: 'i-2', submission_id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', sort_order: 2, sap_code: '82216', product_name: 'КОФА', unit: 'xyz', qty: 1.23456, std_price: 10, discount_pct: 30, proposed_price: 7, store_comment: 'счупена дръжка' },
@@ -92,11 +92,11 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
   {
     const h = env(); await openCo(h);
     const row = h.doc.getElementById('rv-co-Кърджали');
-    ok('Кърджали — „подадена“ и 4 реда', !!row && row.textContent.indexOf('подадена') >= 0 && row.textContent.indexOf('4') >= 0);
+    ok('Кърджали — „одобрена“ и 4 реда', !!row && row.textContent.indexOf('одобрена') >= 0 && row.textContent.indexOf('4') >= 0);
     const sh = h.doc.getElementById('rv-co-Шумен');
     ok('Шумен — „не е подала“, без „Отвори“', !!sh && sh.textContent.indexOf('не е подала') >= 0 && !btn(sh, 'Отвори'));
     ok('ЦО не е в списъка', !h.doc.getElementById('rv-co-Централен офис'));
-    ok('обобщение', h.doc.getElementById('rv-co-tally').textContent.indexOf('подадени 1') >= 0);
+    ok('обобщение', h.doc.getElementById('rv-co-tally').textContent.indexOf('одобрени 1') >= 0);
     realClick(h.w, btn(row, 'Отвори')); await ticks(6);
     ok('„Отвори“ → бланката на Кърджали', h.w.rvStore === 'Кърджали' && !!h.doc.getElementById('rv-row-i-1'));
     ok('и „← Към списъка“', !!btn(mod(h), 'Към списъка'));

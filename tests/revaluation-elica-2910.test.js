@@ -36,8 +36,8 @@ const XLSX_SRC = fs.readFileSync(path.join(ROOT, 'node_modules', 'xlsx', 'dist',
 const CAMP = { id: 'c-1', title: 'Пожелателна преоценка 10.2026', kind: 'optional', starts_on: dayOffset(-2), ends_on: dayOffset(2), default_pct: 30, status: 'open' };
 const SUBS = [
   { id: 's-k', campaign_id: 'c-1', store_name: 'Кърджали', status: 'processed', no_items: false },
-  { id: 's-sh', campaign_id: 'c-1', store_name: 'Шумен', status: 'submitted', no_items: false },
-  { id: 's-pz', campaign_id: 'c-1', store_name: 'Пазарджик', status: 'submitted', no_items: false }
+  { id: 's-sh', campaign_id: 'c-1', store_name: 'Шумен', status: 'approved', no_items: false },
+  { id: 's-pz', campaign_id: 'c-1', store_name: 'Пазарджик', status: 'approved', no_items: false }
 ];
 const IN_CAT = ['8097638', '8099404', '8096295', '8092880', '8100913', '8103124', '8103126', '8104074'];
 const NOT_CAT = ['8103128', '8103131', '8104871'];

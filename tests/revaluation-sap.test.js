@@ -31,7 +31,7 @@ const PAST = { id: 'c-0', title: 'Минала', kind: 'mandatory', starts_on: d
 const LONG = 'ВРАТА БАНЯ PVC ОРЕХ 200/70/КАСА 7СМ ЛЯВА ДЪБ'; /* 45 знака */
 const SUBS = [
   { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'processed', no_items: false },
-  { id: 's-2', campaign_id: 'c-1', store_name: 'Шумен', status: 'submitted', no_items: false },
+  { id: 's-2', campaign_id: 'c-1', store_name: 'Шумен', status: 'approved', no_items: false },
   { id: 's-3', campaign_id: 'c-1', store_name: 'Добрич', status: 'draft', no_items: false },
   { id: 's-4', campaign_id: 'c-1', store_name: 'Габрово', status: 'processed', no_items: true }
 ];
@@ -317,7 +317,7 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
     const opts = Array.from(h.doc.querySelectorAll('#rv-campaign option')).map(o => o.value);
     ok('изборът: само своята кампания (без черновата, без предстоящата)', opts.join(',') === 'c-9', opts.join(','));
     ok('и „Следваща: …“ до него (няма активна)', !!h.doc.getElementById('rv-next') && h.doc.getElementById('rv-next').textContent.indexOf('Следваща') === 0);
-    ok('заявката за своите бланки е само за обекта и submitted/processed', h.calls.get.some(u => u.indexOf('store_name=eq.' + encodeURIComponent('Кърджали') + '&status=in.(submitted,processed)') >= 0));
+    ok('заявката за своите бланки е само за обекта и submitted/approved/processed', h.calls.get.some(u => u.indexOf('store_name=eq.' + encodeURIComponent('Кърджали') + '&status=in.(submitted,approved,processed)') >= 0));
     const both = env({ user: STORE, campaigns: [ACTIVE, OLD], subs: subs.concat([{ id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'draft', no_items: false }]), items });
     await open(both);
     const o2 = Array.from(both.doc.querySelectorAll('#rv-campaign option')).map(o => o.value);

@@ -2473,7 +2473,8 @@ function deleteAdminNotifSchedule(id){
 /* ── users.notify_groups — колоната „Групи" в списъка с потребители ─────── */
 
 /* 'revaluation' (18.10.2026) — кой получава „Преоценка · <обект>: подадена"
-   (rvRecipients в revaluation.js). Само група на ПОТРЕБИТЕЛЯ:
+   (rvRecipients в revaluation.js; от 13.11.2026 — само при обект без
+   регионален) и „… одобрена от регионалния" (rvNotifyApproved). Само група на ПОТРЕБИТЕЛЯ:
    - в матрицата (NOTIF_GROUPS) я няма — notification_matrix_group_key_check
      в базата допуска само co / controlling / regional / owner / store;
    - в NOTIFY_GROUP_ORDER я няма — той е = REPORT_GROUP_KEYS (bulletin.js),
@@ -2625,7 +2626,9 @@ var WHO_BROWSER_MAILS = [
   { mail: 'Пикинг — „🚚 Тръгна"', on: 'складът пуска транспорта', who: 'акаунтите на обекта, които са в app_settings.picking_users', sites: ['picking.js:pkNotifyShipment'] },
   { mail: 'Разлики — до доставчик', on: '„✉️ Изпрати" (Ц. Тенева, admin)', who: 'ръчно въведени адреси (до / копие / отговор)', sites: ['stock-differences.js:sendDiffEmail'] },
   { mail: 'Разлики — сторно бележка / отговор', on: 'бележка или отговор по разлика', who: 'бележка → управител и склад на обекта; отговор → авторът', sites: ['stock-differences.js:sdNoteNotify'] },
-  { mail: 'Преоценка — подадено', on: 'обектът подава', who: 'група „преоценка" + регионалните на обекта', sites: ['revaluation.js:rvNotify'] },
+  { mail: 'Преоценка — подадено', on: 'обектът подава', who: 'регионалните на обекта + одобряващите от app_settings.revaluation_approvers; без тях — група „преоценка"', sites: ['revaluation.js:rvNotify'] },
+  { mail: 'Преоценка — одобрено', on: 'регионалният одобрява бланката', who: 'група „преоценка"', sites: ['revaluation.js:rvNotifyApproved'] },
+  { mail: 'Преоценка — върната', on: 'регионалният връща бланката с коментар', who: 'управителят и складът на обекта', sites: ['revaluation.js:rvNotifyReturned'] },
   { mail: 'Преоценка — обработено', on: 'ЦО отбелязва обработено', who: 'акаунтите на обекта + копие app_settings.revaluation_done_cc', sites: ['revaluation.js:rvCoNotifyDone'] },
   { mail: 'Чек лист', on: '„✉️ Изпрати"', who: 'по един адрес на отметнат обект (управител, първо @temax.bg)', sites: ['checklist.js:submitChecklistSend'] },
   { mail: 'Бюлетин — седмичен дайджест', on: 'меню „Имейл" / понеделнишкият банер', who: 'всички активни управители', sites: ['email.js:sendWeeklyDigest'] },

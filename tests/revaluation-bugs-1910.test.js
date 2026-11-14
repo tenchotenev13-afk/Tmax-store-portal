@@ -35,7 +35,7 @@ const { boot, realClick, ok, btn, section, report, dayOffset, ticks } = H;
 const OPEN = { id: 'c-1', title: 'Преоценка 10.2026', kind: 'mandatory', starts_on: dayOffset(-3), ends_on: dayOffset(5), default_pct: 50, status: 'open' };
 const EXPIRED = Object.assign({}, OPEN, { starts_on: dayOffset(-10), ends_on: dayOffset(-1) });
 const CLOSED = Object.assign({}, OPEN, { status: 'closed' });
-const SUB = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'submitted', no_items: false, submitted_at: new Date().toISOString(), default_pct: null };
+const SUB = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'approved', no_items: false, submitted_at: new Date().toISOString(), default_pct: null };
 const PROC = Object.assign({}, SUB, { status: 'processed', processed_at: new Date().toISOString(), processed_by: 'Елица Гюрова' });
 function item(id, o) {
   return Object.assign({ id, submission_id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', sort_order: 1, sap_code: '14557', product_name: 'ЛАМПА',

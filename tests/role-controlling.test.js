@@ -100,8 +100,11 @@ const shown = (h, id) => { const m = h.doc.getElementById(id); return !!m && m.s
       { email: 'r@temax.bg', display_name: 'Регионален Шумен', notify_groups: [], is_regional: true, assigned_stores: ['Шумен'] },
       { email: 'x@temax.bg', display_name: 'Регионален друг', notify_groups: [], is_regional: true, assigned_stores: ['Петрич'] }
     ];
+    /* 13.11.2026: обект с регионален → само регионалните; без регионален → групата. */
     const rec = h.w.rvRecipients(USERS, 'Шумен').map(u => u.display_name);
-    ok('получава само групата revaluation (+ регионалния на обекта)', rec.join(',') === 'Преоценка,Регионален Шумен', rec.join(','));
+    ok('обект с регионален → само регионалният на обекта', rec.join(',') === 'Регионален Шумен', rec.join(','));
+    const rec2 = h.w.rvRecipients(USERS, 'Пазарджик').map(u => u.display_name);
+    ok('получава само групата revaluation (обект без регионален)', rec2.join(',') === 'Преоценка', rec2.join(','));
     ok('Админ: групата „Преоценка" е в редактора на групите', h.w.NOTIFY_GROUP_LABELS.revaluation === 'Преоценка' && h.w.NOTIFY_GROUP_USER_ONLY.indexOf('revaluation') >= 0);
     ok('…но НЕ в матрицата (CHECK в базата) и НЕ в реда на отчетите', !h.w.NOTIF_GROUPS.some(g => g.key === 'revaluation') && h.w.NOTIFY_GROUP_ORDER.indexOf('revaluation') < 0);
   }
