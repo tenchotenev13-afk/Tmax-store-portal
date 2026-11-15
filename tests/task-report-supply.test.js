@@ -1,7 +1,7 @@
 /* Отчет по задача — секция „Зареждане" (send-routed-report v10, 19.09.2026).
 
    Задача с bulletin_tasks.linked_module='supply' получава под картичката
-   обобщение на бланките от Транспорт › Зареждане за седмицата на бюлетина:
+   обобщение на бланките от Ревизии и преоценка › Зареждане за седмицата на бюлетина:
    „Попълнили N от M", „Без данни: …", таблица артикул | „Обект N · Обект M"
    (при col2_label „N/M" с легенда), „Общо". Задача без linked_module='supply'
    — нищо ново, дори не се четат supply_* таблиците. Провал на заявка →
@@ -165,8 +165,8 @@ const text = html => String(html || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;
     ok('записите се теглят на страници (limit=1000&offset=0)', a.log.get.some(g => /^supply_entries\?.*order=id\.asc&limit=1000&offset=0/.test(g)));
     ok('неактивната бланка (Колоранти) я няма', t.indexOf('Колоранти') < 0 && t.indexOf('КОЛОРАНТ') < 0);
     ok('бланките по sort_order: Подови настилки преди Кабели', a.html.indexOf('Подови настилки') >= 0 && a.html.indexOf('Подови настилки') < a.html.indexOf('Кабели на макара'));
-    ok('линк към портала с текста „Пълна матрица и Excel → Портал › Транспорт › Зареждане"',
-      /<a href="https:\/\/tenchotenev13-afk\.github\.io\/Tmax-store-portal\/"[^>]*>Пълна матрица и Excel → Портал › Транспорт › Зареждане<\/a>/.test(a.html));
+    ok('линк към портала с текста „Пълна матрица и Excel → Портал › Ревизии и преоценка › Зареждане"',
+      /<a href="https:\/\/tenchotenev13-afk\.github\.io\/Tmax-store-portal\/"[^>]*>Пълна матрица и Excel → Портал › Ревизии и преоценка › Зареждане<\/a>/.test(a.html));
     ok('без картинки в секцията', a.html.slice(a.html.indexOf('🎨 Зареждане')).indexOf('<img') < 0);
     ok('таблица с border-collapse', /<table style="[^"]*border-collapse:collapse/.test(a.html.slice(a.html.indexOf('🎨 Зареждане'))));
   }
