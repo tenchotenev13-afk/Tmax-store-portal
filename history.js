@@ -257,17 +257,22 @@ function renderHistoryResults(){
         '<div class="card-title" style="margin:0;">🚚 Транспортни заявки ('+histData.transport.length+')</div>'+
       '</div>'+
       '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
-      '<thead><tr><th>Дата</th><th>Магазин</th><th>Клиент</th><th>Продукт</th><th>Адрес</th><th>Доставка</th><th>Статус</th></tr></thead>'+
+      '<thead><tr><th>Заявена</th><th>Магазин</th><th>Клиент</th><th>Продукт</th><th>Адрес</th><th>Доставка</th><th>Статус</th></tr></thead>'+
       '<tbody>'+
       histData.transport.map(function(o){
+        /* „Заявена“ — денят на заявката, без час. o.hour е часът на ДОСТАВКАТА и
+           стои в „Доставка“ (както в таб Транспорт, 956df16); без delivery — „—“
+           и под него часът в сиво. Филтърът и подредбата остават по date. */
         return '<tr>'+
-          '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
+          '<td>'+esc(fmtDate(o.date))+'</td>'+
           '<td>'+esc(o.store_name||'')+'</td>'+
           '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">'+esc(o.phone||'')+'</small>'+
             (o.client_order_num?'<br><small style="color:#1d4ed8;">📋 Клиентска заявка №'+esc(o.client_order_num)+'</small>':'')+'</td>'+
           '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+(o.sap?'SAP: '+esc(o.sap):'')+'</small></td>'+
           '<td style="font-size:11px;">'+esc(o.address||'')+'</td>'+
-          '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
+          '<td>'+(o.delivery
+            ? '<b>'+esc(fmtDate(o.delivery))+'</b>'+(o.hour?' '+esc(o.hour):'')
+            : '—'+(o.hour?'<br><small style="color:#94a3b8;">'+esc(o.hour)+'</small>':''))+'</td>'+
           /* Същото правило като в таб Транспорт — чакащ стока транспорт не е просрочен */
           '<td>'+statusBadge((o.awaiting_stock&&['done','refused','postponed'].indexOf(o.status)<0)?'awaiting':calcStatus(o.delivery,o.status))+stockArrivedBadge(o)+lateBadge(o)+'</td>'+
         '</tr>';
