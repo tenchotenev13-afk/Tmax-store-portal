@@ -372,7 +372,8 @@ function rvRender(){
   if(edit && rvShowAdd) h += rvAddRowHtml();
 
   var PINK_TH = 'background:#fce7f3;color:#9d174d;';
-  h += '<div class="tbl-wrap tbl-compact"><table><thead><tr><th>Код</th><th>Описание</th><th>Кол.</th><th>МЕ</th><th>Коментар обект</th><th>Ст. цена</th><th>%</th><th>Предложение</th>' +
+  /* tbl-rv-sheet — пренасяне на „Описание“ / „Коментар обект“ и скрол в кутията (index.html, 15.11.2026) */
+  h += '<div class="tbl-wrap tbl-compact tbl-rv-sheet"><table><thead><tr><th>Код</th><th>Описание</th><th>Кол.</th><th>МЕ</th><th>Коментар обект</th><th>Ст. цена</th><th>%</th><th>Предложение</th>' +
     (pink ? '<th style="' + PINK_TH + '">Преоценен код</th><th style="' + PINK_TH + '">Цена преоц. код</th><th style="' + PINK_TH + '">Прехвърлено</th><th style="' + PINK_TH + '">Коментар Ели</th>' : '') +
     (edit ? '<th></th>' : '') + '</tr></thead><tbody id="rv-rows">';
   if(!rvItems.length){

@@ -821,19 +821,48 @@ function parseDelimitedCatalog(text){
   /* Разпознаване на разделителя: табулация > точка-запетая (стандарт за SAP/
      европейски CSV износ, тъй като запетаята вече се ползва за десетичен
      знак в числата, напр. "0,230") > обикновена запетая, като последен fallback. */
-  var delim = text.indexOf('\t')>=0 ? '\t' : (text.indexOf(';')>=0 ? ';' : ',');
-  var lines=text.split(/\r\n|\n/).filter(function(l){return l.trim().length;});
-  if(!lines.length)return [];
-  var headers=lines[0].split(delim).map(function(h){return h.trim();});
+  /* От 15.11.2026 разделителят се гадае по ЗАГЛАВНИЯ ред, не по целия файл —
+     „;“ в описание в кавички при CSV със запетаи вече не обръща избора. */
+  var head=text.split(/\r\n|\n/)[0]||'';
+  var delim = head.indexOf('\t')>=0 ? '\t' : (head.indexOf(';')>=0 ? ';' : ',');
+  var recs=parseDelimitedRecords(text,delim).filter(function(r){return r.join('').trim().length;});
+  if(!recs.length)return [];
+  var headers=recs[0].map(function(h){return h.trim();});
   var rows=[];
-  for(var i=1;i<lines.length;i++){
-    var cols=lines[i].split(delim);
+  for(var i=1;i<recs.length;i++){
+    var cols=recs[i];
     var row={};
     headers.forEach(function(h,idx){row[h]=(cols[idx]||'').trim();});
     rows.push(row);
   }
   rows._detectedHeaders=headers; /* за диагностика, ако нищо не съвпадне */
   return rows;
+}
+/* CSV по RFC 4180 (15.11.2026): поле, което ЗАПОЧВА с ", е в кавички — вътре
+   разделителят и новият ред не цепят, а "" е една кавичка. Кавичка в средата
+   на поле без кавички (25/80") е буквална. Дотогава редът се цепеше по
+   разделителя без кавички и описание като "Резервоар, за ... резервоари"
+   изместваше колоните — 111 реда в product_catalog.default_unit с текст
+   (claude/open/06-11-catalog-unit-garbage.md). Връща масив от записи (масиви). */
+function parseDelimitedRecords(text,delim){
+  var recs=[],rec=[],f='',i=0,n=text.length,q=false,start=true;
+  while(i<n){
+    var c=text.charAt(i);
+    if(q){
+      if(c==='"'){
+        if(text.charAt(i+1)==='"'){f+='"';i+=2;continue;}
+        q=false;i++;continue;
+      }
+      f+=c;i++;continue;
+    }
+    if(start&&c==='"'){q=true;start=false;i++;continue;}
+    if(c===delim){rec.push(f);f='';start=true;i++;continue;}
+    if(c==='\r'&&text.charAt(i+1)==='\n'){i++;continue;}
+    if(c==='\n'||c==='\r'){rec.push(f);recs.push(rec);rec=[];f='';start=true;i++;continue;}
+    f+=c;start=false;i++;
+  }
+  if(f.length||rec.length){rec.push(f);recs.push(rec);}
+  return recs;
 }
 function openCatalogImportModal(){
   var old=document.getElementById('catalog-import-ov'); if(old)old.remove();

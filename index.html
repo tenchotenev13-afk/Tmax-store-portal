@@ -185,6 +185,17 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
   .tbl-compact table{min-width:0;}
   .tbl-compact thead th{position:sticky;top:var(--nav-h,58px);z-index:2;background:var(--surf);}
 }
+/* Преоценка (15.11.2026) — само в #mod-revaluation, глобалното .tbl-compact не се пипа.
+   Дълъг текст без интервали („ПРЕОЦ.ШЕЗЛОНГ2-ПОЗИЦ.МЕТАЛ+ТЕКСТ60/153/8“) излизаше от
+   клетката при fixed лейаута, а таблицата с розовите полета на ЦО — от картата (над
+   1200px .tbl-compact е overflow:visible). Тук: автоматичен лейаут и хоризонтален скрол
+   в самата кутия на всяка ширина (закаченият thead под навигацията отпада за този
+   модул — sticky не работи в кутия със скрол). Бланката (.tbl-rv-sheet): „Описание“
+   (2-ра) и „Коментар обект“ (5-а) се пренасят и посред дума, но не под 160px; другите
+   колони — нормално (иначе кодът се цепеше на „801/234/5“ при 1100px — мерено в браузър). */
+#mod-revaluation .tbl-compact{overflow-x:auto;}
+#mod-revaluation .tbl-compact table{table-layout:auto;}
+#mod-revaluation .tbl-rv-sheet td:nth-child(2),#mod-revaluation .tbl-rv-sheet td:nth-child(5){overflow-wrap:anywhere;min-width:160px;}
 /* Разлики (.tbl-sd-compact), изглед „Решени редове“: 7 колони (8 в „Междускладови“ — там е
    „Склад · Магазин“). Общият модел е .tbl-compact: под 1200px — хоризонтален скрол в кутията,
    от 1200px — закачен thead. Ширините са по КЛАС на клетката (sd-c-*), не по :nth-child, защото
