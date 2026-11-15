@@ -1,5 +1,5 @@
 Отворено: 15.11 · Кой чака: Тенчо · Сесия: zarezhdane-v-revizii
-Затворено: 15.11 · Как: 777b29a + 392a9df, деплой send-routed-report v24 през CLI от git archive на 392a9df, обратно четене байт в байт; OPTIONS 200 + ACAO, recipients_only+dry_run 200
+Затворено: 15.11 · Как: 23f12e0 + c2c00dd, деплой send-routed-report v24 през CLI от git archive (392a9df преди rebase, блобът = c2c00dd), обратно четене байт в байт; OPTIONS 200 + ACAO, recipients_only+dry_run 200
 
 - **send-routed-report — старият път към Зареждане в писмото.** От 15.11.2026 „🎨 Зареждане" е под-таб на „Ревизии и преоценка", не на Транспорт. В отчета по задача с `linked_module='supply'` линкът под секцията още гласи „Пълна матрица и Excel → Портал › Транспорт › Зареждане" (`supabase/functions/send-routed-report/index.ts:1309`; коментарите на редове 108 и 1166 — същото). Заковано в `tests/task-report-supply.test.js:168–169`. Поправката е: текст → „Портал › Ревизии и преоценка › Зареждане", тестът — заедно, после деплой през CLI с обратно четене (правилата за едж функции в CLAUDE.md). Нарочно не е в задачата zarezhdane-v-revizii — „без деплой".
 - Други едж функции / notifications.js / push.js / today.js / history.js с текст или вход към 'supply' — няма (grep 15.11). Наръчникът и `documents`, `recurring_tasks`, `notification_topics` в базата — няма текст „Транспорт … Зареждане".
