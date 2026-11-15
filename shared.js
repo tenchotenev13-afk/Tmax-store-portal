@@ -1821,6 +1821,11 @@ function setupTabsForRole(){
      под-лентата). Атрибутът се връща при всеки вход — същата страница може да
      смени потребителя без презареждане. */
   if(rvTab)rvTab.setAttribute('onclick',isControllingRole()?"showModule('revaluation')":"showModule('rev-schedule')");
+  /* Под-бутон „🎨 Зареждане“ (supply.js) — от 15.11.2026 в „Ревизии и
+     преоценка“ (дотогава tps-supply в Транспорт, за всички роли). Видим за
+     всички, които виждат таба — rsCanSee(), без отделен ключ. */
+  var supSubBtn=document.getElementById('rvs-supply');
+  if(supSubBtn)supSubBtn.style.display=(typeof rsCanSee==='function'&&rsCanSee())?'':'none';
   var rvSubBtn=document.getElementById('rvs-revaluation');
   if(rvSubBtn){
     rvSubBtn.style.display=(typeof rvCanSee==='function'&&rvCanSee())?'':'none';
@@ -1903,11 +1908,10 @@ function showModule(mod){
   /* "Транспорт" и "Палети" — под-таб в Транспорт (наличности на празни палети по обекти) */
   var tpSub=document.getElementById('transport-pallets-subnav');
   if(tpSub){
-    tpSub.style.display=(mod==='transport'||mod==='calendar'||mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'||mod==='picking')?'block':'none';
-    var btnT=document.getElementById('tps-transport'),btnP=document.getElementById('tps-pallets'),btnS=document.getElementById('tps-supply'),btnL=document.getElementById('tps-loading');
+    tpSub.style.display=(mod==='transport'||mod==='calendar'||mod==='pallets'||mod==='loading'||mod==='transfers'||mod==='picking')?'block':'none';
+    var btnT=document.getElementById('tps-transport'),btnP=document.getElementById('tps-pallets'),btnL=document.getElementById('tps-loading');
     if(btnT)btnT.classList.toggle('active',mod==='transport');
     if(btnP)btnP.classList.toggle('active',mod==='pallets');
-    if(btnS)btnS.classList.toggle('active',mod==='supply');
     if(btnL)btnL.classList.toggle('active',mod==='loading');
     var btnX=document.getElementById('tps-transfers');
     if(btnX)btnX.classList.toggle('active',mod==='transfers');
@@ -1918,19 +1922,22 @@ function showModule(mod){
   }
   /* Подтабовете на Транспорт държат главния таб активен - иначе навигацията
      показва Транспорт като незает, докато си вътре в негов подтаб. */
-  if(mod==='calendar'||mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'||mod==='picking'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
+  if(mod==='calendar'||mod==='pallets'||mod==='loading'||mod==='transfers'||mod==='picking'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
   /* „Ревизии и преоценка“ — под-лента като при Транспорт; главният таб е
-     tab-revaluation и за двата под-таба. */
+     tab-revaluation за всички под-табове. „🎨 Зареждане“ ('supply') е тук от
+     15.11.2026 (дотогава в Транспорт). */
   var rvSubnav=document.getElementById('rev-subnav');
   if(rvSubnav){
-    rvSubnav.style.display=(mod==='rev-schedule'||mod==='revaluation'||mod==='minusi')?'block':'none';
+    rvSubnav.style.display=(mod==='rev-schedule'||mod==='supply'||mod==='revaluation'||mod==='minusi')?'block':'none';
     var btnRs=document.getElementById('rvs-schedule'),btnRv=document.getElementById('rvs-revaluation');
     if(btnRs)btnRs.classList.toggle('active',mod==='rev-schedule');
+    var btnSup=document.getElementById('rvs-supply');
+    if(btnSup)btnSup.classList.toggle('active',mod==='supply');
     if(btnRv)btnRv.classList.toggle('active',mod==='revaluation');
     var btnMn=document.getElementById('rvs-minusi');
     if(btnMn)btnMn.classList.toggle('active',mod==='minusi');
   }
-  if(mod==='rev-schedule'||mod==='minusi'){var rvMainTab=document.getElementById('tab-revaluation');if(rvMainTab)rvMainTab.classList.add('active');}
+  if(mod==='rev-schedule'||mod==='supply'||mod==='minusi'){var rvMainTab=document.getElementById('tab-revaluation');if(rvMainTab)rvMainTab.classList.add('active');}
   if(mod==='admin')loadAdmin();
   if(mod==='transport')loadTransport();
   if(mod==='client')loadClientOrders();

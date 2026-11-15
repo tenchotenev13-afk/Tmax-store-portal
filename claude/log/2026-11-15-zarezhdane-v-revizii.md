@@ -1,0 +1,7 @@
+# 15.11 — zarezhdane-v-revizii
+
+- „🎨 Зареждане" е под-таб на „Ревизии и преоценка" (решение на Тенчо 15.11 по предложение на Теодор от 30.10): `tps-supply` е махнат от под-лентата на Транспорт, `rvs-supply` е между „📅 График ревизии" и „🏷️ Преоценка". Видим по `rsCanSee()`, без ключ. `showModule('supply')` показва под-лентата на Ревизии и маркира `rvs-supply` + `tab-revaluation`; Транспорт — скрит/неактивен. Под-лентата на Ревизии е с `flex-wrap:wrap` (4 бутона на 390 px).
+- Бюлетин: `linkedModuleAllowed('supply')` → `rsCanSee()` (като пилотните под-табове). Ролите kasa, user, logistics, info, marketing (23 акаунта) губят достъп; проверено в базата — за 60 дни в `supply_entries` / `supply_store_notes` / `supply_no_need` са писали само manager, sklad, supply (+ 1 служебна поправка „поправка 14.10 (ЦО)").
+- Текст „Транспорт → Зареждане" в портала няма (само коментарът в `supply.js`, сменен). В едж функцията — да, виж `claude/open/15-11-zarezhdane-edge-tekst.md`.
+- Тест: `tests/supply-in-revisions.test.js` (нов, в `TESTS`), обновени `transport-subnav-calendar`, `linked-module-buttons`, `supply`; в `supply-auto-complete` и `bul-pending-hint` е добавен `revisions.js` към модулите (в първия и фиктивната роля 'store' → 'manager'). Мутации (rvs-supply скрит за manager; `tab-transport` активен за supply; `tps-supply` върнат в Транспорт) — и трите го събарят.
+- Без схема — ред за Живко няма.

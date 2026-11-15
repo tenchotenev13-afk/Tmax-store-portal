@@ -72,7 +72,7 @@ const MOD = { 'r-sd': 'stock-diff', 'r-srd': 'stock-returns', 'r-sup': 'supply' 
 
 function env(user, comps) {
   const h = boot({
-    modules: ['transport.js', 'stock-returns.js', 'stock-differences.js', 'bulletin.js', 'today.js', 'report.js'],
+    modules: ['transport.js', 'stock-returns.js', 'stock-differences.js', 'bulletin.js', 'today.js', 'report.js', 'revisions.js'], /* rsCanSee() — бутонът към Зареждане (15.11.2026) */
     user: user,
     data: {
       users: [{ store_name: STORE }], stores: [{ name: STORE }],

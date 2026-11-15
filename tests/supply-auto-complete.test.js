@@ -41,7 +41,7 @@ function freezeDate(w, d) {
 }
 
 const STORE = 'Троян';
-const USER = { email: 't@temax.bg', display_name: 'Иван', role: 'store', store_name: STORE };
+const USER = { email: 't@temax.bg', display_name: 'Иван', role: 'manager', store_name: STORE }; /* реална роля — Зареждане се отваря по rsCanSee() от 15.11.2026 */
 const TPL_A = 't-floor', TPL_B = 't-cable', TPL_C = 't-new';
 
 function supplyTask(over) {
@@ -66,7 +66,7 @@ const ent = (tid, over) => Object.assign({ template_id: tid, store_name: STORE, 
 function env(opts) {
   opts = opts || {};
   const h = boot({
-    modules: ['bulletin.js'],
+    modules: ['bulletin.js', 'revisions.js'], /* rsCanSee() — бутонът към Зареждане от 15.11.2026 */
     user: USER,
     data: {
       users: [{ store_name: STORE }], stores: [{ name: STORE }],

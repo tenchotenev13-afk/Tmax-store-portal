@@ -288,9 +288,10 @@ var LINKED_MODULES = [
   { value:'reference', label:'🛡️ Гаранции' },
   { value:'history', label:'📊 История' },
   { value:'pallets', label:'🟫 Палети' },
-  /* Подтаб на Транспорт като Палети — linkedModuleAllowed() го пуска за
-     всички. send-routed-report добавя секция „Зареждане" в отчета по задача
-     с този linked_module. */
+  /* Под-таб на „Ревизии и преоценка" от 15.11.2026 (дотогава на Транспорт,
+     за всички) — linkedModuleAllowed() го пуска по rsCanSee(), като под-бутона
+     rvs-supply. send-routed-report добавя секция „Зареждане" в отчета по
+     задача с този linked_module. */
   { value:'supply', label:'🎨 Зареждане' },
   /* Под-табове на „Ревизии и преоценка" (25.10.2026) — пилотни, бутонът е по
      видимостта на под-бутона (linkedModuleAllowed). Без auto_complete (полето
@@ -335,6 +336,8 @@ function linkedModuleAllowed(value){
      revaluation.js и minusi.js се зареждат след този файл — затова typeof. */
   if(value==='revaluation') return typeof rvCanSee==='function'&&rvCanSee();
   if(value==='minusi') return typeof mnTabVisible==='function'&&mnTabVisible();
+  /* „🎨 Зареждане" — под-таб на Ревизии от 15.11.2026: по rsCanSee() (revisions.js). */
+  if(value==='supply') return typeof rsCanSee==='function'&&rsCanSee();
   return true;
 }
 /* Кои обекти са в пилота, се знае чак след app_settings, който

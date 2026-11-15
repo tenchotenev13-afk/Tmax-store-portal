@@ -2,8 +2,10 @@
    Договорено с Теодор (имейли 30.10 и 02.11.2026): в бутона — кратко име,
    пълното — в заглавието на страницата.
 
-   1. Ред в под-лентата: Заявки, Календар, Зареждане, Товарни листи,
-      Трансфери, Пикинг, Палети — Палети последен.
+   1. Ред в под-лентата: Заявки, Календар, Товарни листи,
+      Трансфери, Пикинг, Палети — Палети последен. „🎨 Зареждане“ (tps-supply)
+      от 15.11.2026 НЕ е тук — под-таб на „Ревизии и преоценка“ (rvs-supply,
+      tests/supply-in-revisions.test.js).
    2. Календар вече НЕ е горен таб (#tab-calendar го няма); бутонът
       tps-calendar е скрит до setupTabsForRole() и видим за всички роли след
       вход — същото като стария таб (shared.js показваше tab-calendar с '').
@@ -45,7 +47,8 @@ function title(h, mod) {
   {
     const sub = h.doc.getElementById('transport-pallets-subnav');
     const ids = Array.from(sub.querySelectorAll('button')).map(b => b.id);
-    const want = ['tps-transport', 'tps-calendar', 'tps-supply', 'tps-loading', 'tps-transfers', 'tps-picking', 'tps-pallets'];
+    const want = ['tps-transport', 'tps-calendar', 'tps-loading', 'tps-transfers', 'tps-picking', 'tps-pallets'];
+    ok('tps-supply го няма (Зареждане е в Ревизии от 15.11.2026)', !h.doc.getElementById('tps-supply'));
     ok('редът е ' + want.join(', '), JSON.stringify(ids) === JSON.stringify(want), ids.join(','));
     ok('Палети е последен', ids[ids.length - 1] === 'tps-pallets', ids[ids.length - 1]);
     ok('бутоните пазят кратките имена',

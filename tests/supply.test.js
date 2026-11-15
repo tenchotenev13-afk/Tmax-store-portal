@@ -1,4 +1,4 @@
-/* Транспорт > 🎨 Зареждане (supply.js), Етапи 1–2.
+/* Ревизии и преоценка > 🎨 Зареждане (supply.js), Етапи 1–2 (до 15.11.2026 — под-таб на Транспорт).
 
    Какво се заковава:
    - формата за обект: шаблонът се показва само ако обектът е в target_stores
@@ -42,7 +42,7 @@ const ITEMS = [
 
 function env(user, entries, extra) {
   return boot(Object.assign({
-    modules: ['pallets.js', 'supply.js'],
+    modules: ['pallets.js', 'supply.js', 'revisions.js'],
     user: user,
     data: {
       supply_templates: [TPL],
@@ -216,20 +216,23 @@ const RED = /^(#dc2626|rgb\(220,38,38\))$/;
     ok('Габрово вижда бланката', !!h.doc.getElementById('sup-q1-it-a'));
   }
 
-  section('9. Навигация: реален клик на „🎨 Зареждане" в под-нав на Транспорт');
+  section('9. Навигация: реален клик на „🎨 Зареждане" в под-нав на Ревизии (от 15.11.2026)');
   {
-    const h = env(STORE);
-    const b = h.doc.getElementById('tps-supply');
-    ok('бутонът съществува', !!b);
+    const h = env(Object.assign({}, STORE, { role: 'manager' }));
+    h.w.setupTabsForRole(); await ticks(4);
+    ok('в Транспорт няма tps-supply', !h.doc.getElementById('tps-supply'));
+    const b = h.doc.getElementById('rvs-supply');
+    ok('бутонът съществува и се вижда', !!b && b.style.display === '');
     if (b) {
       realClick(h.w, b); await ticks(6);
-      ok('под-нав се показва', h.doc.getElementById('transport-pallets-subnav').style.display === 'block');
+      ok('под-нав на Ревизии се показва', h.doc.getElementById('rev-subnav').style.display === 'block');
+      ok('под-нав на Транспорт е скрита', h.doc.getElementById('transport-pallets-subnav').style.display === 'none');
       ok('бутонът е активен', b.classList.contains('active'));
-      ok('„Палети" не е активен', !h.doc.getElementById('tps-pallets').classList.contains('active'));
+      ok('„График ревизии" не е активен', !h.doc.getElementById('rvs-schedule').classList.contains('active'));
       ok('#mod-supply е видим', mod(h).style.display === 'block');
       ok('#mod-pallets е скрит', h.doc.getElementById('mod-pallets').style.display === 'none');
-      const tt = h.doc.getElementById('tab-transport');
-      ok('таб Транспорт е активен', !tt || tt.classList.contains('active'));
+      ok('таб Ревизии и преоценка е активен', h.doc.getElementById('tab-revaluation').classList.contains('active'));
+      ok('таб Транспорт НЕ е активен', !h.doc.getElementById('tab-transport').classList.contains('active'));
       ok('loadSupply() е тръгнал (формата е рендирана)', !!h.doc.getElementById('sup-q1-it-a'));
     }
   }

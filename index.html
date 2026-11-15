@@ -421,14 +421,14 @@ OneSignalDeferred.push(async function(OneSignal) {
     </div>
   </div>
   <div id="transport-pallets-subnav" class="no-print" style="display:none;max-width:1300px;margin:12px auto 0;width:100%;padding:0 16px;">
-    <!-- Ред (13.11.2026, Теодор): Заявки, Календар, Зареждане, Товарни листи,
-         Трансфери, Пикинг, Палети — Палети най-вдясно. В бутона — кратко име,
+    <!-- Ред (13.11.2026, Теодор): Заявки, Календар, Товарни листи,
+         Трансфери, Пикинг, Палети — Палети най-вдясно. „🎨 Зареждане“ от
+         15.11.2026 е под-таб на „Ревизии и преоценка“ (rvs-supply). В бутона — кратко име,
          пълното е в заглавието на страницата. Календар до 13.11.2026 беше горен
          таб tab-calendar; видимостта му е в setupTabsForRole (shared.js). -->
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button id="tps-transport" class="filter-btn" onclick="showModule('transport')">🚚 Заявки</button>
       <button id="tps-calendar" class="filter-btn" style="display:none" onclick="showModule('calendar')">🚐 Календар</button>
-      <button id="tps-supply" class="filter-btn" onclick="showModule('supply')">🎨 Зареждане</button>
       <button id="tps-loading" class="filter-btn" onclick="showModule('loading')">🚛 Товарни листи</button>
       <button id="tps-transfers" class="filter-btn" onclick="showModule('transfers')">🔁 Трансфери</button>
       <button id="tps-picking" class="filter-btn" style="display:none" onclick="showModule('picking')">📦 Пикинг</button>
@@ -437,10 +437,13 @@ OneSignalDeferred.push(async function(OneSignal) {
   </div>
 
   <!-- Под-лента на „Ревизии и преоценка“ (tab-revaluation). Нов под-таб = нов
-       бутон тук + нов mod-* — без пренареждане. „➖ Минуси“ — minusi.js (20.10.2026). -->
+       бутон тук + нов mod-* — без пренареждане. „➖ Минуси“ — minusi.js (20.10.2026).
+       „🎨 Зареждане“ (supply.js) — от 15.11.2026 тук, дотогава в Транспорт
+       (решение на Тенчо по предложение на Теодор); видим по rsCanSee(). -->
   <div id="rev-subnav" class="no-print" style="display:none;max-width:1300px;margin:12px auto 0;width:100%;padding:0 16px;">
-    <div style="display:flex;gap:8px;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button id="rvs-schedule" class="filter-btn" onclick="showModule('rev-schedule')">📅 График ревизии</button>
+      <button id="rvs-supply" class="filter-btn" onclick="showModule('supply')" style="display:none;">🎨 Зареждане</button>
       <button id="rvs-revaluation" class="filter-btn" onclick="showModule('revaluation')" style="display:none;">🏷️ Преоценка</button>
       <button id="rvs-minusi" class="filter-btn" onclick="showModule('minusi')" style="display:none;">➖ Минуси</button>
     </div>
