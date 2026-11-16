@@ -468,7 +468,8 @@ var CHECKLIST_PORTAL_MODE = {
   revizia_953:    'any',       /* има ли поне едно отмятане в прозореца → da/ne */
   revizia_grupi:  'any',       /* „РЕВИЗИЯ ГРУПИ", Пон–Сря → da/ne */
   spravka_minusi: 'count',     /* колко РАЗЛИЧНИ дни са отметнати → „4/5" */
-  preocenka:      'file_none', /* файл → da, иначе ne; nyamat само ръчно */
+  preocenka:      'file_none', /* файл → da, иначе ne; nyamat само ръчно;
+                                  задача не-file_comment (пилотът) → отметка → da */
   srok_godnost:     'any',     /* „СПИСЪК СТОКА ЗА ВРЪЩАНЕ", сряда → da/ne */
   razliki_dostavka: 'count'    /* „РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ", Пон–Пет → „3/5" */
 };
@@ -535,7 +536,7 @@ function checklistPortalValueFor(mode, hits, denom) {
    нарочно. */
 function checklistPortalPlan(metric, task, comps, weekISO) {
   var mode = CHECKLIST_PORTAL_MODE[metric.key];
-  if (mode === 'file_none') return task ? checklistFileNonePlan(comps, weekISO) : null;
+  if (mode === 'file_none') return task ? checklistFileNonePlan(comps, weekISO, task) : null;
   var days = (task && Array.isArray(task.due_weekdays)) ? task.due_weekdays : null;
   if (!mode || !days || !days.length) return null;
 
@@ -588,8 +589,22 @@ function checklistPortalPlan(metric, task, comps, weekISO) {
    без такова липсва от hits и checklistPortalValueFor го дава като 'ne' —
    включително отмятане само с коментар (защо — виж CHECKLIST_PORTAL_MODE).
    Файлът е в task_completions.files (jsonb масив). Снимките (photos) НЕ са
-   файл: задачата иска документ и Бюлетинът за file_comment не качва снимки. */
-function checklistFileNonePlan(comps, weekISO) {
+   файл: задачата иска документ и Бюлетинът за file_comment не качва снимки.
+
+   ФАЙЛ СЕ ИСКА САМО ОТ ЗАДАЧА 'file_comment' (16.11.2026, решение А на
+   Тенчо). task е задачата, която важи ЗА ОБЕКТА (checklistTaskForStore), с
+   task_type от версията за седмицата. Друг вид — пилотната „ПРЕОЦЕНКА
+   ЗАДЪЛЖИТЕЛНА" ('info', отмята се в Бюлетина, без файл) — дава 'da' при
+   свършено отмятане НА САМАТА НЕЯ в седмицата. Отметките по другите задачи
+   от групата не се броят за нея: иначе отметка без файл по file_comment
+   задачата би минала за „да". Правилото е по вида, не по id или списък
+   обекти — пилотът се разширява само с target_stores, без промяна тук.
+   Липсващ task_type (в базата е NOT NULL, тоест само провалена/непълна
+   заявка) → старото правило с файл: несигурното не се пуска като „да".
+   Същото в checklist_portal_values() (coalesce към 'file_comment'). */
+function checklistFileNonePlan(comps, weekISO, task) {
+  var needFile = !task || !task.task_type || task.task_type === 'file_comment';
+  var ownId = (task && task.id != null) ? String(task.id) : null;
   var wkLo = weekISO[0], wkHi = weekISO[6];
   var hits = {}, seen = {};
   comps.forEach(function (c) {
@@ -599,6 +614,10 @@ function checklistFileNonePlan(comps, weekISO) {
     /* Пренесеното се брои по новата си дата — същото като при другите режими. */
     var eff = taskDueDateFor(String(c.completion_date).slice(0, 10), c);
     if (!(eff >= wkLo && eff <= wkHi)) return;
+    if (!needFile) {
+      if (ownId && String(c.recurring_task_id) === ownId) hits[c.store_name] = 'da';
+      return;
+    }
     var files = c.files;
     if (typeof files === 'string') { try { files = JSON.parse(files); } catch (e) { files = null; } }
     if (Array.isArray(files) && files.length) hits[c.store_name] = 'da';
@@ -812,12 +831,12 @@ function checklistRecurringChanges(idx) {
 
 function checklistRecurringChangesFor(idx, autos, ids, weekISO) {
   return Promise.all([
-    sbGet('recurring_tasks', 'id=in.(' + ids.join(',') + ')&select=id,due_weekdays,target_stores,linked_module,active'),
+    sbGet('recurring_tasks', 'id=in.(' + ids.join(',') + ')&select=id,due_weekdays,target_stores,linked_module,active,task_type'),
     /* Дните са СЪДЪРЖАНИЕ по седмици (recurring_task_versions, 24.09.2026):
        редакция за показаната седмица мени знаменателя („2 от 3 дни"), но не
        и за другите. Версиите са само за тези задачи. target_stores и
        linked_module — за групата (checklistTaskGroup). */
-    sbGet('recurring_task_versions', 'recurring_task_id=in.(' + ids.join(',') + ')&select=recurring_task_id,from_monday,to_monday,due_weekdays,target_stores,linked_module')
+    sbGet('recurring_task_versions', 'recurring_task_id=in.(' + ids.join(',') + ')&select=recurring_task_id,from_monday,to_monday,due_weekdays,target_stores,linked_module,task_type')
       .catch(function () { return []; }),
     /* Прозорецът е самата показана седмица. Заявката вече изключва
        записите без дата — PostgREST не връща NULL при gte/lte.

@@ -1,6 +1,8 @@
 -- checklist-portal-values-fn.sql
--- Огледало на supabase/migrations/20261030120000_checklist_portal_values_linked_group.sql
--- (предишната версия: 20261026120100_checklist_portal_values.sql).
+-- Огледало на supabase/migrations/20261116120000_checklist_portal_values_task_type.sql
+-- (предишни версии: 20261104114441_transit_status_split.sql — засечката в
+-- „Стока на път"; 20261030120000_checklist_portal_values_linked_group.sql;
+-- 20261026120100_checklist_portal_values.sql).
 --
 -- ЗАЩО (checklist-live-calc, етап 1 от 3; Теодор 26.10, решение на Тенчо
 -- 26.10.2026). portal_value в weekly_checklist е снимка от последното
@@ -37,7 +39,10 @@
 --       изключена за обекта или глобално (recurring_task_skips) → NULL;
 --     · any: попадение → 'da', иначе 'ne'; count: '<дни>/<знаменател>';
 --       file_none: свършено отмятане в седмицата (по деня на явяването) с
---       непразен масив files → 'da', иначе 'ne'.
+--       непразен масив files → 'da', иначе 'ne'. От 16.11.2026 файл се иска
+--       САМО когато задачата на обекта за седмицата е 'file_comment'; друг
+--       вид (пилотът „ПРЕОЦЕНКА ЗАДЪЛЖИТЕЛНА", 'info') → 'da' при свършено
+--       отмятане ПО САМАТА НЕЯ, без файл (checklistFileNonePlan).
 --   module:
 --     · transit: goods_transit, само direction 'incoming' — '<обработени>/<всички>',
 --       обработен = status непразен и ≠ 'pending' ИЛИ reviewed_at; без входящи
@@ -64,8 +69,8 @@
 -- Повод: „СПРАВКА МИНУСИ“ 03c44560 + 5a4e0562 от 26.10 — Гоце Делчев 0/5.
 -- В checklist.js: checklistTaskGroup / checklistTaskForStore.
 --
--- Rollback: supabase/migrations/20261030120000_checklist_portal_values_linked_group_down.sql
---   (връща тялото от 20261026120100).
+-- Rollback: supabase/migrations/20261116120000_checklist_portal_values_task_type_down.sql
+--   (връща тялото от 20261104114441).
 
 create or replace function public.checklist_portal_values(p_year int, p_week int)
 returns table(store_name text, metric_key text, value text)
@@ -138,6 +143,8 @@ begin
                 else t.target_stores end                                     as targets,
            case when ver.recurring_task_id is not null then ver.linked_module
                 else t.linked_module end                                     as lm,
+           case when ver.recurring_task_id is not null then ver.task_type
+                else t.task_type end                                         as ttype,
            exists (select 1 from public.recurring_task_periods p
                     where p.recurring_task_id = t.id)                        as has_periods,
            exists (select 1 from public.recurring_task_periods p
@@ -146,7 +153,7 @@ begin
                       and (p.to_monday is null or p.to_monday >= v_mon))     as valid_week
       from public.recurring_tasks t
       left join lateral (
-        select v.recurring_task_id, v.due_weekdays, v.target_stores, v.linked_module
+        select v.recurring_task_id, v.due_weekdays, v.target_stores, v.linked_module, v.task_type
           from public.recurring_task_versions v
          where v.recurring_task_id = t.id
            and v.from_monday <= v_mon
@@ -187,7 +194,7 @@ begin
               g.task_id
   ),
   rt as (
-    select pk.key, a.portal_mode, pk.s, pk.task_id, e.days, e.has_periods, e.valid_week
+    select pk.key, a.portal_mode, pk.s, pk.task_id, e.days, e.has_periods, e.valid_week, e.ttype
       from pick pk
       join anchors a on a.key = pk.key
       join eff e on e.id = pk.task_id
@@ -207,7 +214,8 @@ begin
   comps as (
     select p.key, p.s, c.status, c.completion_date as orig,
            c.postponed_to, coalesce(c.postponed_to, c.completion_date) as eff,
-           c.files, p.allowed
+           c.files, p.allowed,
+           (g.task_id = p.task_id)                               as own_task
       from rt_plan p
       join grp g on g.key = p.key
       join public.task_completions c on c.recurring_task_id = g.task_id
@@ -240,7 +248,10 @@ begin
            -- file_none: свършено, денят на явяването в седмицата, с файл
            bool_or(c.status = 'done' and c.eff_in
                    and jsonb_typeof(c.files) = 'array'
-                   and jsonb_array_length(c.files) > 0)           as has_file
+                   and jsonb_array_length(c.files) > 0)           as has_file,
+           -- file_none при задача, която НЕ е file_comment (16.11.2026): свършено,
+           -- в седмицата, по САМАТА задача на обекта — без изискване за файл
+           bool_or(c.status = 'done' and c.eff_in and c.own_task) as has_own_done
       from comps2 c
      group by c.key, c.s
   ),
@@ -253,7 +264,9 @@ begin
                              and k.year = v_skip_y and k.week_number = v_skip_w
                              and (k.store_name is null or k.store_name = p.s)) then null
              when p.portal_mode = 'file_none' then
-               case when coalesce(ps.has_file, false) then 'da' else 'ne' end
+               case when coalesce(p.ttype, 'file_comment') <> 'file_comment'
+                    then case when coalesce(ps.has_own_done, false) then 'da' else 'ne' end
+                    when coalesce(ps.has_file, false) then 'da' else 'ne' end
              when p.base_denom + coalesce(ps.delta, 0) <= 0 then null
              when p.portal_mode = 'any' then
                case when coalesce(ps.hits, 0) > 0 then 'da' else 'ne' end
@@ -266,10 +279,12 @@ begin
   transit as (
     select g.store_name as s,
            count(*) filter (where (coalesce(g.status, '') <> '' and g.status <> 'pending')
-                               or g.reviewed_at is not null)            as done,
+                               or g.reviewed_at is not null
+                               or g.recon_at is not null)               as done,
            count(*)                                                     as total
       from public.goods_transit g
      where g.direction = 'incoming'
+       and g.archived_at is null
      group by g.store_name
   ),
   rets as (
@@ -321,7 +336,7 @@ end
 $function$;
 
 comment on function public.checklist_portal_values(int, int) is
-  'Чек лист: автоматичните стойности за ISO седмица (p_year, p_week) — ред на recurring:/module: колона за всеки отчетен обект, смятани в момента на четене по правилото на checklist.js. value NULL = няма стойност. Колона от постоянна задача брои групата със същия linked_module за седмицата, всеки обект по задачата от своя target_stores (30.10.2026).';
+  'Чек лист: автоматичните стойности за ISO седмица (p_year, p_week) — ред на recurring:/module: колона за всеки отчетен обект, смятани в момента на четене по правилото на checklist.js. value NULL = няма стойност. Колона от постоянна задача брои групата със същия linked_module за седмицата, всеки обект по задачата от своя target_stores (30.10.2026). file_none иска файл само от задача file_comment; друг вид — свършена отметка по самата задача (16.11.2026).';
 
 revoke all on function public.checklist_portal_values(int, int) from public;
 grant execute on function public.checklist_portal_values(int, int) to anon, authenticated, service_role;
