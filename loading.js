@@ -4111,6 +4111,13 @@ function llEditorHtml(){
         (llProductsBlockShown(it) ? '<tr data-ll-prodrow="'+i+'"><td></td><td colspan="6" style="padding:0 6px 6px;">'+llProductsBlockHtml(it, i)+'</td></tr>' : '');
     });
     h += '</table></div>';
+    /* Втори „➕ Добави нов ред" под таблицата — молба на складовете: при дълги
+       листи всеки нов ред значеше скрол до горния бутон и обратно. Същата
+       функция като горния бутон (llAddFreeRow) — логиката е на едно място.
+       Само когато има редове: при празна чернова горният е точно над текста. */
+    h += '<div style="text-align:left;margin-top:8px;">'+
+      '<button data-ll-add-bottom="1" onclick="llAddFreeRow()" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">➕ Добави нов ред</button>'+
+      '</div>';
   }
   h += '</div>';
 

@@ -147,6 +147,7 @@ const TESTS = [
   'loading-lists-store.test.js',
   'loading-lists-pallets.test.js',
   'loading-lists-pallet-default.test.js',
+  'loading-lists-add-bottom.test.js',
   'loading-lists-unit-views.test.js',
   'loading-lists-labels.test.js',
   'loading-lists-unnumbered-head.test.js',
