@@ -4,4 +4,5 @@
 - Копие на `bgHolidaysForYear` / `isBgWorkday` / `reportWorkdaysBetween` от `send-scheduled-report`; третото копие е в `tests/co-overdue-report.test.js` т.7.
 - admin.js: `NOTIF_IMPLEMENTED_TOPICS` + колона „Незавършено за обекта" в „Кой какво получава".
 - Данни: `store-open-items-schema.sql` (тема `active=false`, `test_email`, матрица store/email). Без нова колона — ред за Живко няма.
+- Комит `1219960` (преди rebase-а `8715f88`, същият блоб на функцията); деплой `bulletin-notify` версия 34 (CLI, 16.11 07:52 UTC, обратно четене байт в байт, `verify_jwt` true, `ezbr_sha256` `3696ed24…0ff5`, 193 227 байта); кронът в 08:00 UTC — 200 на версия 34. Миграция `20261116080516` (`store_open_items_topic`). dry_run 16.11: 14 обекта, 31 получатели; Сливен, Кърджали, Козлодуй, Троян — сверени със SQL.
 - Тест: `tests/store-open-items.test.js` (нов, в `TESTS`), обновени `admin-who-gets`, `co-overdue-report`. Мутации М1–М4 — и четирите го събарят.
