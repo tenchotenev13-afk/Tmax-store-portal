@@ -10,6 +10,19 @@
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
+//   store_open_items — Незавършено за обекта: по едно писмо на обект (v19)
+//
+// v19 (15.11.2026) — ЕДНО нещо: нова тема store_open_items (Тенчо 15.11,
+//   етап 1 от 2). Делник сутрин по ЕДНО писмо на обект до ролите manager /
+//   sklad / info (soiRecipients — не resolveRecipients, там 'store' включва и
+//   kasa): (А) просрочените задачи на обекта от buildOverdueTasks, (Б)
+//   клиентски заявки — закъснели и със срок до 2 работни дни, като заявител и
+//   като изпълнител. Матрицата (store_open_items, 'store') решава само дали
+//   праща имейл; override 'exclude' се зачита, 'include' — не. Неработен ден
+//   → skipped. notification_log „<дата>|<обект>". Без push. Копие на
+//   bgHolidaysForYear / isBgWorkday / reportWorkdaysBetween от
+//   send-scheduled-report. За сверка в почивен ден: {"as_of":"гггг-мм-дд"} —
+//   само с dry_run и само за тази тема. Останалите теми — непроменени.
 //
 // v18 (12.11.2026) — ЕДНО нещо: {"recipients_only":true[,"topic_key":…]}
 //   (Теодор 11.11, етап 2б, таблицата „📋 Кой какво получава“). За всяка тема
@@ -659,7 +672,7 @@ async function reportableStores(supabase: any): Promise<string[]> {
 /* ──────────── v18: САМО ПОЛУЧАТЕЛИТЕ (recipients_only) ──────────── */
 /* Списъкът е същият като IMPLEMENTED_TOPICS (заковано в
    tests/admin-who-gets.test.js); строителят за всяка тема е в RO_BUILDERS. */
-const RO_TOPIC_KEYS = ['overdue_tasks', 'deadline_passed', 'promo_expiring', 'loading_lists_pending', 'today_deadlines', 'minus_unfilled'];
+const RO_TOPIC_KEYS = ['overdue_tasks', 'deadline_passed', 'promo_expiring', 'loading_lists_pending', 'today_deadlines', 'minus_unfilled', 'store_open_items'];
 
 const roAsP = (r: Recipient) => ({ email: r.email, name: r.name, channel: r.channel, scope: r.scope, stores: r.stores, groups: r.groups });
 const roIsMail = (r: Recipient) => r.channel === 'email' || r.channel === 'both';
@@ -688,6 +701,20 @@ const RO_BUILDERS: Record<string, (supabase: any, topic: any, bg: ReturnType<typ
     const accounts = (su || []).filter((u: any) => u.email && u.store_name && EXCLUDED_STORES.indexOf(u.store_name) < 0)
       .map((u: any) => ({ email: u.email, name: u.display_name || u.email, store: u.store_name }));
     return { personal: watchers.filter(roIsMail).map(roAsP), store_accounts: accounts, push: true };
+  },
+  /* v19 — правилото на soiRecipients(): по обект, само ролите от SOI_ROLES;
+     празно, ако матрицата не дава имейл на групата store. */
+  store_open_items: async (supabase, topic) => {
+    const rec = await soiRecipients(supabase, topic.key);
+    const personal: any[] = [];
+    if (rec.on) {
+      for (const st of Object.keys(rec.byStore).sort()) {
+        for (const r of rec.byStore[st]) {
+          personal.push({ email: r.email, name: r.name, role: r.role, channel: 'email', scope: 'own_stores', stores: [st], groups: ['store'] });
+        }
+      }
+    }
+    return { personal: personal, by_store: rec.on ? rec.byStore : {}, matrix_channel: rec.channel };
   },
   minus_unfilled: async (supabase) => {
     const { data: ms } = await supabase.from('app_settings').select('key,value').eq('key', 'minus_stores');
@@ -2643,6 +2670,324 @@ async function runMinusAutoTick(supabase: any, bg: ReturnType<typeof bgNow>, dry
   };
 }
 
+/* ─────── ТЕМА: НЕЗАВЪРШЕНО ЗА ОБЕКТА (store_open_items, v19) ─────────
+   Решение на Тенчо (15.11.2026), етап 1 от 2. ПО ЕДНО писмо на обект, делник
+   сутрин, до управителя / склада / инфо акаунта на обекта. Без общо писмо.
+
+   Получатели — soiRecipients(), НЕ resolveRecipients(): групата 'store' там е
+   ВСЕКИ активен акаунт с обект, тоест и петте с роля kasa. Тук — само ролите в
+   SOI_ROLES. Матрицата решава САМО дали темата праща имейл (ред store_open_items
+   / 'store' с канал email или both — превключвателят в Администрация →
+   Известия). notification_overrides: 'exclude' се зачита; 'include' за тази
+   тема НЕ се поддържа (писмото е за обекта — човек без обект няма какво да
+   получи).
+
+   Секциите са в SOI_SECTIONS — двойки load (веднъж за пускането) → forStore
+   (за обекта). Етап 2 (транспорти, стока на път, връщания, разлики) е по един
+   ред там.
+     · zadachi — просрочените от buildOverdueTasks(), само редовете на обекта.
+       {skip} → празна секция, писмото продължава.
+     · zayavki — client_orders: закъснели (правилото на reportIsLate от
+       send-scheduled-report без клона awaiting_stock — колоната я няма в
+       client_orders) и със срок до SOI_SOON_WORKDAYS работни дни; като
+       заявител (store_name) и като изпълнител (fulfiller). Сравнението на
+       имената е trim + lower (като coNormName) и за двете. Заявка, в която
+       обектът е и двете, е при заявителя. „Пристигнала в магазина" с минала
+       дата не е закъсняла (същото като чипа „Просрочени").
+
+   Неработен ден (isBgWorkday) → skipped. На живо notification_log с ref_key
+   „<дата>|<обект>" — втори път за деня обектът се прескача; паднало пращане
+   маха реда. test_email → по едно писмо на обект до тестовия адрес, без лог.
+   Без push. */
+const SOI_ROLES = ['manager', 'sklad', 'info'];
+const SOI_SOON_WORKDAYS = 2;
+const SOI_CO_COLS = 'id,in_num,store_name,fulfiller,customer_name,delivery,status,co_eta,product,items,date';
+const SOI_STATUS: Record<string, string> = {
+  pending: 'Изчаква', approved: 'Одобрена', processed: 'Обработена от ЦО', sent: 'Изпратена',
+  arrived: 'Пристигнала в магазина', postponed: 'Отложена', done: 'Изпълнена', refused: 'Отказана',
+};
+
+/* ── Копие от send-scheduled-report (под същите имена) — празници и работни
+   дни. Сверката с shared.js е в tests/co-overdue-report.test.js, т.7. ── */
+function localDateISO(d?: Date){
+  d = d || new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+var _bgHolidayCache: any = {};
+function bgOrthodoxEaster(year){
+  var a=year%4,b=year%7,c=year%19,d=(19*c+15)%30,e=(2*a+4*b-d+34)%7;
+  var m=Math.floor((d+e+114)/31),day=((d+e+114)%31)+1;
+  return new Date(year,m-1,day+13);
+}
+function bgHolidaysForYear(year){
+  if(_bgHolidayCache[year])return _bgHolidayCache[year];
+  var set: any = {};
+  var isWeekend=function(dt){var w=dt.getDay();return w===0||w===6;};
+  var fixed=[[0,1],[2,3],[4,1],[4,6],[4,24],[8,6],[8,22],[11,24],[11,25],[11,26]];
+  var e=bgOrthodoxEaster(year);
+  [-2,-1,0,1].forEach(function(off){set[localDateISO(new Date(year,e.getMonth(),e.getDate()+off))]=true;});
+  fixed.forEach(function(f){set[localDateISO(new Date(year,f[0],f[1]))]=true;});
+  fixed.forEach(function(f){
+    if(!isWeekend(new Date(year,f[0],f[1])))return;
+    var n=new Date(year,f[0],f[1]+1);
+    while(isWeekend(n)||set[localDateISO(n)])n=new Date(n.getFullYear(),n.getMonth(),n.getDate()+1);
+    set[localDateISO(n)]=true;
+  });
+  _bgHolidayCache[year]=set;
+  return set;
+}
+function isBgWorkday(iso){
+  var dt=new Date(iso+'T00:00:00');
+  var w=dt.getDay();
+  if(w===0||w===6)return false;
+  return !bgHolidaysForYear(dt.getFullYear())[iso];
+}
+function reportWorkdaysBetween(fromD, refD){
+  var n = 0;
+  var d = new Date(fromD.getFullYear(), fromD.getMonth(), fromD.getDate());
+  while (true) {
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    if (d > refD) break;
+    if (isBgWorkday(localDateISO(d))) n++;
+  }
+  return n;
+}
+
+/* Местна полунощ от 'гггг-мм-дд' (не new Date(iso) — той е UTC). */
+function soiDay(iso: string): Date {
+  const p = String(iso).slice(0, 10).split('-').map(Number);
+  return new Date(p[0], p[1] - 1, p[2]);
+}
+function soiNorm(n: unknown): string { return String(n || '').trim().toLowerCase(); }
+/* N-тият работен ден СЛЕД iso. */
+function soiAddWorkdays(iso: string, n: number): string {
+  let d = soiDay(iso);
+  while (n > 0) {
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    if (isBgWorkday(localDateISO(d))) n--;
+  }
+  return localDateISO(d);
+}
+/* reportIsLate (send-scheduled-report) върху низове, без клона awaiting_stock. */
+function soiIsLate(o: any, todayISO: string): boolean {
+  if (!o || !o.delivery) return false;
+  if (['done', 'refused', 'postponed', 'arrived'].indexOf(o.status) >= 0) return false;
+  if (o.status === 'processed' && o.co_eta && String(o.co_eta).slice(0, 10) >= todayISO) return false;
+  return String(o.delivery).slice(0, 10) < todayISO;
+}
+function soiIsSoon(o: any, todayISO: string, limitISO: string): boolean {
+  if (!o || !o.delivery || soiIsLate(o, todayISO)) return false;
+  if (['pending', 'processed', 'sent'].indexOf(o.status) < 0) return false;
+  const d = String(o.delivery).slice(0, 10);
+  return d >= todayISO && d <= limitISO;
+}
+/* Просрочие в РАБОТНИ дни, поне 1 (reportLateDays). */
+function soiLateDays(o: any, todayISO: string): number {
+  return Math.max(1, reportWorkdaysBetween(soiDay(o.delivery), soiDay(todayISO)));
+}
+function soiItemText(o: any): string {
+  const items = Array.isArray(o && o.items) ? o.items.filter(Boolean) : [];
+  const first = String((items[0] && items[0].product) || (o && o.product) || '').trim() || '—';
+  return items.length > 1 ? first + ' и още ' + (items.length - 1) : first;
+}
+/* Четирите подгрупи за обекта, в реда на писмото. */
+function soiClassify(rows: any[], store: string, todayISO: string, limitISO: string) {
+  const out = { late_req: [] as any[], late_ful: [] as any[], soon_req: [] as any[], soon_ful: [] as any[] };
+  const me = soiNorm(store);
+  for (const o of (rows || [])) {
+    const req = soiNorm(o.store_name) === me;
+    const ful = !req && soiNorm(o.fulfiller) === me;
+    if (!req && !ful) continue;
+    if (soiIsLate(o, todayISO)) (req ? out.late_req : out.late_ful).push(o);
+    else if (soiIsSoon(o, todayISO, limitISO)) (req ? out.soon_req : out.soon_ful).push(o);
+  }
+  const byDel = (a: any, b: any) => String(a.delivery).localeCompare(String(b.delivery)) || String(a.in_num || '').localeCompare(String(b.in_num || ''));
+  out.late_req.sort(byDel); out.late_ful.sort(byDel); out.soon_req.sort(byDel); out.soon_ful.sort(byDel);
+  return out;
+}
+
+/* Получателите по обект + включена ли е темата за имейл в матрицата. */
+async function soiRecipients(supabase: any, topicKey: string) {
+  const { data: mx } = await supabase.from('notification_matrix').select('channel')
+    .eq('topic_key', topicKey).eq('group_key', 'store');
+  const ch = ((mx || [])[0] || {}).channel;
+  const on = ch === 'email' || ch === 'both';
+  const { data: users } = await supabase.from('users').select('email,display_name,role,store_name')
+    .eq('active', true).in('role', SOI_ROLES);
+  const { data: ov } = await supabase.from('notification_overrides').select('user_email,mode').eq('topic_key', topicKey);
+  const excluded = (ov || []).filter((o: any) => o.mode === 'exclude').map((o: any) => soiNorm(o.user_email));
+  const byStore: Record<string, { email: string; name: string; role: string }[]> = {};
+  for (const u of (users || [])) {
+    if (!u || !u.email || !u.store_name || SOI_ROLES.indexOf(u.role) < 0) continue;
+    if (EXCLUDED_STORES.indexOf(u.store_name) >= 0) continue;
+    const k = soiNorm(u.email);
+    if (excluded.indexOf(k) >= 0) continue;
+    const list = byStore[u.store_name] || (byStore[u.store_name] = []);
+    if (list.some((x) => soiNorm(x.email) === k)) continue;
+    list.push({ email: u.email, name: u.display_name || u.email, role: u.role });
+  }
+  return { on: on, channel: ch || null, byStore: byStore };
+}
+
+/* ── Секция А: просрочени задачи ── */
+async function soiLoadTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
+  const built: any = await buildOverdueTasks(supabase, bg);
+  return built.skip ? { items: [], skip: built.skip } : { items: built.items || [] };
+}
+function soiTasksFor(data: any, store: string) {
+  const mine = (data.items || []).filter((it: any) => it.store === store)
+    .sort((a: any, b: any) => String(a.due).localeCompare(String(b.due)) || String(a.title).localeCompare(String(b.title)));
+  if (!mine.length) return { n: 0, counts: { zadachi: 0 }, html: '' };
+  let html = soiH3('Просрочени задачи от Бюлетина (' + mine.length + ')');
+  for (const it of mine) {
+    html += soiRow((it.kind === 'recurring' ? '🔁 ' : '') + esc(it.title),
+      'срок ' + esc(bgDate(it.due)));
+  }
+  return { n: mine.length, counts: { zadachi: mine.length }, html: html };
+}
+
+/* ── Секция Б: клиентски заявки ── */
+async function soiLoadOrders(supabase: any, bg: ReturnType<typeof bgNow>) {
+  const today = bg.dateStr;
+  const limit = soiAddWorkdays(today, SOI_SOON_WORKDAYS);
+  let rows: any[] = [];
+  /* Страници по 1000 — таванът на PostgREST. */
+  for (let off = 0; ; off += 1000) {
+    const { data, error } = await supabase.from('client_orders').select(SOI_CO_COLS)
+      .not('status', 'in', '(done,refused)').not('delivery', 'is', null).lte('delivery', limit)
+      .order('id', { ascending: true }).range(off, off + 999);
+    if (error) throw new Error('client_orders: ' + (error.message || String(error)));
+    rows = rows.concat(data || []);
+    if (!data || data.length < 1000) break;
+  }
+  return { rows: rows, today: today, limit: limit };
+}
+function soiOrdersFor(data: any, store: string) {
+  const c = soiClassify(data.rows, store, data.today, data.limit);
+  const counts = { late_req: c.late_req.length, late_ful: c.late_ful.length, soon_req: c.soon_req.length, soon_ful: c.soon_ful.length };
+  const n = counts.late_req + counts.late_ful + counts.soon_req + counts.soon_ful;
+  if (!n) return { n: 0, counts: counts, html: '' };
+  const soonTxt = (o: any) => {
+    const k = reportWorkdaysBetween(soiDay(data.today), soiDay(o.delivery));
+    return k === 0 ? 'срок днес' : 'остава' + (k === 1 ? ' 1 работен ден' : 'т ' + k + ' работни дни');
+  };
+  const line = (o: any, asReq: boolean, late: boolean) => {
+    const main = '№ ' + esc(o.in_num || '—') + ' · ' + esc(soiItemText(o));
+    const meta = 'срок ' + esc(bgDate(String(o.delivery))) + ' · ' + esc(SOI_STATUS[o.status] || o.status || '')
+      + ' · ' + (late ? '<b style="color:#b91c1c;">+' + soiLateDays(o, data.today) + ' работни дни</b>' : esc(soonTxt(o)));
+    const who = asReq
+      ? 'Клиент: ' + esc(o.customer_name || '—') + ' · Изпълнява: '
+        + esc(o.fulfiller && soiNorm(o.fulfiller) !== soiNorm(store) ? o.fulfiller : 'вашият обект')
+      : 'Заявил: ' + esc(o.store_name || '—');
+    return soiRow(main, meta + '<br>' + who);
+  };
+  const groups: [string, any[], boolean, boolean][] = [
+    ['Закъснели — като заявител', c.late_req, true, true],
+    ['Закъснели — като изпълнител', c.late_ful, false, true],
+    ['Срок до ' + SOI_SOON_WORKDAYS + ' работни дни — като заявител', c.soon_req, true, false],
+    ['Срок до ' + SOI_SOON_WORKDAYS + ' работни дни — като изпълнител', c.soon_ful, false, false],
+  ];
+  let html = soiH3('Клиентски заявки (' + n + ')');
+  for (const g of groups) {
+    if (!g[1].length) continue;
+    html += '<div style="font-size:13px;font-weight:700;color:' + (g[3] ? '#b91c1c' : '#b45309') + ';margin:10px 0 4px;">'
+      + esc(g[0]) + ' (' + g[1].length + ')</div>';
+    for (const o of g[1]) html += line(o, g[2], g[3]);
+  }
+  return { n: n, counts: counts, html: html };
+}
+
+/* ЕДИНСТВЕНИЯТ списък със секциите на писмото — нова секция е нов ред. */
+const SOI_SECTIONS = [
+  { key: 'zadachi', load: soiLoadTasks, forStore: soiTasksFor },
+  { key: 'zayavki', load: soiLoadOrders, forStore: soiOrdersFor },
+];
+
+function soiH3(t: string): string {
+  return '<h3 style="margin:16px 0 6px;font-size:15px;color:#1f2937;border-bottom:1px solid #e5e7eb;padding-bottom:4px;">' + esc(t) + '</h3>';
+}
+function soiRow(mainHtml: string, metaHtml: string): string {
+  return '<div style="padding:5px 0;border-bottom:1px solid #f3f4f6;"><div style="font-size:13.5px;font-weight:600;">' + mainHtml
+    + '</div><div style="font-size:12px;color:#6b7280;line-height:1.5;">' + metaHtml + '</div></div>';
+}
+function soiHtmlFor(store: string, parts: any[], bg: ReturnType<typeof bgNow>): string {
+  return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:640px;">'
+    + '<h2 style="margin:0 0 4px;font-size:19px;color:#b91c1c;">Незавършено за ' + esc(store) + '</h2>'
+    + '<div style="font-size:13px;color:#6b7280;margin-bottom:6px;">Към ' + esc(bgDate(bg.dateStr))
+    + ' сутринта — какво чака обекта.</div>'
+    + parts.map((p) => p.html).join('')
+    + '<div style="margin-top:16px;"><a href="' + PORTAL_URL + '" '
+    + 'style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;'
+    + 'font-size:13px;font-weight:600;padding:10px 18px;border-radius:6px;">Отвори портала</a></div>'
+    + '<div style="font-size:11px;color:#9ca3af;margin-top:18px;">ТеМАХ Портал</div></div>';
+}
+
+async function runStoreOpenItems(supabase: any, topic: any, bg: any, dryRun: boolean) {
+  if (!isBgWorkday(bg.dateStr)) {
+    return { topic: topic.key, skipped: 'Неработен ден (' + bg.dateStr + ')', recipients: 0 };
+  }
+  const rec = await soiRecipients(supabase, topic.key);
+  if (!rec.on) {
+    return { topic: topic.key, skipped: 'Матрицата: групата store няма имейл за темата (' + (rec.channel || 'няма ред') + ')', recipients: 0 };
+  }
+  const loaded: Record<string, any> = {};
+  for (const s of SOI_SECTIONS) loaded[s.key] = await s.load(supabase, bg);
+
+  const subject = (store: string) => 'ТеМАХ — Незавършено за ' + store + ' (' + bgDate(bg.dateStr).slice(0, 5) + ')';
+  const plan: any[] = [];
+  const empty: string[] = [];
+  for (const store of Object.keys(rec.byStore).sort()) {
+    const parts = SOI_SECTIONS.map((s) => Object.assign({ key: s.key }, s.forStore(loaded[s.key], store)));
+    const total = parts.reduce((a, p) => a + p.n, 0);
+    if (!total) { empty.push(store); continue; }
+    plan.push({ store: store, to: rec.byStore[store], parts: parts, total: total });
+  }
+
+  const planned = plan.map((p) => {
+    const row: any = { obekt: p.store, redove: p.total,
+      poluchateli: p.to.map((r: any) => ({ name: r.name, email: r.email, role: r.role })) };
+    for (const part of p.parts) row[part.key] = part.counts;
+    return row;
+  });
+  if (dryRun) {
+    return { topic: topic.key, dry_run: true, obekti: plan.length, bez_redove: empty,
+      zadachi_skip: (loaded.zadachi && loaded.zadachi.skip) || null,
+      recipients: plan.reduce((a, p) => a + p.to.length, 0), planned: planned };
+  }
+
+  let sent = 0, failed = 0, already = 0, stores = 0;
+  for (const p of plan) {
+    const html = soiHtmlFor(p.store, p.parts, bg);
+    if (topic.test_email) {
+      const banner = '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за '
+        + esc(p.store) + ': ' + p.to.map((r: any) => esc(r.name) + ' &lt;' + esc(r.email) + '&gt;').join(', ') + '</div>';
+      if (await sendEmail(topic.test_email, subject(p.store), banner + html)) { sent++; stores++; } else { failed++; }
+      continue;
+    }
+    const ref = bg.dateStr + '|' + p.store;
+    const ins = await supabase.from('notification_log')
+      .insert({ topic_key: topic.key, ref_key: ref, detail: p.total + ' реда · ' + p.to.length + ' адреса' });
+    if (ins.error) { already++; continue; }
+    let okAny = false;
+    for (const r of p.to) {
+      if (await sendEmail(r.email, subject(p.store), html)) { sent++; okAny = true; } else { failed++; }
+    }
+    if (!okAny) {
+      await supabase.from('notification_log').delete().eq('topic_key', topic.key).eq('ref_key', ref);
+    } else { stores++; }
+  }
+
+  await supabase.from('notification_topics').update({
+    last_run_at: new Date().toISOString(),
+    last_recipients: plan.reduce((a, p) => a + p.to.length, 0),
+    last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + stores + ' обекта, ' + sent + ' писма, ' + failed + ' неуспешни, '
+      + already + ' вече пратени' + (topic.test_email ? ' (тест до ' + topic.test_email + ')' : ''),
+  }).eq('key', topic.key);
+
+  return { topic: topic.key, obekti: stores, sent_emails: sent, failed_emails: failed, already_sent: already,
+    bez_redove: empty.length, test_email: topic.test_email || null };
+}
+
 /* ЕДИНСТВЕНИЯТ списък с темите, които имат строител. notification_topics
    държи единайсет реда; строители тук има за петте отдолу. Останалите са редове
    в базата и нищо повече — събудят ли се, връщат skipped.
@@ -2668,6 +3013,7 @@ const IMPLEMENTED_TOPICS = [
   { key: 'deadline_passed', run: runDeadlinePassed },
   { key: 'loading_lists_pending', run: runLoadingListsPending },
   { key: 'minus_unfilled', run: runMinusUnfilled },
+  { key: 'store_open_items', run: runStoreOpenItems },
 ];
 
 async function runTopic(supabase: any, topic: any, bg: any, dryRun: boolean) {
@@ -2747,8 +3093,13 @@ Deno.serve(async (req) => {
       if (!topics || !topics.length) {
         return Response.json({ ok: false, error: 'Няма такава тема: ' + body.topic_key }, { headers: CORS, status: 404 });
       }
-      const result = await runTopic(supabase, topics[0], bg, dryRun);
-      return Response.json({ ok: true, mode: 'manual', bg_date: bg.dateStr, result: result }, { headers: CORS });
+      /* v19: {"as_of":"гггг-мм-дд"} — САМО с dry_run и САМО за
+         store_open_items: какво би излязло в 08:00 на тази дата (сверка в
+         почивен ден). Без dry_run се пренебрегва. */
+      const runBg = dryRun && topics[0].key === 'store_open_items' && /^\d{4}-\d{2}-\d{2}$/.test(String(body.as_of || ''))
+        ? bgNow(new Date(body.as_of + 'T06:00:00Z')) : bg;
+      const result = await runTopic(supabase, topics[0], runBg, dryRun);
+      return Response.json({ ok: true, mode: 'manual', bg_date: runBg.dateStr, result: result }, { headers: CORS });
     }
 
     const { data: topics } = await supabase

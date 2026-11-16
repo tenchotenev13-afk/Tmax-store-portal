@@ -1249,6 +1249,7 @@ var NOTIF_IMPLEMENTED_TOPICS = [
   { key: 'deadline_passed',       fn: 'bulletin-notify' },
   { key: 'loading_lists_pending', fn: 'bulletin-notify' },
   { key: 'minus_unfilled',        fn: 'bulletin-notify' },
+  { key: 'store_open_items',      fn: 'bulletin-notify' },
   { key: 'weekly_routed',         fn: 'send-routed-report' }
 ];
 /* Кой обслужва темата — низ или null. */
@@ -2641,7 +2642,8 @@ var WHO_COLS = [
   { key: 'overdue_tasks',   src: 'bulletin', label: 'Просрочени задачи', when: 'пн–пт 08:15' },
   { key: 'deadline_passed', src: 'bulletin', label: 'Изтекъл срок',      when: '15 мин след часа' },
   { key: 'promo_expiring',  src: 'bulletin', label: 'Промоции',          when: '08:30' },
-  { key: 'loading_lists_pending', src: 'bulletin', label: 'Товарни листи 48 ч', when: 'пн–пт 09:00' }
+  { key: 'loading_lists_pending', src: 'bulletin', label: 'Товарни листи 48 ч', when: 'пн–пт 09:00' },
+  { key: 'store_open_items', src: 'bulletin', label: 'Незавършено за обекта', when: 'пн–пт 07:45' }
 ];
 /* Теми само с push — не са колона, а ред под таблицата. */
 var WHO_PUSH_ONLY = ['today_deadlines', 'minus_unfilled'];

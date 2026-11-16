@@ -1,0 +1,384 @@
+/* „Незавършено за обекта" — тема store_open_items в bulletin-notify (v19,
+   15.11.2026, етап 1 от 2).
+
+   Зарежда РЕАЛНИЯ supabase/functions/bulletin-notify/index.ts (типовете махнати
+   с node:module.stripTypeScriptTypes) във vm с фалшив supabase клиент, фалшив
+   часовник и стъб на fetch към resend-email, и вика истинския Deno.serve
+   handler — {topic_key:'store_open_items', dry_run?}, {recipients_only}.
+
+   Покрива:
+     1. получателите — kasa, неактивен, без имейл, обект от EXCLUDED_STORES —
+        извън; два управителя на един обект — и двамата; info акаунт — вътре;
+        override 'exclude' — вън; матрица без имейл → skipped;
+     2. секция А — само задачите на обекта; отметнатата не излиза; {skip} →
+        писмото продължава със секция Б;
+     3. секция Б — срок вчера / днес / втори работен ден / трети; през уикенд и
+        през официален празник (24–28.12.2026); processed с co_eta днес и
+        вчера; postponed и arrived; заявител = изпълнител (веднъж); изпълнител с
+        различен регистър и интервали; done / refused / без срок;
+     4. обект без редове — без писмо; тема и съдържание (esc, без телефон, без
+        клиент при изпълнителя);
+     5. test_email — по едно писмо на обект до тестовия адрес, лента с
+        получателите, без запис в notification_log;
+     6. на живо — по писмо на адрес, лог „<дата>|<обект>"; второ пускане
+        прескача; паднало пращане маха реда и last_status е „ГРЕШКА:";
+     7. неработен ден (неделя, 24.12) → skipped, нищо не се праща;
+     8. recipients_only — правилото по обект.
+
+   Мутационна проверка (15.11.2026) — всяка СЪБАРЯ теста (exit 1), пусната със
+   SOI_SRC=<мутирало копие>:
+     М1 махнат филтър по роля (и .in('role') в заявката, и проверката в JS):
+        пада 1 „kasa — извън", „override exclude" и 5 „по писмо на адрес";
+     М2 „<" вместо „<=" на границата от 2 работни дни (soiIsSoon): пада 2
+        ({skip} → 6 реда вместо 7) и 3 (A3, петък → вторник, 30.12);
+     М3 махнато прескачането по лога (ins.error не спира): пада 5 „второ
+        пускане — нула писма";
+     М4 изпълнителят без trim/lower (=== вместо soiNorm): пада 2, 3 „ ТРОЯН "
+        и 4 (подгрупите, броят 3 / 1 / 2 / 1).
+
+   Пускане:  node tests/store-open-items.test.js .
+*/
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const nodeModule = require('node:module');
+const { ok, section, report } = require('../.claude/skills/tmax-jsdom-test/harness');
+
+const ROOT = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirname, '..');
+const SRC_PATH = process.env.SOI_SRC || path.join(ROOT, 'supabase/functions/bulletin-notify/index.ts');
+const _w = process.emitWarning; process.emitWarning = function () {};
+const JS = nodeModule.stripTypeScriptTypes(fs.readFileSync(SRC_PATH, 'utf8').replace(/^import\s.*$/mg, ''));
+process.emitWarning = _w;
+const clone = x => JSON.parse(JSON.stringify(x));
+
+/* ── Фалшив supabase клиент ─────────────────────────────────────────── */
+function fakeSb(db, log) {
+  const has = v => v !== null && v !== undefined;
+  const pass = (row, f) => {
+    const v = row[f[1]];
+    switch (f[0]) {
+      case 'eq': return v === f[2];
+      case 'in': return f[2].indexOf(v) >= 0;
+      case 'gte': return has(v) && String(v) >= String(f[2]);
+      case 'lte': return has(v) && String(v) <= String(f[2]);
+      case 'not':
+        if (f[2] === 'is') return has(v);
+        if (f[2] === 'in') return String(f[3]).replace(/[()]/g, '').split(',').indexOf(v) < 0;
+        return true;
+      default: return true;
+    }
+  };
+  return {
+    from(table) {
+      const q = { table, filters: [], op: 'select', range: null, lim: null };
+      const self = new Proxy({}, {
+        get(_t, k) {
+          if (k === 'then') {
+            return (res, rej) => {
+              log.push(q);
+              const arr = db[table] || (db[table] = []);
+              let out;
+              if (q.op === 'insert') {
+                if (table === 'notification_log' && arr.some(r => r.topic_key === q.row.topic_key && r.ref_key === q.row.ref_key)) {
+                  out = { data: null, error: { code: '23505', message: 'duplicate key' } };
+                } else { arr.push(Object.assign({}, q.row)); out = { data: null, error: null }; }
+              } else if (q.op === 'delete') {
+                db[table] = arr.filter(r => !q.filters.every(f => pass(r, f))); out = { error: null };
+              } else if (q.op === 'update') {
+                arr.filter(r => q.filters.every(f => pass(r, f))).forEach(r => Object.assign(r, q.row)); out = { error: null };
+              } else {
+                let rows = arr.filter(r => q.filters.every(f => pass(r, f)));
+                if (q.range) rows = rows.slice(q.range[0], q.range[1] + 1);
+                if (q.lim) rows = rows.slice(0, q.lim);
+                out = { data: clone(rows), error: null };
+              }
+              return Promise.resolve(out).then(res, rej);
+            };
+          }
+          return (...a) => {
+            if (k === 'select') q.select = a[0];
+            else if (['eq', 'in', 'gte', 'lte'].indexOf(k) >= 0) q.filters.push([k, a[0], a[1]]);
+            else if (k === 'not') q.filters.push(['not', a[0], a[1], a[2]]);
+            else if (k === 'range') q.range = [a[0], a[1]];
+            else if (k === 'limit') q.lim = a[0];
+            else if (k === 'insert') { q.op = 'insert'; q.row = a[0]; }
+            else if (k === 'delete') q.op = 'delete';
+            else if (k === 'update') { q.op = 'update'; q.row = a[0]; }
+            return self;
+          };
+        },
+      });
+      return self;
+    },
+  };
+}
+
+/* ── vm с часовник; sendFail(to) → true = resend-email връща 500 ──────── */
+function load(db, clock, sendFail) {
+  const posts = [], log = [];
+  let handler = null;
+  const Real = Date, fixed = new Real(clock).getTime();
+  class FakeDate extends Real {
+    constructor(...a) { if (a.length === 0) super(fixed); else super(...a); }
+    static now() { return fixed; }
+  }
+  const ctx = {
+    Date: FakeDate, Response, Intl, JSON, Math, Object, Array, String, Number, Promise, Error, RegExp, Set, Map, setTimeout, encodeURIComponent,
+    console: { log() {}, warn() {}, error() {} },
+    Deno: { env: { get: k => (k === 'SUPABASE_URL' ? 'https://x.supabase.co' : 'KEY') }, serve: fn => { handler = fn; } },
+    createClient: () => fakeSb(db, log),
+    fetch: (url, init) => {
+      const body = JSON.parse((init && init.body) || '{}');
+      posts.push({ url, body });
+      const bad = sendFail && body.type === 'email' && sendFail(body.to);
+      return Promise.resolve({ ok: !bad, status: bad ? 500 : 200, json: () => Promise.resolve({}), text: () => Promise.resolve('x') });
+    },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(JS, ctx, { filename: 'bulletin-notify.js' });
+  const call = async body => (await handler({ method: 'POST', json: () => Promise.resolve(body) })).json();
+  return { ctx, call, posts, log, db, mails: () => posts.filter(p => p.body.type === 'email') };
+}
+
+/* ── Данни ──────────────────────────────────────────────────────────── */
+const TR = 'Троян', LV = 'Ловеч', KJ = 'Кърджали', SL = 'Сливен', CO = 'Централен офис';
+const U = (email, display_name, role, store_name, over) => Object.assign({ email, display_name, role, store_name, active: true, notify_groups: [], assigned_stores: [] }, over || {});
+const USERS = [
+  U('troyan@temax.bg', 'Управител Троян', 'manager', TR),
+  U('sklad.troyan@temax.bg', 'Склад Троян', 'sklad', TR),
+  U('kasa.troyan@temax.bg', 'Каса Троян', 'kasa', TR),
+  U('lovech@temax.bg', 'Управител Ловеч', 'manager', LV),
+  U('old.lovech@temax.bg', 'Неактивен Ловеч', 'manager', LV, { active: false }),
+  U(null, 'Склад Ловеч без имейл', 'sklad', LV),
+  U('kardzhali@temax.bg', 'Управител Кърджали', 'manager', KJ),
+  U('test.kardzhali@gmail.com', 'Тест', 'manager', KJ),
+  U('sliven@temax.bg', 'Инфо Сливен', 'info', SL),
+  U('co.manager@temax.bg', 'ЦО управител', 'manager', CO),
+];
+const TOPIC = { key: 'store_open_items', label: 'Незавършено за обекта', schedule_type: 'daily', weekdays: [1, 2, 3, 4, 5],
+  scheduled_time: '07:45:00', active: false, test_email: null, sort_order: 12 };
+const MATRIX = [{ topic_key: 'store_open_items', group_key: 'store', channel: 'email', scope: 'own_stores' }];
+
+/* Понеделник 16.11.2026, 07:45 София (05:45 UTC). ISO седмица 47.
+   Работни дни напред: 17 (вт), 18 (ср) → границата „до 2 работни дни" е 18.11. */
+const MON = '2026-11-16T05:45:00Z';
+const BULLETIN = { id: 'b47', week_number: 47, year: 2026, status: 'published' };
+const TASKS = [
+  { id: 't1', bulletin_id: 'b47', title: 'Ревизия <група А>', due_date: '2026-11-13', target_stores: [TR, LV, KJ], created_by: 'Миглена' },
+  { id: 't2', bulletin_id: 'b47', title: 'Снимки на витрината', due_date: '2026-11-14', target_stores: [TR], created_by: 'Миглена' },
+];
+const COMPS = [{ task_id: 't1', store_name: TR, status: 'done', completion_date: '2026-11-13', postponed_to: null }];
+const O = (id, over) => Object.assign({ id, in_num: id, store_name: TR, fulfiller: null, customer_name: 'Клиент ' + id, phone: '0888 123 456',
+  delivery: '2026-11-16', status: 'pending', co_eta: null, product: 'Стока ' + id, items: null, date: '2026-11-01' }, over || {});
+const ORDERS = [
+  O('A1', { fulfiller: LV, delivery: '2026-11-15', items: [{ product: 'Диван „Лале"' }, { product: 'Табуретка' }, { product: 'Възглавница' }] }), // вчера (неделя) → закъсняла, 1
+  O('A2', { delivery: '2026-11-16' }),                                         // днес → до 2 дни
+  O('A3', { status: 'sent', delivery: '2026-11-18' }),                         // втори работен ден → до 2 дни
+  O('A4', { delivery: '2026-11-19' }),                                         // трети → нищо
+  O('A5', { status: 'processed', co_eta: '2026-11-16', delivery: '2026-11-10' }), // co_eta днес → не е закъсняла
+  O('A6', { status: 'processed', co_eta: '2026-11-15', delivery: '2026-11-12' }), // co_eta вчера → закъсняла, 2
+  O('A7', { status: 'postponed', delivery: '2026-11-10' }),
+  O('A8', { status: 'arrived', delivery: '2026-11-10' }),
+  O('A9', { store_name: LV, fulfiller: ' ТРОЯН ', customer_name: 'Тайна Клиентка', delivery: '2026-11-13' }), // изпълнител, регистър
+  O('A10', { store_name: LV, fulfiller: TR, status: 'processed', delivery: '2026-11-17' }),                   // изпълнител, до 2 дни
+  O('A11', { fulfiller: TR, delivery: '2026-11-12', customer_name: 'Иван <b>И</b>' }),                       // заявител = изпълнител
+  O('A12', { status: 'done', delivery: '2026-11-10' }),
+  O('A13', { status: 'refused', delivery: '2026-11-10' }),
+  O('A14', { delivery: null }),
+];
+function db(over) {
+  return Object.assign({
+    users: clone(USERS), notification_topics: [clone(TOPIC)], notification_matrix: clone(MATRIX), notification_overrides: [],
+    notification_log: [], bulletins: [clone(BULLETIN)], bulletin_tasks: clone(TASKS), task_completions: clone(COMPS),
+    recurring_tasks: [], recurring_task_periods: [], recurring_task_versions: [], recurring_task_skips: [],
+    client_orders: clone(ORDERS),
+  }, over || {});
+}
+const ids = arr => (arr || []).map(o => o.in_num).join(',');
+
+(async function () {
+  section('1. Получатели (dry_run, понеделник 16.11.2026)');
+  let dry;
+  {
+    const L = load(db(), MON);
+    const r = await L.call({ topic_key: 'store_open_items', dry_run: true });
+    dry = r.result || {};
+    const by = {}; (dry.planned || []).forEach(p => { by[p.obekt] = p; });
+    const emails = s => ((by[s] || {}).poluchateli || []).map(p => p.email).sort().join(',');
+    ok('dry_run минава', r.ok === true && dry.dry_run === true, JSON.stringify(r).slice(0, 300));
+    ok('Троян: управител + склад, kasa — извън', emails(TR) === 'sklad.troyan@temax.bg,troyan@temax.bg', emails(TR));
+    ok('Ловеч: неактивният и този без имейл — извън', emails(LV) === 'lovech@temax.bg', emails(LV));
+    ok('Кърджали: и двата управителя', emails(KJ) === 'kardzhali@temax.bg,test.kardzhali@gmail.com', emails(KJ));
+    ok('ЦО (EXCLUDED_STORES) — няма ред', !by[CO] && (dry.bez_redove || []).indexOf(CO) < 0, JSON.stringify(Object.keys(by)));
+    ok('ролята се връща в dry_run', ((by[TR] || {}).poluchateli || []).some(p => p.role === 'sklad'));
+    ok('нищо не е пратено, нищо не е писано', L.posts.length === 0 && L.log.every(q => q.op === 'select'), JSON.stringify(L.log.filter(q => q.op !== 'select')));
+  }
+  {
+    const L = load(db({ notification_overrides: [{ topic_key: 'store_open_items', user_email: 'Sklad.Troyan@temax.bg', mode: 'exclude' }] }), MON);
+    const r = (await L.call({ topic_key: 'store_open_items', dry_run: true })).result;
+    const tr = r.planned.filter(p => p.obekt === TR)[0];
+    ok('override exclude (друг регистър на имейла) — складът излиза', tr && tr.poluchateli.map(p => p.email).join(',') === 'troyan@temax.bg', JSON.stringify(tr));
+  }
+  {
+    const L = load(db({ notification_matrix: [{ topic_key: 'store_open_items', group_key: 'store', channel: 'push', scope: 'own_stores' }] }), MON);
+    const r = (await L.call({ topic_key: 'store_open_items' })).result;
+    ok('матрица без имейл за store → skipped, нищо не тръгва', !!r.skipped && /Матрицата/.test(r.skipped) && L.mails().length === 0, JSON.stringify(r));
+  }
+
+  section('2. Секция А — задачите на обекта');
+  {
+    const by = {}; (dry.planned || []).forEach(p => { by[p.obekt] = p; });
+    ok('Троян: 1 задача (t2; t1 е отметната)', by[TR] && by[TR].zadachi.zadachi === 1, JSON.stringify(by[TR] && by[TR].zadachi));
+    ok('Ловеч: 1 (t1)', by[LV] && by[LV].zadachi.zadachi === 1);
+    ok('Кърджали: 1 (t1), без заявки', by[KJ] && by[KJ].zadachi.zadachi === 1 && by[KJ].redove === 1, JSON.stringify(by[KJ]));
+  }
+  {
+    const L = load(db({ bulletins: [] }), MON);
+    const r = (await L.call({ topic_key: 'store_open_items', dry_run: true })).result;
+    const by = {}; r.planned.forEach(p => { by[p.obekt] = p; });
+    ok('{skip} от buildOverdueTasks → zadachi_skip е попълнен', !!r.zadachi_skip, JSON.stringify(r.zadachi_skip));
+    ok('{skip} → Троян пак има писмо (само заявки)', by[TR] && by[TR].zadachi.zadachi === 0 && by[TR].redove === 7, JSON.stringify(by[TR]));
+    ok('{skip} → Кърджали (без заявки) няма писмо', !by[KJ] && r.bez_redove.indexOf(KJ) >= 0, JSON.stringify(r.bez_redove));
+  }
+
+  section('3. Секция Б — границите');
+  {
+    const L = load(db(), MON);
+    const C = L.ctx;
+    const c = C.soiClassify(ORDERS, TR, '2026-11-16', C.soiAddWorkdays('2026-11-16', 2));
+    ok('границата в понеделник е сряда 18.11', C.soiAddWorkdays('2026-11-16', 2) === '2026-11-18');
+    /* По срок, после по № като низ: 12.11 → A11, A6; 15.11 → A1. */
+    ok('закъснели като заявител: A11, A6 (co_eta вчера), A1 (срок вчера)', ids(c.late_req) === 'A11,A6,A1', ids(c.late_req));
+    ok('закъснели като изпълнител: A9 („ ТРОЯН ")', ids(c.late_ful) === 'A9', ids(c.late_ful));
+    ok('до 2 дни като заявител: A2 (днес), A3 (втори работен ден)', ids(c.soon_req) === 'A2,A3', ids(c.soon_req));
+    ok('до 2 дни като изпълнител: A10', ids(c.soon_ful) === 'A10', ids(c.soon_ful));
+    const all = [].concat(c.late_req, c.late_ful, c.soon_req, c.soon_ful).map(o => o.in_num);
+    ok('трети работен ден (A4) — няма', all.indexOf('A4') < 0);
+    ok('processed с co_eta днес (A5) — няма', all.indexOf('A5') < 0);
+    ok('postponed (A7) и arrived (A8) — няма', all.indexOf('A7') < 0 && all.indexOf('A8') < 0);
+    ok('done / refused / без срок — няма', ['A12', 'A13', 'A14'].every(x => all.indexOf(x) < 0));
+    ok('заявител = изпълнител (A11) — веднъж', all.filter(x => x === 'A11').length === 1);
+    ok('просрочие: A1 (нд → пн) = 1, A6 (чт 12 → пн) = 2', C.soiLateDays(ORDERS[0], '2026-11-16') === 1 && C.soiLateDays(ORDERS[5], '2026-11-16') === 2);
+    ok('стока: първият артикул + „и още 2"', C.soiItemText(ORDERS[0]) === 'Диван „Лале" и още 2' && C.soiItemText(ORDERS[1]) === 'Стока A2');
+    const lv = C.soiClassify(ORDERS, LV, '2026-11-16', '2026-11-18');
+    ok('Ловеч: заявител A9, изпълнител A1', ids(lv.late_req) === 'A9' && ids(lv.late_ful) === 'A1', JSON.stringify([ids(lv.late_req), ids(lv.late_ful)]));
+  }
+  {
+    const L = load(db(), MON);
+    const C = L.ctx;
+    /* Петък 20.11.2026 — през уикенда: пн 23, вт 24. */
+    const lim = C.soiAddWorkdays('2026-11-20', 2);
+    const rows = [O('W1', { delivery: '2026-11-21' }), O('W2', { delivery: '2026-11-24' }), O('W3', { delivery: '2026-11-25' }), O('W4', { delivery: '2026-11-19' })];
+    const c = C.soiClassify(rows, TR, '2026-11-20', lim);
+    ok('петък → границата е вторник 24.11', lim === '2026-11-24', lim);
+    ok('уикенд: събота и вторник — до 2 дни; сряда — не', ids(c.soon_req) === 'W1,W2', ids(c.soon_req));
+    ok('четвъртък в петък → закъсняла, 1 работен ден', ids(c.late_req) === 'W4' && C.soiLateDays(rows[3], '2026-11-20') === 1);
+    /* Сряда 23.12.2026 — 24, 25 празник, 26–27 уикенд, 28 пренесен празник (26.12 е събота). */
+    const limH = C.soiAddWorkdays('2026-12-23', 2);
+    const h = C.soiClassify([O('H1', { delivery: '2026-12-30' }), O('H2', { delivery: '2026-12-31' }), O('H3', { delivery: '2026-12-28' })], TR, '2026-12-23', limH);
+    ok('празник: от 23.12 границата е 30.12', limH === '2026-12-30', limH);
+    ok('празник: 28.12 и 30.12 — до 2 дни; 31.12 — не', ids(h.soon_req) === 'H3,H1', ids(h.soon_req));
+    ok('просрочие през празниците: срок 23.12, днес 29.12 = 1 работен ден', C.soiLateDays(O('H4', { delivery: '2026-12-23' }), '2026-12-29') === 1);
+  }
+
+  section('4. Съдържание на писмото (test_email) и обект без редове');
+  {
+    const d = db(); d.notification_topics[0].test_email = 'ten.tenev@temax.bg';
+    const L = load(d, MON);
+    const r = (await L.call({ topic_key: 'store_open_items' })).result;
+    const mails = L.mails();
+    const subj = mails.map(m => m.body.subject).sort();
+    ok('по ЕДНО писмо на обект: Кърджали, Ловеч, Троян', subj.join('|') === 'ТеМАХ — Незавършено за Кърджали (16.11)|ТеМАХ — Незавършено за Ловеч (16.11)|ТеМАХ — Незавършено за Троян (16.11)', subj.join('|'));
+    ok('всички до test_email', mails.every(m => m.body.to === 'ten.tenev@temax.bg'));
+    ok('Сливен (info, без редове) — без писмо', !mails.some(m => /Сливен/.test(m.body.subject)) && r.bez_redove >= 1, JSON.stringify(r));
+    const kj = mails.filter(m => /Кърджали/.test(m.body.subject))[0].body.html;
+    ok('лентата ТЕСТОВ РЕЖИМ изброява двата адреса на Кърджали', /ТЕСТОВ РЕЖИМ — предназначено за Кърджали: /.test(kj) && kj.indexOf('kardzhali@temax.bg') >= 0 && kj.indexOf('test.kardzhali@gmail.com') >= 0);
+    ok('notification_log НЕ е писан', d.notification_log.length === 0 && !L.log.some(q => q.table === 'notification_log'), JSON.stringify(d.notification_log));
+    ok('без push', !L.posts.some(p => p.body.type === 'push'));
+    const tr = mails.filter(m => /Троян/.test(m.body.subject))[0].body.html;
+    const pos = s => tr.indexOf(s);
+    ok('подгрупите са в реда: закъснели заявител → изпълнител → до 2 дни заявител → изпълнител',
+      pos('Закъснели — като заявител (3)') > 0 && pos('Закъснели — като заявител') < pos('Закъснели — като изпълнител (1)') &&
+      pos('Закъснели — като изпълнител') < pos('Срок до 2 работни дни — като заявител (2)') &&
+      pos('Срок до 2 работни дни — като заявител') < pos('Срок до 2 работни дни — като изпълнител (1)'));
+    ok('задачата на Троян е вътре, отметнатата t1 — не', tr.indexOf('Снимки на витрината') > 0 && tr.indexOf('Ревизия') < 0);
+    ok('ред на заявител: №, стока, „+1 работни дни", клиент, кой изпълнява', tr.indexOf('№ A1 · Диван „Лале&quot; и още 2') > 0 && tr.indexOf('+1 работни дни') > 0 &&
+      tr.indexOf('Клиент: Клиент A1 · Изпълнява: Ловеч') > 0 && tr.indexOf('Изпълнява: вашият обект') > 0);
+    ok('ред на изпълнител: „Заявил: Ловеч", БЕЗ име на клиента', tr.indexOf('Заявил: Ловеч') > 0 && tr.indexOf('Тайна Клиентка') < 0);
+    ok('статус на български', tr.indexOf('Изчаква') > 0 && tr.indexOf('Обработена от ЦО') > 0 && tr.indexOf('Изпратена') > 0);
+    ok('без телефон', tr.indexOf('0888') < 0);
+    ok('esc: името на клиента и заглавието на задачата', tr.indexOf('Иван &lt;b&gt;И&lt;/b&gt;') > 0 && tr.indexOf('<b>И</b>') < 0 &&
+      mails.filter(m => /Ловеч/.test(m.body.subject))[0].body.html.indexOf('Ревизия &lt;група А&gt;') > 0);
+    ok('бутон „Отвори портала"', tr.indexOf('Отвори портала') > 0);
+    ok('last_status е обновен (тестът също)', /^ok: 3 обекта, 3 писма/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
+    const by = {}; (dry.planned || []).forEach(p => { by[p.obekt] = p; });
+    ok('dry_run броя на Троян: 3 / 1 / 2 / 1', JSON.stringify(by[TR].zayavki) === JSON.stringify({ late_req: 3, late_ful: 1, soon_req: 2, soon_ful: 1 }), JSON.stringify(by[TR].zayavki));
+  }
+
+  section('5. На живо — лог, повторно пускане, паднало пращане');
+  {
+    const d = db();
+    const L = load(d, MON);
+    const r1 = (await L.call({ topic_key: 'store_open_items' })).result;
+    const to = L.mails().map(m => m.body.to).sort().join(',');
+    ok('по писмо на адрес (5 адреса в 3 обекта)', to === 'kardzhali@temax.bg,lovech@temax.bg,sklad.troyan@temax.bg,test.kardzhali@gmail.com,troyan@temax.bg', to);
+    ok('лог: „2026-11-16|<обект>" ×3', d.notification_log.map(x => x.ref_key).sort().join(',') === '2026-11-16|Кърджали,2026-11-16|Ловеч,2026-11-16|Троян', JSON.stringify(d.notification_log));
+    ok('резултат: 3 обекта, 5 писма', r1.obekti === 3 && r1.sent_emails === 5 && r1.already_sent === 0, JSON.stringify(r1));
+    const before = L.mails().length;
+    const r2 = (await L.call({ topic_key: 'store_open_items' })).result;
+    ok('второ пускане — нула писма, трите обекта прескочени', L.mails().length === before && r2.already_sent === 3 && r2.sent_emails === 0, JSON.stringify(r2));
+  }
+  {
+    const d = db();
+    const L = load(d, MON, to => to === 'lovech@temax.bg');
+    const r = (await L.call({ topic_key: 'store_open_items' })).result;
+    ok('паднало пращане за Ловеч → редът в лога е махнат', d.notification_log.map(x => x.ref_key).sort().join(',') === '2026-11-16|Кърджали,2026-11-16|Троян', JSON.stringify(d.notification_log));
+    ok('last_status започва с „ГРЕШКА:"', /^ГРЕШКА: /.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
+    ok('резултатът брои неуспешното', r.failed_emails === 1 && r.obekti === 2, JSON.stringify(r));
+  }
+
+  section('6. Неработен ден');
+  for (const [clock, why] of [['2026-11-15T05:45:00Z', 'неделя 15.11'], ['2026-12-24T05:45:00Z', 'Бъдни вечер 24.12 (четвъртък)']]) {
+    const d = db();
+    const L = load(d, clock);
+    const r = (await L.call({ topic_key: 'store_open_items' })).result;
+    ok(why + ' → skipped, нищо не тръгва и не се пише', /Неработен ден/.test(r.skipped || '') && L.posts.length === 0 && L.log.every(q => q.op === 'select'), JSON.stringify(r));
+  }
+
+  section('6б. as_of — само с dry_run');
+  {
+    const L = load(db(), '2026-11-15T09:00:00Z');   /* неделя */
+    const r = await L.call({ topic_key: 'store_open_items', dry_run: true, as_of: '2026-11-16' });
+    ok('неделя + dry_run + as_of понеделник → сметката е за 16.11', r.bg_date === '2026-11-16' && r.result.dry_run === true && r.result.obekti === 3, JSON.stringify(r).slice(0, 200));
+    const r2 = await L.call({ topic_key: 'store_open_items', as_of: '2026-11-16' });
+    ok('без dry_run as_of се пренебрегва → неработен ден, нищо не тръгва', /Неработен ден/.test(r2.result.skipped || '') && L.posts.length === 0, JSON.stringify(r2));
+  }
+
+  section('7. recipients_only — правилото по обект');
+  {
+    const L = load(db(), MON);
+    const r = await L.call({ recipients_only: true, topic_key: 'store_open_items' });
+    const t = r.topics && r.topics.store_open_items;
+    ok('темата е в RO_TOPIC_KEYS', !!t && !t.error, JSON.stringify(r).slice(0, 200));
+    if (t) {
+      const em = t.personal.map(p => p.email).sort().join(',');
+      ok('управители / склад / инфо по обект, без kasa и ЦО', em === 'kardzhali@temax.bg,lovech@temax.bg,sklad.troyan@temax.bg,sliven@temax.bg,test.kardzhali@gmail.com,troyan@temax.bg', em);
+      ok('всеки с обхват своя обект', t.personal.every(p => p.scope === 'own_stores' && p.stores.length === 1 && p.channel === 'email'));
+      ok('by_store по обект', Object.keys(t.by_store).sort().join(',') === [KJ, LV, SL, TR].sort().join(','), JSON.stringify(Object.keys(t.by_store)));
+      ok('нищо не е писано', L.log.every(q => q.op === 'select') && L.posts.length === 0);
+    }
+    const L2 = load(db({ notification_matrix: [] }), MON);
+    const t2 = (await L2.call({ recipients_only: true, topic_key: 'store_open_items' })).topics.store_open_items;
+    ok('без ред в матрицата → празно правило', t2.personal.length === 0 && t2.matrix_channel === null, JSON.stringify(t2));
+  }
+
+  section('8. Темата е регистрирана');
+  {
+    const src = fs.readFileSync(SRC_PATH, 'utf8');
+    ok('IMPLEMENTED_TOPICS → runStoreOpenItems', /\{ key: 'store_open_items', run: runStoreOpenItems \}/.test(src));
+    ok('SOI_ROLES = manager, sklad, info', /const SOI_ROLES = \['manager', 'sklad', 'info'\];/.test(src));
+  }
+
+  report();
+})();

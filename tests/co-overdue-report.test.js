@@ -7,7 +7,9 @@
    Покрива: pending късна/в срок; processed с co_eta вчера / днес / утре;
    processed без co_eta; sent/arrived; друг изпълнител; 0 реда; празник
    (22.09.2026); dry_run; получатели; сверка bgHolidaysForYear/isBgWorkday на
-   копието с shared.js (всички дни 2020–2035).
+   копието с shared.js (всички дни 2020–2035) — и третото копие в
+   bulletin-notify (темата store_open_items, 15.11.2026), заедно с
+   reportWorkdaysBetween.
 
    Пускане:  node tests/co-overdue-report.test.js .
 */
@@ -240,6 +242,35 @@ const ORDERS = [
   {
     const h = boot({ modules: [], user: { email: 'a@temax.bg', display_name: 'А', role: 'admin', store_name: CO }, data: {} });
     const L = load({});
+    /* Третото копие — bulletin-notify (store_open_items). Типовете махнати,
+       import-ите махнати; Deno.serve само се записва. */
+    const BN = (() => {
+      const w = process.emitWarning; process.emitWarning = function () {};
+      const js = nodeModule.stripTypeScriptTypes(fs.readFileSync(path.join(ROOT, 'supabase/functions/bulletin-notify/index.ts'), 'utf8')
+        .replace(/^import\s.*$/mg, ''));
+      process.emitWarning = w;
+      const c = { console, Intl, JSON, Math, Object, Array, String, Number, Promise, Date, Response, setTimeout,
+        Deno: { env: { get: () => 'https://x.supabase.co' }, serve: () => {} }, createClient: () => ({}) };
+      vm.createContext(c); vm.runInContext(js, c, { filename: 'bulletin-notify.js' });
+      return c;
+    })();
+    let d3 = [], n3 = 0, wd3 = [];
+    for (let y = 2020; y <= 2035; y++) {
+      const ka = Object.keys(h.w.bgHolidaysForYear(y)).sort().join(','), kc = Object.keys(BN.bgHolidaysForYear(y)).sort().join(',');
+      if (ka !== kc) d3.push(y + ': ' + ka + ' ≠ ' + kc);
+      for (let m = 0; m < 12; m++) for (let d = 1; d <= 31; d++) {
+        const dt = new Date(y, m, d); if (dt.getMonth() !== m) continue;
+        const iso = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        n3++;
+        if (h.w.isBgWorkday(iso) !== BN.isBgWorkday(iso)) d3.push(iso);
+        /* reportWorkdaysBetween: копието в bulletin-notify срещу това в
+           send-scheduled-report, на интервали от 0 до 9 дни. */
+        const a = new Date(y, m, d), b = new Date(y, m, d + (n3 % 10));
+        if (L.ctx.reportWorkdaysBetween(a, b) !== BN.reportWorkdaysBetween(new BN.Date(a.getTime()), new BN.Date(b.getTime()))) wd3.push(iso + '+' + (n3 % 10));
+      }
+    }
+    ok('bulletin-notify: bgHolidaysForYear / isBgWorkday — същото като shared.js (' + n3 + ' дни)', !d3.length, d3.slice(0, 3).join(' | '));
+    ok('bulletin-notify: reportWorkdaysBetween — същото като send-scheduled-report', !wd3.length, wd3.slice(0, 3).join(' | '));
     let diffs = [], n = 0;
     for (let y = 2020; y <= 2035; y++) {
       const a = h.w.bgHolidaysForYear(y), b = L.ctx.bgHolidaysForYear(y);
