@@ -31,6 +31,17 @@ var supplyCoNotes = [];     /* supply_store_notes на обекта за тек�
    попълнена в supply_store_done() и задачата в Бюлетина се отмята. */
 var supplyNoNeed = [];
 var supplyNoNeedSaving = {}; /* templateId -> true, докато тече запис/отмяна */
+/* Колона 1, която се ПОДСКАЗВА от последната въведена от обекта стойност
+   (16.11.2026, предложение от обект): при „Подови настилки" col1 е „места в
+   търговската зала" — сменя се само при нов дисплей / стелаж / стойка. При
+   другите бланки col1 е седмична наличност или поръчка — не влизат тук.
+   Подсказката е само в полето на обекта: записва се едва при „💾 Запази";
+   матрицата, Excel, „🕘 4 седмици", „мин. седм." и писмото показват записаното. */
+var SUPPLY_STICKY_COL1 = ['floor-lm'];
+var supplySticky = {};       /* item_id -> {qty1, week} — най-новото непразно qty1 преди supplyWeek */
+function supplyIsSticky(t){ return !!t && SUPPLY_STICKY_COL1.indexOf(t.slug) >= 0; }
+/* 'гггг-мм-дд' -> 'дд.мм' */
+function supplyWeekDM(w){ w = String(w || ''); return w.length >= 10 ? w.slice(8,10) + '.' + w.slice(5,7) : ''; }
 
 /* Понеделникът на ISO седмицата на дадена дата (по подразбиране днес), като
    местна дата 'YYYY-MM-DD'. Неделя е последният ден от седмицата, не първият. */
@@ -117,10 +128,12 @@ function loadSupply(){
     var store = currentUser.store_name;
     supplyTemplates = tpls.filter(function(t){ return supplyTemplateForStore(t, store); });
     supplyNoNeed = [];
+    supplySticky = {};
     if(!supplyTemplates.length){ renderSupplyStore(); return; }
 
     var ids = supplyTemplates.map(function(t){ return t.id; });
     var prev = supplyAddDays(supplyWeek, -7);
+    var stickyIds = supplyTemplates.filter(supplyIsSticky).map(function(t){ return t.id; });
     return Promise.all([
       sbGet('supply_template_items', 'template_id=in.(' + ids.join(',') + ')&active=eq.true&order=sort_order'),
       sbGet('supply_entries', 'store_name=eq.' + encodeURIComponent(store) +
@@ -135,7 +148,15 @@ function loadSupply(){
          отметката да съществува — грешката трябва да се види. */
       sbGet('supply_no_need', 'store_name=eq.' + encodeURIComponent(store) +
         '&week_start=eq.' + supplyWeek + '&template_id=in.(' + ids.join(',') + ')' +
-        '&select=id,template_id,store_name,week_start,created_by,created_at')
+        '&select=id,template_id,store_name,week_start,created_by,created_at'),
+      /* Подсказката за col1 (SUPPLY_STICKY_COL1): всички непразни qty1 на обекта
+         преди тази седмица, без ограничение назад — на страници (supplyGetAll
+         отхвърля при провал). Провал → без подсказка и червен toast, не грешна
+         или половинчата стойност; формата се показва. */
+      stickyIds.length ? supplyGetAll('supply_entries', 'store_name=eq.' + encodeURIComponent(store) +
+        '&template_id=in.(' + stickyIds.join(',') + ')&week_start=lt.' + supplyWeek +
+        '&qty1=not.is.null&select=id,item_id,template_id,store_name,week_start,qty1')
+        .catch(function(err){ return { error: String((err && err.message) || err) }; }) : []
     ]).then(function(res){
       /* Филтрите се повтарят и тук: редовете, които не са за тази бланка,
          обект и седмица, не бива да попаднат във формата, каквото и да върне заявката. */
@@ -152,6 +173,17 @@ function loadSupply(){
       supplyNoNeed = (Array.isArray(res[3]) ? res[3] : []).filter(function(n){
         return n.store_name === store && n.week_start === supplyWeek && ids.indexOf(n.template_id) >= 0;
       });
+      if(Array.isArray(res[4])){
+        res[4].forEach(function(e){
+          if(e.store_name !== store || stickyIds.indexOf(e.template_id) < 0) return;
+          if(!(e.week_start < supplyWeek) || e.qty1 === null || e.qty1 === undefined || e.qty1 === '') return;
+          var cur = supplySticky[e.item_id];
+          if(!cur || e.week_start > cur.week) supplySticky[e.item_id] = { qty1: e.qty1, week: e.week_start };
+        });
+      } else {
+        toast('Последните стойности за „' + supplyTemplates.filter(supplyIsSticky).map(function(t){ return t.col1_label; }).join('", „') +
+          '" не се заредиха — попълнете ги ръчно: ' + ((res[4] && res[4].error) || 'неизвестна грешка'), '#dc2626');
+      }
       renderSupplyStore();
     });
   });
@@ -217,9 +249,19 @@ function renderSupplyStore(){
         /* Миналата стойност стои ПОД полето на същата колона — етикетът на
            колоната я обяснява. Не „За поръчка: X": не всяка бланка има колона
            за поръчка (Кабели: „Налична макара"). */
+        /* Подсказка за col1 (SUPPLY_STICKY_COL1): само ако тази седмица няма qty1
+           и бланката не е „Нямам нужда" (иначе „💾 Запази" би махнало отметката).
+           data-sticky пази подсказаната стойност — непроменена, тя не се брои за
+           „въведено" от supplyFormHasQty. */
+        var st = ((e.qty1 === null || e.qty1 === undefined || e.qty1 === '') && !nn && supplyIsSticky(t)) ? supplySticky[i.id] : null;
         function inp(n, val, prevVal){
+          var s = n === 1 ? st : null;
+          if(s) val = s.qty1;
           return '<input type="number" min="0" step="1" inputmode="numeric" class="fi" id="sup-q' + n + '-' + escAttr(i.id) + '" value="' +
-            (val === null || val === undefined ? '' : String(val)) + '" style="text-align:center;max-width:110px;padding:5px 8px;">' +
+            (val === null || val === undefined ? '' : String(val)) + '"' +
+            (s ? ' data-sticky="' + escAttr(String(s.qty1)) + '"' : '') +
+            ' style="text-align:center;max-width:110px;padding:5px 8px;">' +
+            (s ? '<div class="sup-sticky" style="font-size:11px;color:#94a3b8;margin-top:3px;">от ' + supplyWeekDM(s.week) + '</div>' : '') +
             '<div class="sup-prev-q" style="font-size:11px;color:var(--muted);margin-top:3px;">мин. седм.: ' + supplyQtyText(prevVal) + '</div>';
         }
         /* Последната колона: коментарът от миналата седмица (ако има) и историята. */
@@ -281,7 +323,11 @@ function supplyFormHasQty(templateId){
     if(i.template_id !== templateId) return false;
     return [1, 2].some(function(n){
       var el = document.getElementById('sup-q' + n + '-' + i.id);
-      return !!el && String(el.value || '').trim() !== '';
+      if(!el) return false;
+      var v = String(el.value || '').trim();
+      /* Подсказана и непроменена стойност (SUPPLY_STICKY_COL1) не е въведена от обекта. */
+      if(el.getAttribute('data-sticky') !== null && el.getAttribute('data-sticky') === v) return false;
+      return v !== '';
     });
   });
 }
@@ -413,6 +459,17 @@ function submitSupplyForm(templateId){
     rows.push({ item: i, qty1: q1, qty2: q2, note: supplyReadNote('sup-note-' + i.id) });
   });
   if(bad.length){ toast('Невалидно количество (цяло число ≥ 0): ' + bad.join(', '), '#dc2626'); return; }
+
+  /* SUPPLY_STICKY_COL1 (решение на Тенчо, 16.11.2026): колона 1 се подсказва,
+     затова „Запази" само с нея би изглеждало като попълнена бланка. Иска се
+     поне една стойност в колона 2 — тя никога не се подсказва, тоест е от
+     тази седмица. 0 е стойност. Иначе — „Нямам нужда тази седмица". */
+  if(supplyIsSticky(t) && two && !rows.some(function(r){ return r.qty2 !== null; })){
+    toast('Въведете брой за трансфер/поръчка или натиснете „Нямам нужда тази седмица“.', '#dc2626');
+    var f2 = items.length ? document.getElementById('sup-q2-' + items[0].id) : null;
+    if(f2 && f2.focus) f2.focus();
+    return;
+  }
 
   /* Число в коментара при празно количество — почти сигурно е сбъркана колона
      (Севлиево, 12.10.2026: 25 реда „Кабели на макара" с броя в „Коментар").

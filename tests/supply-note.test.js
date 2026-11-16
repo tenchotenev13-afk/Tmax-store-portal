@@ -109,6 +109,8 @@ const text = html => String(html || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;
     const h = env(STORE);
     h.w.loadSupply(); await ticks(6);
     h.doc.getElementById('sup-q1-it-a').value = '5';
+    /* floor-lm: „Запази" иска поне една стойност в колона 2 (16.11.2026). */
+    h.doc.getElementById('sup-q2-it-a').value = '1';
     h.doc.getElementById('sup-note-it-a').value = '  ' + EVIL + '  ';
     h.doc.getElementById('sup-q1-it-b').value = '2';
     h.doc.getElementById('sup-note-it-b').value = '   ';
@@ -128,10 +130,13 @@ const text = html => String(html || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;
     const h = env(STORE);
     h.w.loadSupply(); await ticks(6);
     h.doc.getElementById('sup-note-it-a').value = 'спрян от доставчика';
+    /* floor-lm: „Запази" иска поне една стойност в колона 2 (16.11.2026) —
+       тя е на ДРУГ ред (it-b, 0), it-a остава само с коментар. */
+    h.doc.getElementById('sup-q2-it-b').value = '0';
     realClick(h.w, btn(mod(h), 'Запази'));
     await ticks(8);
-    ok('един POST — за it-a', h.calls.post.length === 1 && h.calls.post[0].body.item_id === 'it-a', String(h.calls.post.length));
-    const p = (h.calls.post[0] || {}).body || {};
+    ok('POST за it-a (и за it-b с колона 2)', h.calls.post.length === 2 && h.calls.post.some(x => x.body.item_id === 'it-a'), String(h.calls.post.length));
+    const p = (h.calls.post.find(x => x.body.item_id === 'it-a') || {}).body || {};
     ok('qty1/qty2 null, note текстът', p.qty1 === null && p.qty2 === null && p.note === 'спрян от доставчика', JSON.stringify(p));
   }
 
