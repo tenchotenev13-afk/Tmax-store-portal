@@ -18,6 +18,10 @@
    M2 created_by липсва и при нов ред (редът `data.created_by = …` махнат);
    M3 resolution_comment изпаднал заедно с created_by (махнат от data).
 
+   Етап 2 на Разлики (16.11.2026): обектът вижда само чакащите Заприхождаване/Връщане — очакванията за обекта са сменени нарочно.
+   (§3: решеният ред „Липса“ не е в таблицата на обекта — ✏️ се отваря пряко
+   с openSDModal, записът през submitSD се мери същият.)
+
    Пускане: node tests/sd-created-by.test.js . */
 'use strict';
 
@@ -68,10 +72,17 @@ const has = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
 const KEEP = ['store_name', 'supplier', 'material_code', 'material_name', 'quantity', 'order_number',
   'confirmed_date', 'type', 'status', 'comment', 'resolution_comment'];
 
-async function editAndSave(h, id, fill) {
+async function editAndSave(h, id, fill, direct) {
   const e = editBtn(h, id);
-  if (!ok('бутонът ✏️ е на реда', !!e)) return null;
-  realClick(h.w, e);
+  if (direct) {
+    /* Етап 2: решеният ред не е в таблицата на обекта — ✏️ се отваря пряко,
+       записът (submitSD) се мери същият. */
+    ok('обектът: редът НЕ е в таблицата (етап 2), ✏️ — пряко', !e);
+    h.w.openSDModal(id);
+  } else {
+    if (!ok('бутонът ✏️ е на реда', !!e)) return null;
+    realClick(h.w, e);
+  }
   await settle();
   if (fill) fill(h.doc);
   h.calls.patch.length = 0; h.calls.post.length = 0; h.calls.toast.length = 0;
@@ -139,7 +150,7 @@ async function editAndSave(h, id, fill) {
     const p = await editAndSave(h, 'l-1', d => {
       today = h.w.today();
       d.getElementById('sd-cdate').value = today;
-    });
+    }, true);
     if (p) {
       ok('PATCH-ът НЯМА ключ created_by', !has(p.body, 'created_by'), JSON.stringify(p.body.created_by));
       /* Магазин + решен ред „Липса": comment и status не се пращат — така е и

@@ -374,6 +374,11 @@ function renderStockDiff() {
      иначе първото прерисуване показва само скрития тип под „Всички типове“
      (Пирдоп, 16.11.2026). */
   if (sdTypeChipHidden(sdTypeFilter)) sdTypeFilter = 'all';
+  /* Етап 2: обектът няма чипове по статус — всичките му редове чакат. Запомнен
+     филтър (pending / taken / completed / waiting) пада на „Всички“ ПРЕДИ list,
+     иначе първото прерисуване показва празно или грешно подмножество. */
+  var storeRows = sdStoreRowsView();
+  if (storeRows && sdFilter !== 'all') sdFilter = 'all';
   var list = sdTableRows();
   var showWh = sdWhColumnInTable(); /* „Отговор на склада" - само междускладов */
 
@@ -499,10 +504,15 @@ function renderStockDiff() {
 
     /* Филтри по статус. Същият критерий - числото е броят редове след клика,
        не общият брой в модула (за това са картите отгоре). */
+    /* Етап 2: обектът вижда само чакащи редове — чиповете по статус (и
+       „📝 Чакат моя отговор“ с тях) не се рисуват; остава само Excel. Чипът
+       „Чакат…“ тук винаги би бил 0: брои междускладови редове без тип, а
+       обектът вижда само „Заприхождаване“ / „Връщане“. Нарочно скрит контрол. */
+    h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
+    if (!storeRows) {
     var chipAll     = sdTableRows({status:'all'}).length;
     var chipPending = sdTableRows({status:'pending'}).length;
     var chipTaken   = sdTableRows({status:'taken'}).length;
-    h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
     var statusChips = [['all','Всички ('+chipAll+')'],['pending',cw.pIcon+' '+cw.pending+' ('+chipPending+')'],['taken',cw.tIcon+' '+cw.taken+' ('+chipTaken+')']];
     /* Четвърти чип САМО за обекта (складът и офисът имат свои изгледи): колко
        реда чакат НЕГОВИЯ отговор. Числото е в РЕДОВЕ, както е и надписът до
@@ -516,6 +526,7 @@ function renderStockDiff() {
       var a = sdFilter===f[0];
       h += '<button data-f="'+f[0]+'" onclick="setSDFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
     });
+    }
     /* Excel на ТОЧНО видяното - същото място и стил като в „За връщане".
        Бутонът е винаги тук, и при 0 реда (тогава износът казва „Няма редове"). */
     h += '<button onclick="exportSDExcel()" style="margin-left:auto;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📥 Excel</button>';
@@ -523,7 +534,7 @@ function renderStockDiff() {
 
     /* Таблица */
     if (!list.length) {
-      h += '<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📋</div><div style="margin-top:8px;">Няма записи.</div></div>';
+      h += '<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📋</div><div style="margin-top:8px;">'+(storeRows ? 'Нищо не чака вас тук' : 'Няма записи.')+'</div></div>';
     } else {
       /* Компактна таблица като „За връщане“ / Клиентски (общият модел в index.html:
          .tbl-wrap.tbl-compact + клас на таба .tbl-sd-compact). Без вътрешен скрол и без
@@ -606,7 +617,9 @@ function renderStockDiff() {
           h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'return\')" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">↩️ Връщане</button>';
         }
         /* Приключен ред няма „✅ Върната" - един клик би го върнал в „Взета". */
-        if (canEdit && !isTaken && r.status !== 'received' && r.type !== 'not_invoiced' && !sdIsCompleted(r) && !sdStoreLockedMissing(r)) {
+        /* Условието е sdRowAwaitsMark — същото, по което обектът вижда реда
+           (sdStoreMustAct, етап 2). */
+        if (canEdit && sdRowAwaitsMark(r) && !sdStoreLockedMissing(r)) {
           var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : r.type==='not_invoiced' ? '🧾 Приключена' : '✅ Приета';
           h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
         }
@@ -839,9 +852,28 @@ function sdStoreHintsOn(){
    контрол, не пропуск. Скриват се само чиповете: редовете от тези типове
    остават в „Всички типове“. Офисът и логистичните складове — както досега. */
 var SD_STORE_HIDDEN_TYPE_CHIPS = ['missing','not_invoiced'];
+/* Обектът в изглед „Решени редове“ — ЕДНА група за етап 1 (скритите чипове)
+   и етап 2 (само редовете за действие): sdStoreHintsOn() + роля на обекта
+   (manager / sklad / info). kasa / user на обект не са в нея — както в етап 1. */
+function sdStoreRowsView(){
+  return sdStoreHintsOn() && ['manager','sklad','info'].indexOf(currentUser.role) >= 0;
+}
 function sdTypeChipHidden(t){
-  return SD_STORE_HIDDEN_TYPE_CHIPS.indexOf(t) >= 0 && sdStoreHintsOn() &&
-    ['manager','sklad','info'].indexOf(currentUser.role) >= 0;
+  return SD_STORE_HIDDEN_TYPE_CHIPS.indexOf(t) >= 0 && sdStoreRowsView();
+}
+/* Редът още може да бъде отметнат („📥 Заприходена“ / „✅ Върната“ / …) —
+   условието на бутона в таблицата. 'capitalized' е 'taken' (sdIsTaken). */
+function sdRowAwaitsMark(r){
+  return !!r && !sdIsTaken(r) && !sdIsCompleted(r) && r.status !== 'received' && r.type !== 'not_invoiced';
+}
+/* Етап 2 (уточнение на Тенчо, 16.11.2026; среща 12.11.2026): в „Решени
+   редове“ обектът вижда САМО редовете, по които трябва да действа —
+   „Заприхождаване“ / „Връщане“, които още чакат бутона. Същата функция решава
+   и бутона (sdRowAwaitsMark), за да не се разминат. Нарочно скрито: „Липса“,
+   „Не са фактурирани“, „Сторнирано“, отбелязаните, приключените и
+   потвърдените междускладови. Офисът и логистичните складове — без промяна. */
+function sdStoreMustAct(r){
+  return !!r && (r.type === 'writein' || r.type === 'return') && sdRowAwaitsMark(r);
 }
 /* Два непресичащи се списъка за обекта, пресметнати веднъж на рендер:
    wait  — редовете, които Бюлетинът брои (bulDiffStoreWaiting, огледало на
@@ -935,7 +967,11 @@ function sdTableRows(over){
   over = over || {};
   var typeF   = over.hasOwnProperty('type')   ? over.type   : sdTypeFilter;
   var statusF = over.hasOwnProperty('status') ? over.status : sdFilter;
+  var storeOnly = sdStoreRowsView();
   return sdData.filter(function(r) {
+    /* Обектът — само редовете за действие (етап 2). Преди всички останали
+       филтри: числата по чиповете, превключвателят и Excel минават оттук. */
+    if (storeOnly && !sdStoreMustAct(r)) return false;
     /* Ред без тип още не е минал през Цветелина - мястото му е в секцията
        "За преглед". Изключение: междускладов ред, потвърден от отсрещната
        страна (status='received'). Там решение от Цвети няма и никога няма да

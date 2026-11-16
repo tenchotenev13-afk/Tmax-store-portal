@@ -28,6 +28,10 @@
      6. ✉️ в горната карта и при сторно (условието по посока махнато) → пада (и)
      7. ✉️ в „Решени редове" и при сторно (условието махнато)         → пада (и)
 
+   Етап 2 на Разлики (16.11.2026): обектът вижда само чакащите Заприхождаване/Връщане — очакванията за обекта са сменени нарочно.
+   (д: сторнираният ред не е в „Решени редове“ на обекта; етикетът и баджът —
+   пряко през sdExcelRows / sdRowStatusBadge; печатът — непроменен.)
+
    Пускане:  node tests/sd-wrong-receipt-storno.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
@@ -188,7 +192,7 @@ function resolveBtns(doc) {
     ok('междускладова: само reviewed', JSON.stringify(w.sdReviewedPatch('rep-int')) === '{"reviewed":true}');
   }
 
-  section('д) магазинът вижда „✓ 🧾 Сторнирано" и „ИЗЧИСТЕНА", без бутони');
+  section('д) магазинът: сторнираният ред — „✓ 🧾 Сторнирано" и „ИЗЧИСТЕНА" по данните, в „Решени редове" не (етап 2)');
   {
     const done = row({ id: 'wr-1', report_id: 'rep-wr1', type: 'storno', status: 'taken',
       resolved_by: 'Ц. Тенева', resolved_at: NOW_ISO, completed_by: 'Ц. Тенева', completed_at: NOW_ISO });
@@ -196,10 +200,12 @@ function resolveBtns(doc) {
     const { w, doc } = env(STORE, [done], [repDone], { view: 'rows' });
     guard('рендер на магазина', () => w.renderStockDiff());
     const body = doc.getElementById('sd-rows');
-    ok('редът е в „Решени редове" под „Всички типове"', !!body && body.querySelectorAll('tr').length === 1);
-    ok('етикет „🧾 Сторнирано"', !!body && body.textContent.indexOf('🧾 Сторнирано') >= 0);
-    ok('бадж „ИЗЧИСТЕНА"', !!body && body.textContent.indexOf('ИЗЧИСТЕНА') >= 0, body && body.textContent);
-    ok('чипът „Приключени" го брои', /Приключени \(1\)/.test(doc.getElementById('mod-stock-diff').textContent));
+    ok('редът НЕ е в „Решени редове" при обекта (етап 2)', !body &&
+      doc.getElementById('mod-stock-diff').textContent.indexOf('Нищо не чака вас тук') >= 0);
+    ok('етикет „Сторнирано" по данните (sdExcelRows — като на екрана)', w.sdExcelRows([w.sdData[0]])[1][0] === 'Сторнирано',
+      JSON.stringify(w.sdExcelRows([w.sdData[0]])[1]));
+    ok('бадж „ИЗЧИСТЕНА" (sdRowStatusBadge)', w.sdRowStatusBadge(w.sdData[0]).indexOf('ИЗЧИСТЕНА') >= 0, w.sdRowStatusBadge(w.sdData[0]));
+    ok('чипове по статус при обекта няма — и „Приключени"', !/Приключени \(/.test(doc.getElementById('mod-stock-diff').textContent));
     ok('без бутони за решение и без ✏️', resolveBtns(doc).length === 0 &&
       !buttonsIn(body).some(b => /sdMarkTaken|openSDModal/.test(b.getAttribute('onclick') || '')));
     ok('diffLineResolveButtons → „✓ 🧾 Сторнирано"', w.diffLineResolveButtons(w.sdData[0]).indexOf('✓ 🧾 Сторнирано') >= 0);

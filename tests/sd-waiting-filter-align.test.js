@@ -31,6 +31,11 @@
    M2 махнат 'id,' от select-а на склада → пада е) (пулс 0 ≠ рендер 1);
    M3 махната проверката за difference_category в diffLineWaitsStore → пада в).
 
+   Етап 2 на Разлики (16.11.2026): обектът вижда само чакащите Заприхождаване/Връщане — очакванията за обекта са сменени нарочно.
+   (§3: чипът „📝 Чакат моя отговор“ в „Решени редове“ при обекта не се рисува;
+   филтърът — пряко през sdTableRows({status:'waiting'}). Fixture-ът тук е с
+   междускладови редове С ТИП — в живата база такива няма (16.11.2026: 0).)
+
    Пускане: node tests/sd-waiting-filter-align.test.js . */
 'use strict';
 
@@ -211,16 +216,18 @@ async function pulse(h, reps, lines, swaps) {
     if (guard('showModule(stock-diff) не хвърля', () => h.w.showModule('stock-diff'))) {
       await settle(60);
       const mod = h.doc.getElementById('mod-stock-diff');
+      /* Етап 2 (16.11.2026): при обекта чиповете по статус в „Решени редове“
+         не се рисуват — и „Чакат моя отговор“ с тях. Филтърът се мери пряко
+         през sdTableRows({status:'waiting'}) — същото правило. */
       const b = btn(mod, 'Чакат моя отговор');
-      if (ok('чипът „Чакат моя отговор" го има', !!b)) {
-        ok('и показва (3)', /\(3\)/.test(b.textContent), b.textContent.trim());
-        realClick(h.w, b);
-        const tb = txt(h.doc.getElementById('sd-rows'));
-        ok('след клик: ret1, sw1, sw2 в таблицата',
-          ['ret1', 'sw1', 'sw2'].every(id => tb.indexOf('АРТИКУЛ ' + id) >= 0), tb.slice(0, 160));
-        ok('и нито on1, on2, wb1, si1, sw3',
-          ['on1', 'on2', 'wb1', 'si1', 'sw3'].every(id => tb.indexOf('АРТИКУЛ ' + id) < 0), tb.slice(0, 160));
-      }
+      ok('чипът „Чакат моя отговор" в „Решени редове" при обекта го НЯМА (етап 2)', !b);
+      const wl = h.w.sdTableRows({ status: 'waiting' });
+      const tb = wl.map(l => l.material_name).join(' | ');
+      ok('филтърът „waiting" дава (3)', wl.length === 3, String(wl.length));
+      ok('филтърът: ret1, sw1, sw2',
+        ['ret1', 'sw1', 'sw2'].every(id => tb.indexOf('АРТИКУЛ ' + id) >= 0), tb.slice(0, 160));
+      ok('и нито on1, on2, wb1, si1, sw3',
+        ['on1', 'on2', 'wb1', 'si1', 'sw3'].every(id => tb.indexOf('АРТИКУЛ ' + id) < 0), tb.slice(0, 160));
       const on = h.doc.getElementById('sd-onway-note');
       ok('банерът „🚚 2 реда са на път към вас" е на място', /🚚 2 реда са на път към вас/.test(txt(on)), txt(on));
     }

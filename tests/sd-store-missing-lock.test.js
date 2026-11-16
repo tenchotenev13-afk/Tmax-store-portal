@@ -12,6 +12,10 @@
    Плюс: запис на „Липса", ВЗЕТА от Цвети, през модала на магазина НЕ трие
    completed_by/at (статусът не се праща → състоянието не се мени).
 
+   Етап 2 на Разлики (16.11.2026): обектът вижда само чакащите Заприхождаване/Връщане — очакванията за обекта са сменени нарочно.
+   (§1: „Липса“ не е в таблицата на обекта; §3: ✏️ на „Липса“ се отваря пряко
+   с openSDModal — защитата в модала и в submitSD остава покрита.)
+
    Пускане:  node tests/sd-store-missing-lock.test.js .
 */
 'use strict';
@@ -62,23 +66,22 @@ const btnOn = (h, id, fn) => Array.prototype.find.call(mod(h).querySelectorAll('
 const sdPatches = (h, id) => h.calls.patch.filter(p => /stock_differences/.test(p.url) && p.url.indexOf('id=eq.' + id) >= 0);
 const red = h => h.calls.toast.filter(t => /Цветелина/.test(String(t)));
 async function openEdit(h, id) { realClick(h.w, btnOn(h, id, 'openSDModal')); await settle(); }
+/* Етап 2: „Липса“ не е в таблицата на обекта — ✏️ се отваря пряко, защитата в
+   модала и в submitSD се мери така. */
+async function openEditDirect(h, id) { h.w.openSDModal(id); await settle(); }
 async function save(h) { realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'Запази')); await settle(); }
 
 (async function run() {
 
-  section('1. Магазин + „Липса": таблицата');
+  section('1. Магазин + „Липса": таблицата (етап 2 — редът не се вижда)');
   {
     const h = env(STORE);
-    const tr = row(h, 'm-p');
-    if (ok('редът „ЛИПСА ЧАКАЩА" е на екрана', !!tr)) {
-      ok('няма бутон за кредитно', !btnOn(h, 'm-p', 'sdToggleCreditNote'));
-      ok('кредитното е текст „❌ Няма"', tr.querySelector('.sd-credit').textContent.trim() === '❌ Няма',
-        tr.querySelector('.sd-credit').textContent);
-      ok('няма „✅ Изписана"', !btnOn(h, 'm-p', 'sdMarkTaken'));
-      ok('✏️ си е там', !!btnOn(h, 'm-p', 'openSDModal'));
-    }
-    ok('ВЗЕТА „Липса": кредитното е текст „✅ Издадено"',
-      !btnOn(h, 'm-t', 'sdToggleCreditNote') && row(h, 'm-t').querySelector('.sd-credit').textContent.trim() === '✅ Издадено');
+    ok('редът „ЛИПСА ЧАКАЩА" НЕ е на екрана', !row(h, 'm-p'));
+    ok('„Липса“ е заключена за магазина (sdStoreLockedMissing)', h.w.sdStoreLockedMissing(h.w.sdData.find(l => l.id === 'm-p')) === true);
+    ok('няма бутон за кредитно', !btnOn(h, 'm-p', 'sdToggleCreditNote'));
+    ok('няма „✅ Изписана"', !btnOn(h, 'm-p', 'sdMarkTaken'));
+    ok('чакащите „Заприхождаване“ и „Връщане“ са на екрана', !!row(h, 'w-p') && !!row(h, 'r-p'));
+    ok('ВЗЕТА „Липса" НЕ е на екрана', !row(h, 'm-t'));
     h.close();
   }
 
@@ -99,7 +102,7 @@ async function save(h) { realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'За
   section('3. Магазин + „Липса": ✏️ модалът');
   {
     const h = env(STORE);
-    await openEdit(h, 'm-p');
+    await openEditDirect(h, 'm-p');
     const sel = h.doc.getElementById('sd-status');
     const ov = h.doc.getElementById('sd-ov');
     if (ok('модалът е отворен', !!ov && !!sel)) {
@@ -124,7 +127,7 @@ async function save(h) { realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'За
   {
     /* ВЗЕТА от Цвети: записът на магазина не бива да изтрие кой я е изписал. */
     const h = env(STORE);
-    await openEdit(h, 'm-t');
+    await openEditDirect(h, 'm-t');
     await save(h);
     const p = sdPatches(h, 'm-t')[0];
     if (ok('ВЗЕТА „Липса": записът минава', !!p, h.calls.toast.join(' | '))) {

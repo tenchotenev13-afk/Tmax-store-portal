@@ -12,6 +12,9 @@
      - "⏳ Ще се изпрати"    -> още никой, няма какво да се потвърждава.
    Последният потвърден ред затваря бланката (differences_reports.reviewed).
 
+   Етап 2 на Разлики (16.11.2026): обектът вижда само чакащите Заприхождаване/Връщане — очакванията за обекта са сменени нарочно.
+   (f: потвърденият ред без тип — таблицата се мери при склада; обектът го не вижда.)
+
    Пускане:  node tests/interstore-confirm-flow.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
@@ -231,8 +234,17 @@ const BACK = '📬 Прието обратно';
     const rec = line({ id: 'l-1', status: 'received', type: null,
       completed_by: 'Управител Петрич', completed_at: '2026-09-01T10:00:00.000Z',
       warehouse_response: 'sent' });
-    const h = env(STORE, [rec], { filter: 'all' });
-    ok('sdTableRows() го включва', h.w.sdTableRows().length === 1,
+    /* Етап 2 (16.11.2026): обектът не вижда потвърдения ред — по него няма
+       какво да прави. Таблицата се мери при склада (той вижда своите). */
+    const hs = env(STORE, [rec], { filter: 'all' });
+    ok('обектът: sdTableRows() НЕ го включва (етап 2)', hs.w.sdTableRows().length === 0,
+      String(hs.w.sdTableRows().length));
+    hs.w.sdView = 'rows'; hs.w.renderStockDiff();
+    ok('обектът: таблица няма, „Нищо не чака вас тук“',
+      !hs.doc.getElementById('sd-rows') && hs.doc.getElementById('mod-stock-diff').textContent.indexOf('Нищо не чака вас тук') >= 0);
+    hs.close();
+    const h = env(WAREHOUSE, [rec], { filter: 'all' });
+    ok('sdTableRows() го включва (склад)', h.w.sdTableRows().length === 1,
       String(h.w.sdTableRows().length));
     /* Старият предикат беше само !r.type - точно него сменяме. */
     ok('старият предикат (!r.type) би го изхвърлил', !rec.type);

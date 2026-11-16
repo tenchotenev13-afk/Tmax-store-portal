@@ -18,6 +18,10 @@
    „Базата" тук помни PATCH-овете по stock_differences и POST-овете в
    stock_returns, за да се види маркерът след истинското презареждане.
 
+   Етап 2 на Разлики (16.11.2026): обектът вижда само чакащите Заприхождаване/Връщане — очакванията за обекта са сменени нарочно.
+   (§6: взетият стар ред не е в таблицата на обекта; маркерът се мери пряко
+   през sdReturnMissingMark, отказът — пряко през sdAddMissingReturn.)
+
    Пускане:  node tests/sd-return-create-fail.test.js .
 */
 'use strict';
@@ -178,8 +182,11 @@ async function resolveAsReturn(h) {
   {
     const h = env(STORE);
     await settle();
-    ok('магазин: маркерът е на стария ред', markers(h, 'l-old').length > 0);
-    ok('магазин: бутон „Добави в За връщане" няма', addBtns(h, 'l-old').length === 0);
+    viewIs(h, 'rows');
+    ok('магазин: взетият стар ред НЕ е в таблицата (етап 2)', mod(h).textContent.indexOf('ПЛАНКА ЪГЛОВА') < 0);
+    const mk = h.w.sdReturnMissingMark(h.w.sdData.find(l => l.id === 'l-old'));
+    ok('магазин: маркерът на стария ред (по данните, sdReturnMissingMark)', mk.indexOf('data-return-missing') >= 0, mk);
+    ok('магазин: бутон „Добави в За връщане" няма', addBtns(h, 'l-old').length === 0 && mk.indexOf('sdAddMissingReturn') < 0);
     h.w.sdAddMissingReturn('l-old');
     await settle();
     ok('магазин: директно извикване → без POST', srPosts(h).length === 0);

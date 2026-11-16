@@ -12,6 +12,9 @@
        completed_*. Редът чака крайно решение и в долната таблица предлага
        „📥 Заприх." и „↩️ Връщане" — същият resolveDiffLine, който сменя типа.
 
+   Етап 2 на Разлики (16.11.2026): обектът вижда само чакащите Заприхождаване/Връщане — очакванията за обекта са сменени нарочно.
+   (е: редът „Не са фактурирани“ не е в таблицата на обекта.)
+
    Пускане:  node tests/stock-diff-not-invoiced.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
@@ -316,8 +319,9 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
     hs.w.sdDirTab = 'supplier';
     hs.w.sdView = 'rows';
     if (guard('рендер (магазин)', () => hs.w.renderStockDiff())) {
-      ok('магазин: редът се вижда', mainTableRows(hs.doc).length === 1, 'редове: ' + mainTableRows(hs.doc).length);
-      ok('магазин: НЯМА бутоните за крайно решение', !finalBtn(hs.doc, 'writein') && !finalBtn(hs.doc, 'return'));
+      ok('магазин: редът НЕ се вижда (етап 2)', mainTableRows(hs.doc).length === 0, 'редове: ' + mainTableRows(hs.doc).length);
+      ok('магазин: НЯМА бутоните за крайно решение (и няма право — canReviewDiff)',
+        !finalBtn(hs.doc, 'writein') && !finalBtn(hs.doc, 'return') && !hs.w.canReviewDiff());
     }
   }
 

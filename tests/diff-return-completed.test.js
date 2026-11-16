@@ -12,6 +12,10 @@
    Статусът НЕ се синхронизира със „За връщане" — и 'taken' не се
    синхронизира днес (проверено 29.09.2026).
 
+   Етап 2 на Разлики (16.11.2026): обектът вижда само чакащите Заприхождаване/Връщане — очакванията за обекта са сменени нарочно.
+   (г: взетият и приключеният ред не са в таблицата на обекта — ✏️ се отваря
+   пряко с openSDModal; заключеният селект и отказът в submitSD — непроменени.)
+
    Пускане:  node tests/diff-return-completed.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
@@ -140,11 +144,15 @@ const sdPatch = (h, id) => h.calls.patch.find(p => /stock_differences/.test(p.ur
   section('г) Магазинер: не вижда опцията и не може да смени статуса на приключен ред');
   {
     const h = env(STORE, LINES);
-    realClick(h.w, editBtn(h, 'r-t'));
+    /* Етап 2: взетият и приключеният ред не са в таблицата на обекта — ✏️ се
+       отваря пряко, защитата в модала и в submitSD се мери същата. */
+    ok('обектът: взетият ред НЕ е в таблицата (етап 2)', !editBtn(h, 'r-t'));
+    h.w.openSDModal('r-t');
     await settle();
     ok('на невзет/взет ред няма опция „ПРИКЛЮЧЕНА"', !h.doc.querySelector('#sd-status option[value="completed"]'));
     h.w.closeSDModal();
-    realClick(h.w, editBtn(h, 'r-c'));
+    ok('обектът: приключеният ред НЕ е в таблицата (етап 2)', !editBtn(h, 'r-c'));
+    h.w.openSDModal('r-c');
     await settle();
     const sel = h.doc.getElementById('sd-status');
     ok('на приключен ред селектът е заключен и показва ПРИКЛЮЧЕНА', !!sel && sel.disabled && sel.value === 'completed',

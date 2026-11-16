@@ -34,6 +34,10 @@
      М10 падането след sdTableRows — старото място (находка в)          →  4 ❌
    И единадесетте — exit 1.
 
+   Етап 2 на Разлики (16.11.2026): обектът вижда само чакащите Заприхождаване/Връщане — очакванията за обекта са сменени нарочно.
+   (§2 и §3: „редовете остават в Всички типове“ → „при обекта не се виждат“;
+   чиповете остават скрити — непроменено.)
+
    Пускане:  node tests/razliki-etap1.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
@@ -110,14 +114,14 @@ const chipKeys = doc => typeChips(doc).map(b => b.dataset.f);
     h.close();
   }
 
-  section('2. Обектът: редовете „Липса“ / „Не са фактурирани“ остават в „Всички типове“');
+  section('2. Обектът: редовете „Липса“ / „Не са фактурирани“ НЕ се виждат (етап 2)');
   {
     const h = env(STORE, { lines: RESOLVED, reps: [REP_X] });
     h.w.sdView = 'rows';
     h.w.renderStockDiff();
     const t = h.doc.getElementById('mod-stock-diff').textContent;
-    ok('редът „Липса“ е в таблицата', t.indexOf('ЛИПСА-РЕД') >= 0);
-    ok('редът „Не са фактурирани“ е в таблицата', t.indexOf('НЕФАКТ-РЕД') >= 0);
+    ok('редът „Липса“ НЕ е в таблицата', t.indexOf('ЛИПСА-РЕД') < 0);
+    ok('редът „Не са фактурирани“ НЕ е в таблицата', t.indexOf('НЕФАКТ-РЕД') < 0);
     h.close();
   }
 
@@ -132,9 +136,12 @@ const chipKeys = doc => typeChips(doc).map(b => b.dataset.f);
     /* ПЪРВОТО прерисуване — таблицата, не само променливата (Пирдоп, 16.11.2026:
        падането беше след sdTableRows и под „Всички типове“ стоеше само скритият тип). */
     const trs = Array.from(h.doc.querySelectorAll('#sd-tbl-wrap tbody tr'));
-    const names = ['ЗАПРИХ', 'ВРЪЩ', 'ЛИПСА-РЕД', 'НЕФАКТ-РЕД'];
-    ok('[' + f + '] таблицата: 4 реда при първото прерисуване', trs.length === 4, trs.length + ': ' + trs.map(t => t.textContent.slice(0, 30)).join(' | '));
-    ok('[' + f + '] и четирите типа са в таблицата', names.every(n => trs.some(t => t.textContent.indexOf(n) >= 0)));
+    /* Етап 2: обектът вижда само чакащите „Заприхождаване“ / „Връщане“. */
+    const names = ['ЗАПРИХ', 'ВРЪЩ'];
+    ok('[' + f + '] таблицата: 2 реда при първото прерисуване', trs.length === 2, trs.length + ': ' + trs.map(t => t.textContent.slice(0, 30)).join(' | '));
+    ok('[' + f + '] „Заприхождаване“ и „Връщане“ са в таблицата, „Липса“ / „Не са фактурирани“ — не',
+      names.every(n => trs.some(t => t.textContent.indexOf(n) >= 0)) &&
+      !trs.some(t => /ЛИПСА-РЕД|НЕФАКТ-РЕД/.test(t.textContent)));
     h.close();
   }
   {
