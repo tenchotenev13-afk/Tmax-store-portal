@@ -12,6 +12,11 @@
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //   store_open_items — Незавършено за обекта: по едно писмо на обект (v19)
 //
+// v21 (16.11.2026) — store_open_items, ред на клиентска заявка, само текст:
+//   co_eta = delivery → една дата („срок …"), не „срок към клиента … ·
+//   очаква се от ЦО …" с еднакви дати; „+1 работен ден" в единствено число
+//   (N > 1 — „работни дни"). Бройките и правилата — непроменени.
+//
 // v20 (16.11.2026) — ЕДНО нещо: store_open_items, секция „Клиентски заявки“ —
 //   ЕФЕКТИВЕН СРОК (решение на Тенчо 16.11 след тестовото писмо): co_eta, ако
 //   заявката е processed и co_eta е попълнено, иначе delivery (soiDueISO).
@@ -2904,10 +2909,12 @@ function soiOrdersFor(data: any, store: string) {
   };
   const line = (o: any, asReq: boolean, late: boolean) => {
     const main = '№ ' + esc(o.in_num || '—') + ' · ' + esc(soiItemText(o));
-    const dates = soiDueIsEta(o)
+    /* v21: co_eta = delivery → една дата („срок …"), не две еднакви. */
+    const dates = soiDueIsEta(o) && String(o.co_eta).slice(0, 10) !== String(o.delivery || '').slice(0, 10)
       ? 'срок към клиента ' + esc(dayTxt(o.delivery)) + ' · очаква се от ЦО ' + esc(dayTxt(o.co_eta))
-      : 'срок ' + esc(dayTxt(o.delivery));
-    const tail = late ? '<b style="color:#b91c1c;">+' + soiLateDays(o, data.today) + ' работни дни</b>' : esc(soonTxt(o));
+      : 'срок ' + esc(dayTxt(soiDueISO(o)));
+    const ld = late ? soiLateDays(o, data.today) : 0;
+    const tail = late ? '<b style="color:#b91c1c;">+' + ld + (ld === 1 ? ' работен ден' : ' работни дни') + '</b>' : esc(soonTxt(o));
     const meta = dates + ' · ' + esc(SOI_STATUS[o.status] || o.status || '') + (tail ? ' · ' + tail : '');
     const who = asReq
       ? 'Клиент: ' + esc(o.customer_name || '—') + ' · Изпълнява: '
