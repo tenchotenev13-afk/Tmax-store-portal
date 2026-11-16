@@ -131,6 +131,7 @@ function cpSel(doc) { return doc.getElementById('diff-counterpart'); }
     h.doc.querySelector('#diff-items .di-name').value = 'ЩУЦЕР МЕТАЛЕН';
     h.doc.querySelector('#diff-items .di-qty').value = '10';
     h.doc.querySelector('#diff-items .di-qty-real').value = '8';
+    h.doc.querySelector('#diff-items .di-cat').value = 'excess'; /* междускладов: категорията е задължителна (razliki-etap1) */
     ok('counterpart наистина е празен преди подаването', cpSel(h.doc).value === '');
 
     realClick(h.w, btn(h.doc.getElementById('diff-submit-ov'), 'Подай бланка'));
@@ -179,6 +180,7 @@ function cpSel(doc) { return doc.getElementById('diff-counterpart'); }
     h.doc.querySelector('#diff-items .di-name').value = 'БАТЕРИЯ DURACELL';
     h.doc.querySelector('#diff-items .di-qty').value = '10';
     h.doc.querySelector('#diff-items .di-qty-real').value = '8';
+    h.doc.querySelector('#diff-items .di-cat').value = 'excess'; /* междускладов: категорията е задължителна (razliki-etap1) */
 
     realClick(h.w, btn(h.doc.getElementById('diff-submit-ov'), 'Подай бланка'));
     await ticks(); await ticks();

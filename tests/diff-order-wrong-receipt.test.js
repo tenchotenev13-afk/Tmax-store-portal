@@ -192,6 +192,7 @@ async function threeTries(h, who) {
     const rows = h.doc.querySelectorAll('#diff-items .diff-item-row');
     rows[0].querySelector('.di-name').value = 'ЛАЙСНА'; rows[0].querySelector('.di-qty').value = '1';
     rows[0].querySelector('.di-qty-real').value = '1';
+    rows[0].querySelector('.di-cat').value = 'excess'; /* междускладов: категорията е задължителна (razliki-etap1) */
     await submit(h);
     const rp = repPosts(h);
     ok('междускладов подаден', rp.length === 1 && rp[0].body.direction === 'interstore', JSON.stringify(rp.map(p => p.body)) + ' | ' + h.calls.toast.join(' | '));

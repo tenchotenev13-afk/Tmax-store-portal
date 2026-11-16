@@ -375,6 +375,10 @@ function renderStockDiff() {
   var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани', storno:'🧾 Сторнирано' };
   var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626', not_invoiced:'#64748b', storno:'#0f766e' };
 
+  /* Обектът няма чипове „Липса“ / „Не са фактурирани“ (среща 12.11.2026).
+     Останал филтър по скрит чип пада на „Всички типове“ — иначе таблицата
+     е празна без видим път обратно. */
+  if (sdTypeChipHidden(sdTypeFilter)) sdTypeFilter = 'all';
   var cw = sdCounterWords(sdTypeFilter);
   /* Дали обектът има „Чакат моя отговор“ (null за офис и склад) — за бележката горе и за чипа долу. */
   var chipWaiting = sdWaitingVisible();
@@ -486,7 +490,7 @@ function renderStockDiff() {
       not_invoiced: sdTableRows({type:'not_invoiced'}).length
     };
     h += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">';
-    [['all','Всички типове'],['writein','📥 Заприхождаване ('+typeCounts.writein+')'],['return','↩️ Връщане ('+typeCounts['return']+')'],['missing','❓ Липса ('+typeCounts.missing+')'],['not_invoiced','🧾 Не са фактурирани ('+typeCounts.not_invoiced+')']].forEach(function(f){
+    [['all','Всички типове'],['writein','📥 Заприхождаване ('+typeCounts.writein+')'],['return','↩️ Връщане ('+typeCounts['return']+')'],['missing','❓ Липса ('+typeCounts.missing+')'],['not_invoiced','🧾 Не са фактурирани ('+typeCounts.not_invoiced+')']].filter(function(f){ return !sdTypeChipHidden(f[0]); }).forEach(function(f){
       var a = sdTypeFilter===f[0];
       h += '<button data-f="'+f[0]+'" onclick="setSDTypeFilter(this.dataset.f)" style="border:1px solid '+(a?'#0f172a':'#e2e8f0')+';padding:4px 12px;border-radius:40px;font-size:11.5px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
     });
@@ -827,6 +831,16 @@ var SD_STORE_BTN = { sap_done:'📄 ПУСНАТО В SAP', no_stock:'⛔ НЯМ
    картата) — офисът, складът и прегледът от ЦО не ги виждат (24.10.2026). */
 function sdStoreHintsOn(){
   return !!currentUser && !sdIsCOViewer() && !isGlobal() && !isLogisticsWarehouseUser();
+}
+/* Чиповете „❓ Липса“ и „🧾 Не са фактурирани“ в изглед „Редове“ не са за
+   ОБЕКТА (manager / sklad / info, не склад, не офис) — решение от срещата за
+   Разлики, 12.11.2026 (Цвети, Миглена, Виктор Филев, Тенчо). Нарочно скрит
+   контрол, не пропуск. Скриват се само чиповете: редовете от тези типове
+   остават в „Всички типове“. Офисът и логистичните складове — както досега. */
+var SD_STORE_HIDDEN_TYPE_CHIPS = ['missing','not_invoiced'];
+function sdTypeChipHidden(t){
+  return SD_STORE_HIDDEN_TYPE_CHIPS.indexOf(t) >= 0 && sdStoreHintsOn() &&
+    ['manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
 /* Два непресичащи се списъка за обекта, пресметнати веднъж на рендер:
    wait  — редовете, които Бюлетинът брои (bulDiffStoreWaiting, огледало на
@@ -1911,6 +1925,41 @@ function sdDelete(id) {
     }
     if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadStockDiff(); return; }
     toast('✓ Изтрит'); loadStockDiff();
+  });
+}
+
+/* ── ОБЕКТЪТ ТРИЕ СВОЙ РЕД ОТ НОВОПОДАДЕНА БЛАНКА ── (среща 12.11.2026)
+   Същото условие като ✏️ (canEditSD, без тип, собствен обект) и допълнително:
+   никой още не е пипнал реда — без отговор на склада и на обекта, статус
+   'new', без размяна. При доставчик с вече тръгнало писмо (email_sent_at)
+   редът НЕ се трие: доставчикът го има в писмото. Снимките на бланката
+   (differences_reports.photos) не се пипат. */
+function sdCanStoreDeleteLine(l, rep){
+  if(!l || !rep || !currentUser) return false;
+  if(!(canEditSD(l) && !l.type && currentUser.store_name===rep.store_name)) return false;
+  if(l.warehouse_response || l.store_response || l.status!=='new') return false;
+  if(sdSwapsForLine(l).length) return false;
+  if((rep.direction||'supplier')==='supplier' && rep.email_sent_at) return false;
+  return true;
+}
+function sdStoreDeleteLine(lineId){
+  var l = sdData.find(function(x){ return String(x.id)===String(lineId); });
+  var rep = l ? diffReports.find(function(x){ return x.id===l.report_id; }) : null;
+  if(!sdCanStoreDeleteLine(l, rep)){ toast('Този ред вече не може да се изтрие — списъкът е опреснен','#dc2626'); loadStockDiff(); return; }
+  /* Последният ред не се трие оттук (решение А, Тенчо 16.11.2026): бланка без
+     редове би висяла за преглед. Цялата бланка я трие само admin. */
+  var siblings = sdData.filter(function(x){ return x.report_id===l.report_id; });
+  if(siblings.length<=1){ toast('Това е последният ред на бланката — за да махнете бланката, обадете се на офиса','#dc2626'); return; }
+  if(!confirm('Изтрий реда „'+(l.material_name||'')+'“ от бланката?')) return;
+  sdKeepScroll(rep.id);
+  sbDelete('stock_differences','id=eq.'+l.id).then(function(res){
+    if(!res.ok){
+      console.error('sdStoreDeleteLine: редът НЕ беше изтрит',l.id,res.error);
+      toast('⚠️ Редът НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
+      loadStockDiff(); return;
+    }
+    if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadStockDiff(); return; }
+    toast('✓ Редът е изтрит'); loadStockDiff();
   });
 }
 
@@ -3683,6 +3732,7 @@ function renderDiffReportsSection(){
         var correctBtn = (canEditSD(l)&&!l.type&&currentUser.store_name===rep.store_name)
           ? ' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>'
           : '';
+        if(sdCanStoreDeleteLine(l, rep)) correctBtn += ' <button class="sd-line-del" data-lid="'+l.id+'" onclick="sdStoreDeleteLine(this.dataset.lid)" title="Изтрий реда" style="border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">🗑</button>';
         h+='<tr'+rowCls+' style="border-top:1px solid #f1f5f9;'+rowBg+'">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
           /* Сигналът за размяна стои под ИМЕТО на артикула, а не в колоната на
@@ -4086,6 +4136,18 @@ function diffRowsMissingName(){
     for(var k=0;k<filled.length;k++){
       if((filled[k]||'').trim()){ out.push(i+1); return; }
     }
+  });
+  return out;
+}
+/* Редове с наименование, но без категория (1-базирани, както на екрана) —
+   при междускладов категорията е задължителна. Ред без име не се брои: него
+   го хваща diffRowsMissingName или collectDiffItems го изхвърля. */
+function diffRowsMissingCategory(){
+  var rows=document.querySelectorAll('#diff-items .diff-item-row');
+  var out=[];
+  rows.forEach(function(row,i){
+    if(!(row.querySelector('.di-name').value||'').trim())return;
+    if(!(row.querySelector('.di-cat').value||'').trim()) out.push(i+1);
   });
   return out;
 }
@@ -5016,6 +5078,15 @@ function submitDiffReport(){
     return;
   }
   if(!items.length){toast('Добави поне един артикул с наименование','#dc2626');return;}
+  /* Междускладов: категорията е задължителна на всеки ред (среща 12.11.2026).
+     Доставчик и сторна — без промяна. Номерата са на екрана, 1-базирани. */
+  if(direction==='interstore'){
+    var missingCat=diffRowsMissingCategory();
+    if(missingCat.length){
+      toast((missingCat.length===1?'Ред ':'Редове ')+missingCat.join(', ')+': избери категория','#dc2626');
+      return;
+    }
+  }
   /* Номер на документ в количеството спира подаването ПРЕДИ качването на
      снимките и POST-а - иначе стига до базата като 180486328 бройки. */
   var qtyDocNum=diffRowQtyLikeDocNum();

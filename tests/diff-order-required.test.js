@@ -165,6 +165,8 @@ const lastToast = h => String(h.calls.toast[h.calls.toast.length - 1] || '');
       ok('[' + d + '] няма поле „Поръчка №"', !h.doc.getElementById('diff-order-num'));
       if (d === 'wrong_receipt') { const st = h.doc.getElementById('diff-store'); st.innerHTML = '<option>Враца</option>'; st.value = 'Враца'; }
       if (d === 'interstore') {
+        /* Междускладов: категорията е задължителна (razliki-etap1). */
+        h.doc.querySelectorAll('#diff-items .di-cat').forEach(s => { s.value = 'excess'; });
         const cp = h.doc.getElementById('diff-counterpart');
         cp.innerHTML = '<option>Логистичен склад Търговище</option>'; cp.value = 'Логистичен склад Търговище';
       }

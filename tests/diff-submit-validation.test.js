@@ -39,6 +39,9 @@ function fillRow(doc, i, vals) {
   if (vals.name !== undefined) row.querySelector('.di-name').value = vals.name;
   if (vals.qty !== undefined) row.querySelector('.di-qty').value = vals.qty;
   if (vals.real !== undefined) row.querySelector('.di-qty-real').value = vals.real;
+  /* Формата тук е междускладова — категорията е задължителна (razliki-etap1).
+     Само на ред с име: категория на ред без име би го направила „започнат“. */
+  if (vals.name) row.querySelector('.di-cat').value = 'excess';
   return row;
 }
 async function submit(h) {

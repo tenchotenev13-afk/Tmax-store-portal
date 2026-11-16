@@ -115,6 +115,7 @@ const TESTS = [
   'stock-diff-status-labels.test.js',
   'catalog-lookup.test.js',
   'diff-submit-validation.test.js',
+  'razliki-etap1.test.js',
   'diff-report-no-document.test.js',
   'diff-qty-guard.test.js',
   'stock-returns-manual-order.test.js',
