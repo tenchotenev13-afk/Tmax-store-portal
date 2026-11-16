@@ -12,16 +12,27 @@
       писмо до доставчика. Последният ред не се трие оттук (решение А,
       16.11.2026).
 
-   Мутационна проверка (16.11.2026; всеки мутант върху stock-differences.js,
-   файлът — върнат от копие; чистият код: exit 0, 71/71):
-     М1 sdTypeChipHidden() винаги false (чиповете се връщат за обекта)  → 7 ❌
-     М2 проверката за категория важи и за supplier (if(true))            → 2 ❌
-     М3 sdCanStoreDeleteLine() без warehouse_response                   → 2 ❌
-     М4 sdStoreDeleteLine() трие и последния ред                        → 3 ❌
-     М5 без проверката за размяна                                       → 2 ❌
-     М6 без проверката за тръгнало писмо до доставчика                  → 1 ❌
-     М7 без падането на „Всички типове“                                 → 4 ❌
-   И седемте — exit 1.
+   Находки от проверката на живо (чатът, Пирдоп, 16.11.2026, на 2238ea6):
+     а) 🗑 се рисуваше и на единствения ред на бланката;
+     б) 🗑 се рисуваше на ред с коментар на контролера (resolution_comment)
+        и други полета, които пише офисът — sdLineTouchedByOthers;
+     в) падането на 'all' беше СЛЕД sdTableRows — първото прерисуване
+        показваше само скрития тип под „Всички типове“.
+
+   Мутационна проверка (16.11.2026, след находките; всеки мутант върху
+   stock-differences.js, файлът — върнат от копие; чистият код: exit 0, 88/88):
+     М1  sdTypeChipHidden() винаги false (чиповете се връщат за обекта) → 11 ❌
+     М2  проверката за категория важи и за supplier (if(true))          →  2 ❌
+     М3  sdCanStoreDeleteLine() без warehouse_response                  →  2 ❌
+     М4  предпазителят в sdStoreDeleteLine пуска последния ред          →  1 ❌
+     М5  без проверката за размяна                                      →  2 ❌
+     М6  без проверката за тръгнало писмо до доставчика                 →  1 ❌
+     М7  без падането на „Всички типове“                                →  8 ❌
+     М8  🗑 и на единствения ред (находка а)                            →  2 ❌
+     М9  без sdLineTouchedByOthers (находка б)                          →  6 ❌
+     М9б само resolution_comment не брои (находка б, примерът на живо)  →  1 ❌
+     М10 падането след sdTableRows — старото място (находка в)          →  4 ❌
+   И единадесетте — exit 1.
 
    Пускане:  node tests/razliki-etap1.test.js .
 */
@@ -118,7 +129,12 @@ const chipKeys = doc => typeChips(doc).map(b => b.dataset.f);
     ok('[' + f + '] sdTypeFilter = all', h.w.sdTypeFilter === 'all', h.w.sdTypeFilter);
     const act = typeChips(h.doc).filter(b => /#0f172a/.test(b.getAttribute('style') || '') && /background:#0f172a/.test(b.getAttribute('style')));
     ok('[' + f + '] активният чип е „Всички типове“', act.length === 1 && act[0].dataset.f === 'all', act.map(b => b.dataset.f).join(','));
-    ok('[' + f + '] таблицата НЕ е празна', h.doc.getElementById('mod-stock-diff').textContent.indexOf('ЗАПРИХ') >= 0);
+    /* ПЪРВОТО прерисуване — таблицата, не само променливата (Пирдоп, 16.11.2026:
+       падането беше след sdTableRows и под „Всички типове“ стоеше само скритият тип). */
+    const trs = Array.from(h.doc.querySelectorAll('#sd-tbl-wrap tbody tr'));
+    const names = ['ЗАПРИХ', 'ВРЪЩ', 'ЛИПСА-РЕД', 'НЕФАКТ-РЕД'];
+    ok('[' + f + '] таблицата: 4 реда при първото прерисуване', trs.length === 4, trs.length + ': ' + trs.map(t => t.textContent.slice(0, 30)).join(' | '));
+    ok('[' + f + '] и четирите типа са в таблицата', names.every(n => trs.some(t => t.textContent.indexOf(n) >= 0)));
     h.close();
   }
   {
@@ -307,15 +323,38 @@ const chipKeys = doc => typeChips(doc).map(b => b.dataset.f);
 
   section('9. Последният ред на бланката не се трие оттук (решение А)');
   {
+    /* Пирдоп, 16.11.2026: на единствения ред 🗑 не се рисува изобщо. */
     const h = cardEnv(STORE, [L1]);
-    const b = delOf(h.doc, 'l-1');
-    if (ok('🗑 се вижда и на единствения ред', !!b)) {
-      realClick(h.w, b);
-      await ticks();
-      ok('0 DELETE', h.calls.del.length === 0, h.calls.del.join(' | '));
-      ok('без потвърждение', h.calls.confirm.length === 0);
-      ok('toast „последният ред … обадете се на офиса“', h.calls.toast.some(t => /последният ред на бланката/.test(t)), h.calls.toast.join(' | '));
-    }
+    ok('картата е на екрана', !!h.doc.getElementById('diff-rep-rep-1'));
+    ok('единствен ред → няма 🗑', !delOf(h.doc, 'l-1'));
+    ok('sdCanStoreDeleteLine = false', h.w.sdCanStoreDeleteLine(h.w.sdData[0], h.w.diffReports[0]) === false);
+    /* Предпазителят — пряко извикване. */
+    h.w.sdStoreDeleteLine('l-1');
+    await ticks();
+    ok('пряко извикване → 0 DELETE', h.calls.del.length === 0, h.calls.del.join(' | '));
+    ok('без потвърждение', h.calls.confirm.length === 0);
+    ok('toast „последният ред … обадете се на офиса“', h.calls.toast.some(t => /последният ред на бланката/.test(t)), h.calls.toast.join(' | '));
+    h.close();
+  }
+
+  section('10. По реда е действал офисът или складът → няма 🗑');
+  for (const [why, extra] of [
+    ['коментар на контролера (resolution_comment)', { resolution_comment: 'Това нали го бяхте пуснали като разлика?' }],
+    ['решение, върнато на празно (resolved_by)', { resolved_by: 'Цветелина Тенева', resolved_at: '2026-11-15T09:00:00Z' }],
+    ['кредитно (credit_note_issued)', { credit_note_issued: true }],
+    ['поръчка за връщане (return_order_number)', { return_order_number: '4200017097' }],
+    ['коментар на склада (warehouse_comment)', { warehouse_comment: 'проверяваме' }],
+    ['размяна по реда (swap_id)', { swap_id: 's-9' }]
+  ]) {
+    const h = cardEnv(STORE, [Object.assign({}, L1, extra), L2]);
+    ok('няма 🗑: ' + why, !!h.doc.getElementById('diff-rep-rep-1') && !delOf(h.doc, 'l-1'));
+    ok('  а на съседния непипнат ред има', !!delOf(h.doc, 'l-2'));
+    h.close();
+  }
+  {
+    /* Празни стойности не броят: '' / интервал / false / null. */
+    const h = cardEnv(STORE, [Object.assign({}, L1, { resolution_comment: '  ', credit_note_issued: false, return_order_number: '', warehouse_comment: null }), L2]);
+    ok('празни полета → 🗑 си стои', !!delOf(h.doc, 'l-1'));
     h.close();
   }
 

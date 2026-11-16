@@ -369,16 +369,17 @@ function renderStockDiff() {
   var isAdmin = currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
   var canAdd  = canAddSD();
 
+  /* Обектът няма чипове „Липса“ / „Не са фактурирани“ (среща 12.11.2026).
+     Останал филтър по скрит чип пада на „Всички типове“ ПРЕДИ list —
+     иначе първото прерисуване показва само скрития тип под „Всички типове“
+     (Пирдоп, 16.11.2026). */
+  if (sdTypeChipHidden(sdTypeFilter)) sdTypeFilter = 'all';
   var list = sdTableRows();
   var showWh = sdWhColumnInTable(); /* „Отговор на склада" - само междускладов */
 
   var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани', storno:'🧾 Сторнирано' };
   var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626', not_invoiced:'#64748b', storno:'#0f766e' };
 
-  /* Обектът няма чипове „Липса“ / „Не са фактурирани“ (среща 12.11.2026).
-     Останал филтър по скрит чип пада на „Всички типове“ — иначе таблицата
-     е празна без видим път обратно. */
-  if (sdTypeChipHidden(sdTypeFilter)) sdTypeFilter = 'all';
   var cw = sdCounterWords(sdTypeFilter);
   /* Дали обектът има „Чакат моя отговор“ (null за офис и склад) — за бележката горе и за чипа долу. */
   var chipWaiting = sdWaitingVisible();
@@ -1934,22 +1935,48 @@ function sdDelete(id) {
    'new', без размяна. При доставчик с вече тръгнало писмо (email_sent_at)
    редът НЕ се трие: доставчикът го има в писмото. Снимките на бланката
    (differences_reports.photos) не се пипат. */
+/* Действал ли е някой друг по реда — офисът (Цвети / счетоводител / ЦО) или
+   складът. Полетата са всичко, което тези роли пишат по реда, без
+   type/status (проверяват се отделно) (Пирдоп, 16.11.2026: ред с коментар на
+   контролера имаше 🗑):
+     resolution_comment  — коментар на контролера (submitSD, 💬)
+     resolved_by/_at     — решение по реда (resolveDiffLine, submitSD); остава
+                           и когато типът е върнат на празно
+     credit_note_issued  — кредитно (sdToggleCreditNote)
+     return_order_number — поръчка за връщане (submitSD, само canReviewDiff)
+     warehouse_comment   — коментар на склада (submitWarehouseResponse)
+     swap_id             — размяна (освен sdSwapsForLine — и по самия ред) */
+function sdLineTouchedByOthers(l){
+  if(!l) return false;
+  if(String(l.resolution_comment||'').trim()) return true;
+  if(l.resolved_by || l.resolved_at) return true;
+  if(l.credit_note_issued) return true;
+  if(String(l.return_order_number||'').trim()) return true;
+  if(String(l.warehouse_comment||'').trim()) return true;
+  if(l.swap_id) return true;
+  return false;
+}
 function sdCanStoreDeleteLine(l, rep){
   if(!l || !rep || !currentUser) return false;
   if(!(canEditSD(l) && !l.type && currentUser.store_name===rep.store_name)) return false;
   if(l.warehouse_response || l.store_response || l.status!=='new') return false;
+  if(sdLineTouchedByOthers(l)) return false;
   if(sdSwapsForLine(l).length) return false;
   if((rep.direction||'supplier')==='supplier' && rep.email_sent_at) return false;
+  /* Единственият ред на бланката — без 🗑 (решение А): бланка без редове би
+     висяла за преглед. Проверката в sdStoreDeleteLine остава като предпазител. */
+  if((sdData||[]).filter(function(x){ return x.report_id===l.report_id; }).length<=1) return false;
   return true;
 }
 function sdStoreDeleteLine(lineId){
   var l = sdData.find(function(x){ return String(x.id)===String(lineId); });
   var rep = l ? diffReports.find(function(x){ return x.id===l.report_id; }) : null;
-  if(!sdCanStoreDeleteLine(l, rep)){ toast('Този ред вече не може да се изтрие — списъкът е опреснен','#dc2626'); loadStockDiff(); return; }
   /* Последният ред не се трие оттук (решение А, Тенчо 16.11.2026): бланка без
-     редове би висяла за преглед. Цялата бланка я трие само admin. */
-  var siblings = sdData.filter(function(x){ return x.report_id===l.report_id; });
-  if(siblings.length<=1){ toast('Това е последният ред на бланката — за да махнете бланката, обадете се на офиса','#dc2626'); return; }
+     редове би висяла за преглед. Цялата бланка я трие само admin. 🗑 на такъв
+     ред не се рисува (sdCanStoreDeleteLine); тук е предпазител — ПРЕДИ общата
+     проверка, за да излезе точното съобщение. */
+  if(l && sdData.filter(function(x){ return x.report_id===l.report_id; }).length<=1){ toast('Това е последният ред на бланката — за да махнете бланката, обадете се на офиса','#dc2626'); return; }
+  if(!sdCanStoreDeleteLine(l, rep)){ toast('Този ред вече не може да се изтрие — списъкът е опреснен','#dc2626'); loadStockDiff(); return; }
   if(!confirm('Изтрий реда „'+(l.material_name||'')+'“ от бланката?')) return;
   sdKeepScroll(rep.id);
   sbDelete('stock_differences','id=eq.'+l.id).then(function(res){
