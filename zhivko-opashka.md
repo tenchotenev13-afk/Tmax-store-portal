@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(данни, не схема — миграцията transferi_zachistvane_20261116, transferi-zachistvane-2026-11-16.sql, версия 20261116105503, приложена 16.11.2026)
+- 16.11 · transfers, transfer_cargo, transfer_cargo_events — ВСИЧКИ редове изтрити (старт на чисто от 17.11; 144 / 482 / 794 реда). Огледалото трябва да изтрие своите стари редове в тези три таблици; схемата им не е пипана. Таблиците transfers_archive_20261116, transfer_cargo_archive_20261116, transfer_cargo_events_archive_20261116 НЕ се огледалят (без права за anon). transfer_counters не е пипан — номерата продължават.
+
 (в базата от миграцията revaluation_approve, revaluation-approve-schema.sql, версия 20261114203015, приложена 14.11.2026)
 - 13.11 · revaluation_submissions.approved_at — timestamptz, NULL, без default
 - 13.11 · revaluation_submissions.approved_by — text, NULL, без default
