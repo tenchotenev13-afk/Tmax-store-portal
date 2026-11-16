@@ -155,7 +155,7 @@ async function imported(o) {
     h.w.currentUser = { role: 'marketing', store_name: 'Централен офис' };
     ok('rvCanSee: marketing → не', h.w.rvCanSee() === false);
     h.w.currentUser = { role: 'supply', store_name: 'Централен офис' };
-    ok('rvCanSee: supply → да', h.w.rvCanSee() === true);
+    ok('rvCanSee: supply → не (от 16.11.2026 — само Зареждане)', h.w.rvCanSee() === false);
     h.w.currentUser = STORE_USER;
     guard('showModule(revaluation)', () => h.w.showModule('revaluation'));
     await ticks(5);
@@ -205,7 +205,7 @@ async function imported(o) {
     r = await login({ user: ADMIN, settings: [] });
     ok('admin без ключ → вижда', tab(r.h).style.display === '' && r.h.w.rvCanSee() === true);
     r = await login({ user: { email: 'sn@temax.bg', display_name: 'Снаб', role: 'supply', store_name: 'Централен офис' }, settings: [] });
-    ok('supply без ключ → вижда', tab(r.h).style.display === '');
+    ok('supply без ключ → скрит (от 16.11.2026 — само Зареждане)', tab(r.h).style.display === 'none');
     r = await login({ user: REGIONAL, settings: [] });
     ok('регионален (accounting) без ключ → вижда под-бутона', tab(r.h).style.display === '');
     guard('showModule(revaluation)', () => r.h.w.showModule('revaluation')); await ticks(5);

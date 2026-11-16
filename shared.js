@@ -1810,7 +1810,8 @@ function setupTabsForRole(){
   if(srTab)srTab.style.display='';
   /* Таб „Ревизии и преоценка“ (id tab-revaluation от преди) — admin, accounting,
      supply, manager, sklad: rsCanSee() в revisions.js. Под-бутонът „🏷️ Преоценка“
-     — по rvCanSee() от revaluation.js: admin/accounting/supply винаги, обектите
+     — по rvCanSee() от revaluation.js: admin/accounting/controlling винаги
+     (supply — не, от 16.11.2026), обектите
      само ако app_settings.revaluation_stores = 'on' или обектът е в списъка
      (пилот, 25.10.2026). Ключът се чете при всеки
      логин; до отговора под-бутонът на обекта е скрит, после се преизчислява.
@@ -1820,7 +1821,12 @@ function setupTabsForRole(){
   /* Контролинг: главният таб отваря директно Преоценка (графикът е до него в
      под-лентата). Атрибутът се връща при всеки вход — същата страница може да
      смени потребителя без презареждане. */
-  if(rvTab)rvTab.setAttribute('onclick',isControllingRole()?"showModule('revaluation')":"showModule('rev-schedule')");
+  /* Снабдяване (supply): в таба вижда само „🎨 Зареждане“ (16.11.2026) —
+     главният таб отваря него, графикът и преоценката са скрити. */
+  var rvSupplyOnly=!!currentUser&&currentUser.role==='supply';
+  if(rvTab)rvTab.setAttribute('onclick',isControllingRole()?"showModule('revaluation')":(rvSupplyOnly?"showModule('supply')":"showModule('rev-schedule')"));
+  var rsSubBtn=document.getElementById('rvs-schedule');
+  if(rsSubBtn)rsSubBtn.style.display=(typeof rsCanSeeSchedule==='function'&&rsCanSeeSchedule())?'':'none';
   /* Под-бутон „🎨 Зареждане“ (supply.js) — от 15.11.2026 в „Ревизии и
      преоценка“ (дотогава tps-supply в Транспорт, за всички роли). Видим за
      всички, които виждат таба — rsCanSee(), без отделен ключ. */

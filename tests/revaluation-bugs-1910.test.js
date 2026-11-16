@@ -106,7 +106,8 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     ok('ЦО, затворена (в бланката): „Кампанията е затворена — обектите не могат да подават. Обработката от ЦО продължава.“',
       win(h) === 'Кампанията е затворена — обектите не могат да подават. Обработката от ЦО продължава.', win(h));
     h = env({ campaign: EXPIRED, user: SUPPLY }); await openCo(h);
-    ok('supply (ЦО зрител) — същият текст', win(h).indexOf('Обработката от ЦО продължава') >= 0);
+    /* supply беше ЦО зрител до 16.11.2026; оттогава — без достъп (supply-rev-subtabs). */
+    ok('supply — „Нямаш достъп“ (от 16.11.2026)', /Нямаш достъп/.test(mod(h).textContent));
     h = env({ campaign: EXPIRED, user: STORE }); await openCo(h);
     ok('обект, изтекла: старият текст', win(h) === 'Извън прозореца на кампанията — бланката е само за четене.', win(h));
     h = env({ campaign: CLOSED, user: STORE }); await openCo(h);
@@ -211,12 +212,11 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
   {
     let h = env({ user: SUPPLY }); await openCo(h);
     ok('supply, обзор: без бутон MM41', !btn(mod(h), 'MM41'));
-    ok('supply: „Excel — кампания“ остава', !!btn(mod(h), 'Excel — кампания'));
+    ok('supply: без „Excel — кампания“ — „Нямаш достъп“ (от 16.11.2026)', !btn(mod(h), 'Excel — кампания') && /Нямаш достъп/.test(mod(h).textContent));
     const r1 = await h.w.rvMm41(); await ticks(4);
     ok('supply: rvMm41() → отказ, без файл', r1 === false && !h.files.length);
-    await h.w.rvCoOpenStore('Кърджали'); await ticks(5);
-    ok('supply, бланка: без бутон VK11', !btn(mod(h), 'VK11'));
-    ok('supply: „Excel — този обект“ остава', !!btn(mod(h), 'Excel — този обект'));
+    /* Бланката на обект за supply няма вход от 16.11.2026 (обзорът е
+       „Нямаш достъп“) — проверява се само отказът на самата функция. */
     const r2 = h.w.rvVk11(); await ticks(2);
     ok('supply: rvVk11() → отказ, без файл', r2 === false && !h.files.length);
 

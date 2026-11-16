@@ -25,8 +25,11 @@ function rsCanSee(){
   return !!currentUser && ['admin', 'accounting', 'supply', 'manager', 'sklad', 'controlling'].indexOf(currentUser.role) >= 0;
 }
 /* Самият график. От 18.10.2026 и за Контролинг (само гледане — rsCanEdit е
-   admin / accounting); дотогава Контролинг го нямаше. */
-function rsCanSeeSchedule(){ return rsCanSee(); }
+   admin / accounting); дотогава Контролинг го нямаше. Снабдяването (supply)
+   вижда в таба САМО „🎨 Зареждане“ (решение на Тенчо, 16.11.2026) — затова
+   графикът е rsCanSee() без supply. rsCanSee() остава с supply: от нея са
+   табът, rvs-supply и linkedModuleAllowed('supply') в bulletin.js. */
+function rsCanSeeSchedule(){ return rsCanSee() && currentUser.role !== 'supply'; }
 function rsCanEdit(){ return !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'accounting'); }
 
 /* ─── Подредба ─────────────────────────────────────────── */

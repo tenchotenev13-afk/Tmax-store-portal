@@ -11,7 +11,7 @@
      обекти, пише и преди, и след подаване (пак само в прозореца);
    · admin / accounting — отваря и затваря кампании; бланките само чете
      (отключване и колоните на ЦО са етап 3);
-   · supply — само чете.
+   · supply — само чете до 16.11.2026; оттогава няма достъп (rvCanSee).
    От 13.11.2026 подадената бланка минава през одобрение от регионалния на
    обекта (draft → submitted = чака регионалния → approved → processed;
    обект без регионален: draft → approved). Виж rvSubmitRoute / rvRegApprove /
@@ -82,15 +82,16 @@ function rvIsRegionalFor(store){ return !!store && rvRegionStores().indexOf(stor
    График на кампаниите, Затвори) не са за него. admin с is_regional (В. Филев)
    НЕ попада тук — admin е admin. */
 function rvRegionalAcc(){ return !!currentUser && currentUser.role === 'accounting' && rvRegionStores().length > 0; }
-/* Видимост на таба: admin, accounting, supply — винаги; обекти — само ако
+/* Видимост на таба: admin, accounting, controlling — винаги; обекти — само ако
    обектът е включен в revaluation_stores ('on' или в списъка; скрито от
    13.10.2026 до етап 3, пилот по обект от 25.10.2026). Регионалните днес
    са admin/accounting (проверено 12.10.2026) и виждат таба като ЦО; правото им
    да ПИШАТ в бланката на обект е зад същия ключ, по обекта на бланката
-   (rvCanEdit). */
+   (rvCanEdit). supply (Снабдяване) — вън от 16.11.2026 (решение на Тенчо):
+   в „Ревизии и преоценка“ вижда само „🎨 Зареждане“. */
 function rvCanSee(){
   if(!currentUser) return false;
-  if(['admin', 'accounting', 'supply', 'controlling'].indexOf(currentUser.role) >= 0) return true;
+  if(['admin', 'accounting', 'controlling'].indexOf(currentUser.role) >= 0) return true;
   return rvIsStoreUser() && rvStoreOn(currentUser.store_name);
 }
 function rvStoreOn(store){ return rvStoresOn === true || (!!store && rvStoresList.indexOf(store) >= 0); }
@@ -197,7 +198,7 @@ function rvSortCampaigns(list){
 function rvStoreOptions(){
   if(rvIsStoreUser()) return [currentUser.store_name];
   var reg = rvRegionStores();
-  if(reg.length && (rvRegionalAcc() || (!rvIsCO() && currentUser.role !== 'supply'))) return reg;
+  if(reg.length && (rvRegionalAcc() || !rvIsCO())) return reg;
   return reg.concat(rvStoreList.filter(function(s){ return reg.indexOf(s) < 0; }));
 }
 
@@ -1058,7 +1059,7 @@ function rvCloseCampaign(){
 }
 
 /* ═══ ЕТАП 3а: обработка от Контролинг (15.10.2026) ═════════════════════════
-   admin / accounting обработват обект по обект; supply само чете.
+   admin / accounting обработват обект по обект (supply — без достъп от 16.11.2026).
    Розовите колони на реда: new_sap_code (Преоценен код), sale_price (Цена
    преоц. код), co_qty (Прехвърлено), co_comment (Коментар Ели).
    Предложения по подразбиране (показват се, НЕ се записват, докато ЦО не
@@ -1091,7 +1092,7 @@ var RV_SAP_UNITS = { 'бр.': 'БР', 'бр': 'БР', 'кв.м': 'M2', 'кв.м.
   'рол': 'РОЛ', 'ролка': 'РОЛ', 'тон': 'ТОН', 'm3': 'M3', 'м3': 'M3' };
 var RV_SAP_VALUES = ['БР', 'M2', 'ЛМ', 'ПАК', 'ЧФТ', 'ККТ', 'БЛИ', 'КГ', 'КУТ', 'КАШ', 'ТОП', 'РОЛ', 'ТОН', 'M3'];
 
-function rvIsCoViewer(){ return rvIsCO() || (!!currentUser && currentUser.role === 'supply'); }
+function rvIsCoViewer(){ return rvIsCO(); }   /* supply — вън от 16.11.2026 (rvCanSee) */
 function rvRound3(x){
   if(x == null || !isFinite(x)) return null;
   var s = x < 0 ? -1 : 1;

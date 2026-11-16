@@ -143,7 +143,9 @@ async function open(h) { await h.w.loadRevaluation(); await ticks(6); }
     s.w.rvHistOpenView(); await ticks(4);
     ok('обект: rvHistOpenView отвън не прави нищо', !s.doc.getElementById('rv-hist'));
     const sup = env({ user: { email: 'sn@temax.bg', display_name: 'Снаб', role: 'supply', store_name: 'Централен офис' } }); await open(sup);
-    ok('supply: бутонът го има', !!btn(sup.doc.getElementById('mod-revaluation'), '📁 История'));
+    ok('supply: без бутона — „Нямаш достъп“ (от 16.11.2026)', !btn(sup.doc.getElementById('mod-revaluation'), 'История'));
+    sup.w.rvHistOpenView(); await ticks(4);
+    ok('supply: rvHistOpenView отвън не прави нищо', !sup.doc.getElementById('rv-hist'));
   }
 
   report();

@@ -109,6 +109,7 @@ const TESTS = [
   'picking.test.js',
   'transport-subnav-calendar.test.js',
   'supply-in-revisions.test.js',
+  'supply-rev-subtabs.test.js',
   'picking-pallets.test.js',
   'picking-ship.test.js',
   'stock-diff-null-payload.test.js',

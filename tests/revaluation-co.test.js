@@ -275,12 +275,14 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     ok('паднало четене → Excel НЕ е направен, червен toast', !f.files.length && f.calls.toast.some(t => t.indexOf('непълни') >= 0));
   }
 
-  section('11. supply — само чете; затворена кампания');
+  section('11. supply — без достъп (от 16.11.2026); затворена кампания');
   {
-    const h = env({ user: { email: 'sn@temax.bg', display_name: 'Снаб', role: 'supply', store_name: 'Централен офис' } }); await openCo(h, 'Кърджали');
-    ok('supply вижда розовите (предложенията не се показват), без полета', h.doc.querySelectorAll('#rv-rows input').length === 0 && !!h.doc.querySelector('#rv-rows'));
+    /* До 16.11.2026 supply четеше като ЦО; оттогава в таба вижда само
+       „🎨 Зареждане“ (tests/supply-rev-subtabs.test.js). */
+    const h = env({ user: { email: 'sn@temax.bg', display_name: 'Снаб', role: 'supply', store_name: 'Централен офис' } }); await openCo(h);
+    ok('supply → „Нямаш достъп“, без редове', /Нямаш достъп/.test(mod(h).textContent) && !h.doc.querySelector('#rv-rows'));
     ok('supply — без „Готово“/„Отключи“/„Приеми“', !btn(mod(h), 'Готово') && !btn(mod(h), 'Отключи') && !btn(mod(h), 'Приеми'));
-    ok('supply — Excel кампания има', !!btn(mod(h), 'Excel — кампания'));
+    ok('supply — без Excel кампания', !btn(mod(h), 'Excel — кампания'));
     const closed = Object.assign({}, CAMP, { status: 'closed' });
     const proc = Object.assign({}, SUB, { status: 'processed', processed_at: new Date().toISOString() });
     const c = env({ campaigns: [closed], subs: [proc] }); await openCo(c, 'Кърджали');
