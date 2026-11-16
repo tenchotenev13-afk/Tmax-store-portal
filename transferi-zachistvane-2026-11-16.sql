@@ -47,15 +47,30 @@
 --        (select count(*) from transfers where created_at >= '2026-11-14') t_new,
 --        (select max(created_at) from transfer_cargo_events) last_ev;
 -- t_new трябва да е 0. Ако не е — СПИРАНЕ, нов транспорт след 13.11.
+-- Изпълнено по обед на 16.11 (решение на Тенчо), затова миграцията хваща
+-- само created_at < 2026-11-15T22:00:00Z (16.11 00:00 София); създаденото
+-- днес остава в живите таблици.
 
 -- ═══ МИГРАЦИЯ (apply_migration, име transferi_zachistvane_20261116) ═══
 
 lock table public.transfers, public.transfer_cargo, public.transfer_cargo_events
   in share row exclusive mode;
 
-create table public.transfers_archive_20261116             as select * from public.transfers;
-create table public.transfer_cargo_archive_20261116        as select * from public.transfer_cargo;
-create table public.transfer_cargo_events_archive_20261116 as select * from public.transfer_cargo_events;
+-- Само създаденото ПРЕДИ 16.11 00:00 София (= 2026-11-15T22:00:00Z), решение
+-- на Тенчо 16.11 12:52: каквото е създадено днес, остава. Товарите — на
+-- архивираните трансфери. Отметките — на архивираните товари ИЛИ на
+-- архивираните трансфери (и двата FK са ON DELETE CASCADE, иначе каскадата
+-- би изтрила отметка, която не е в архива).
+create table public.transfers_archive_20261116 as
+  select * from public.transfers
+   where created_at < '2026-11-15T22:00:00Z';
+create table public.transfer_cargo_archive_20261116 as
+  select * from public.transfer_cargo
+   where transfer_id in (select id from public.transfers_archive_20261116);
+create table public.transfer_cargo_events_archive_20261116 as
+  select * from public.transfer_cargo_events
+   where cargo_id    in (select id from public.transfer_cargo_archive_20261116)
+      or transfer_id in (select id from public.transfers_archive_20261116);
 
 alter table public.transfers_archive_20261116             enable row level security;
 alter table public.transfer_cargo_archive_20261116        enable row level security;
@@ -82,6 +97,17 @@ begin
   select count(*) into a_c from public.transfer_cargo_archive_20261116;
   select count(*) into a_e from public.transfer_cargo_events_archive_20261116;
 
+  -- Нещо, което ОСТАВА, да не сочи към изтриваното — иначе SET NULL би
+  -- скъсал връзката мълчаливо (prev_cargo_id, resolves_id).
+  if exists (select 1 from public.transfer_cargo
+              where id not in (select id from public.transfer_cargo_archive_20261116)
+                and prev_cargo_id in (select id from public.transfer_cargo_archive_20261116))
+     or exists (select 1 from public.transfer_cargo_events
+              where id not in (select id from public.transfer_cargo_events_archive_20261116)
+                and resolves_id in (select id from public.transfer_cargo_events_archive_20261116)) then
+    raise exception 'transferi-zachistvane: оставащ ред сочи към изтриван (prev_cargo_id / resolves_id) — отказ';
+  end if;
+
   -- Ред: отметки → товари → трансфери. Трие се САМО архивираното (по id).
   delete from public.transfer_cargo_events
    where id in (select id from public.transfer_cargo_events_archive_20261116);
@@ -95,17 +121,24 @@ begin
    where id in (select id from public.transfers_archive_20261116);
   get diagnostics d_t = row_count;
 
-  select count(*) into r_t from public.transfers;
-  select count(*) into r_c from public.transfer_cargo;
-  select count(*) into r_e from public.transfer_cargo_events;
+  -- Останали от архивираните id — трябва 0 (каскадата не е изтрила повече,
+  -- отколкото е в архива, защото проверката е по броя изтрити).
+  select count(*) into r_t from public.transfers
+   where id in (select id from public.transfers_archive_20261116);
+  select count(*) into r_c from public.transfer_cargo
+   where id in (select id from public.transfer_cargo_archive_20261116);
+  select count(*) into r_e from public.transfer_cargo_events
+   where id in (select id from public.transfer_cargo_events_archive_20261116);
 
   if d_t <> a_t or d_c <> a_c or d_e <> a_e or r_t <> 0 or r_c <> 0 or r_e <> 0 then
-    raise exception 'transferi-zachistvane: архив %/%/%, изтрити %/%/%, останали %/%/% — отказ, нищо не е променено',
+    raise exception 'transferi-zachistvane: архив %/%/%, изтрити %/%/%, останали от архива %/%/% — отказ, нищо не е променено',
       a_t, a_c, a_e, d_t, d_c, d_e, r_t, r_c, r_e;
   end if;
 
-  raise notice 'transferi-zachistvane: архив и изтрити transfers %, transfer_cargo %, transfer_cargo_events %',
-    d_t, d_c, d_e;
+  raise notice 'transferi-zachistvane: архив и изтрити transfers %, transfer_cargo %, transfer_cargo_events %; в живите остават %/%/%',
+    d_t, d_c, d_e,
+    (select count(*) from public.transfers), (select count(*) from public.transfer_cargo),
+    (select count(*) from public.transfer_cargo_events);
 end $$;
 
 -- ═══ СЛЕД ИЗПЪЛНЕНИЕТО (execute_sql, само четене) ═══
