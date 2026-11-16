@@ -12,6 +12,15 @@
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //   store_open_items — Незавършено за обекта: по едно писмо на обект (v19)
 //
+// v20 (16.11.2026) — ЕДНО нещо: store_open_items, секция „Клиентски заявки“ —
+//   ЕФЕКТИВЕН СРОК (решение на Тенчо 16.11 след тестовото писмо): co_eta, ако
+//   заявката е processed и co_eta е попълнено, иначе delivery (soiDueISO).
+//   По него — закъсняла, „до 2 работни дни“, просрочие (= co_overdue за
+//   processed с минала co_eta), „остават N“ и подредбата. На ред с co_eta —
+//   двете дати („срок към клиента … · очаква се от ЦО …“); срок днес → „днес“
+//   вместо датата, без крайната бележка „срок днес“. Заявката към
+//   client_orders вече не филтрира по delivery. Останалото — непроменено.
+//
 // v19 (15.11.2026) — ЕДНО нещо: нова тема store_open_items (Тенчо 15.11,
 //   етап 1 от 2). Делник сутрин по ЕДНО писмо на обект до ролите manager /
 //   sklad / info (soiRecipients — не resolveRecipients, там 'store' включва и
@@ -2768,22 +2777,35 @@ function soiAddWorkdays(iso: string, n: number): string {
   }
   return localDateISO(d);
 }
-/* reportIsLate (send-scheduled-report) върху низове, без клона awaiting_stock. */
+/* v20 — ЕФЕКТИВНИЯТ СРОК (решение на Тенчо 16.11.2026): co_eta, ако заявката
+   е processed и co_eta е попълнено (ЦО е обещал стоката за тази дата); иначе
+   delivery. Ползват го ВСИЧКИ места в секцията — закъсняла, „до 2 дни",
+   просрочие, „остават", подредба. Processed без co_eta → по delivery.
+   Просрочието на processed с минала co_eta е същото като в co_overdue
+   (reportCoOverdueSections: reportLateDays({ delivery: co_eta })). */
+function soiDueISO(o: any): string {
+  if (!o) return '';
+  if (o.status === 'processed' && o.co_eta) return String(o.co_eta).slice(0, 10);
+  return o.delivery ? String(o.delivery).slice(0, 10) : '';
+}
+function soiDueIsEta(o: any): boolean { return !!o && o.status === 'processed' && !!o.co_eta; }
+/* reportIsLate (send-scheduled-report) върху низове и ефективния срок, без
+   клона awaiting_stock. „Processed с co_eta >= днес" следва от правилото. */
 function soiIsLate(o: any, todayISO: string): boolean {
-  if (!o || !o.delivery) return false;
+  const d = soiDueISO(o);
+  if (!d) return false;
   if (['done', 'refused', 'postponed', 'arrived'].indexOf(o.status) >= 0) return false;
-  if (o.status === 'processed' && o.co_eta && String(o.co_eta).slice(0, 10) >= todayISO) return false;
-  return String(o.delivery).slice(0, 10) < todayISO;
+  return d < todayISO;
 }
 function soiIsSoon(o: any, todayISO: string, limitISO: string): boolean {
-  if (!o || !o.delivery || soiIsLate(o, todayISO)) return false;
+  const d = soiDueISO(o);
+  if (!d || soiIsLate(o, todayISO)) return false;
   if (['pending', 'processed', 'sent'].indexOf(o.status) < 0) return false;
-  const d = String(o.delivery).slice(0, 10);
   return d >= todayISO && d <= limitISO;
 }
-/* Просрочие в РАБОТНИ дни, поне 1 (reportLateDays). */
+/* Просрочие в РАБОТНИ дни от ефективния срок, поне 1 (reportLateDays). */
 function soiLateDays(o: any, todayISO: string): number {
-  return Math.max(1, reportWorkdaysBetween(soiDay(o.delivery), soiDay(todayISO)));
+  return Math.max(1, reportWorkdaysBetween(soiDay(soiDueISO(o)), soiDay(todayISO)));
 }
 function soiItemText(o: any): string {
   const items = Array.isArray(o && o.items) ? o.items.filter(Boolean) : [];
@@ -2801,7 +2823,7 @@ function soiClassify(rows: any[], store: string, todayISO: string, limitISO: str
     if (soiIsLate(o, todayISO)) (req ? out.late_req : out.late_ful).push(o);
     else if (soiIsSoon(o, todayISO, limitISO)) (req ? out.soon_req : out.soon_ful).push(o);
   }
-  const byDel = (a: any, b: any) => String(a.delivery).localeCompare(String(b.delivery)) || String(a.in_num || '').localeCompare(String(b.in_num || ''));
+  const byDel = (a: any, b: any) => soiDueISO(a).localeCompare(soiDueISO(b)) || String(a.in_num || '').localeCompare(String(b.in_num || ''));
   out.late_req.sort(byDel); out.late_ful.sort(byDel); out.soon_req.sort(byDel); out.soon_ful.sort(byDel);
   return out;
 }
@@ -2851,10 +2873,12 @@ async function soiLoadOrders(supabase: any, bg: ReturnType<typeof bgNow>) {
   const today = bg.dateStr;
   const limit = soiAddWorkdays(today, SOI_SOON_WORKDAYS);
   let rows: any[] = [];
-  /* Страници по 1000 — таванът на PostgREST. */
+  /* Страници по 1000 — таванът на PostgREST. Без филтър по delivery (v20):
+     ефективният срок може да е co_eta — processed с далечен delivery и близка
+     или минала co_eta трябва да влезе. Сроковете се отсяват в soiClassify. */
   for (let off = 0; ; off += 1000) {
     const { data, error } = await supabase.from('client_orders').select(SOI_CO_COLS)
-      .not('status', 'in', '(done,refused)').not('delivery', 'is', null).lte('delivery', limit)
+      .not('status', 'in', '(done,refused)')
       .order('id', { ascending: true }).range(off, off + 999);
     if (error) throw new Error('client_orders: ' + (error.message || String(error)));
     rows = rows.concat(data || []);
@@ -2867,14 +2891,24 @@ function soiOrdersFor(data: any, store: string) {
   const counts = { late_req: c.late_req.length, late_ful: c.late_ful.length, soon_req: c.soon_req.length, soon_ful: c.soon_ful.length };
   const n = counts.late_req + counts.late_ful + counts.soon_req + counts.soon_ful;
   if (!n) return { n: 0, counts: counts, html: '' };
+  /* „Остават N" — от ефективния срок. Срок днес → без бележка (датата вече
+     казва „днес"); 0 работни дни до срок в почивен ден → също без бележка. */
   const soonTxt = (o: any) => {
-    const k = reportWorkdaysBetween(soiDay(data.today), soiDay(o.delivery));
-    return k === 0 ? 'срок днес' : 'остава' + (k === 1 ? ' 1 работен ден' : 'т ' + k + ' работни дни');
+    const k = reportWorkdaysBetween(soiDay(data.today), soiDay(soiDueISO(o)));
+    return k === 0 ? '' : 'остава' + (k === 1 ? ' 1 работен ден' : 'т ' + k + ' работни дни');
+  };
+  /* Дата или „днес". */
+  const dayTxt = (iso: unknown) => {
+    const s = iso ? String(iso).slice(0, 10) : '';
+    return !s ? '—' : (s === data.today ? 'днес' : bgDate(s));
   };
   const line = (o: any, asReq: boolean, late: boolean) => {
     const main = '№ ' + esc(o.in_num || '—') + ' · ' + esc(soiItemText(o));
-    const meta = 'срок ' + esc(bgDate(String(o.delivery))) + ' · ' + esc(SOI_STATUS[o.status] || o.status || '')
-      + ' · ' + (late ? '<b style="color:#b91c1c;">+' + soiLateDays(o, data.today) + ' работни дни</b>' : esc(soonTxt(o)));
+    const dates = soiDueIsEta(o)
+      ? 'срок към клиента ' + esc(dayTxt(o.delivery)) + ' · очаква се от ЦО ' + esc(dayTxt(o.co_eta))
+      : 'срок ' + esc(dayTxt(o.delivery));
+    const tail = late ? '<b style="color:#b91c1c;">+' + soiLateDays(o, data.today) + ' работни дни</b>' : esc(soonTxt(o));
+    const meta = dates + ' · ' + esc(SOI_STATUS[o.status] || o.status || '') + (tail ? ' · ' + tail : '');
     const who = asReq
       ? 'Клиент: ' + esc(o.customer_name || '—') + ' · Изпълнява: '
         + esc(o.fulfiller && soiNorm(o.fulfiller) !== soiNorm(store) ? o.fulfiller : 'вашият обект')

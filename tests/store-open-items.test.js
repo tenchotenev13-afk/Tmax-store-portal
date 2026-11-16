@@ -13,8 +13,8 @@
      2. секция А — само задачите на обекта; отметнатата не излиза; {skip} →
         писмото продължава със секция Б;
      3. секция Б — срок вчера / днес / втори работен ден / трети; през уикенд и
-        през официален празник (24–28.12.2026); processed с co_eta днес и
-        вчера; postponed и arrived; заявител = изпълнител (веднъж); изпълнител с
+        през официален празник (24–28.12.2026); processed с co_eta (v20 — по
+        ефективния срок, виж долу); postponed и arrived; заявител = изпълнител (веднъж); изпълнител с
         различен регистър и интервали; done / refused / без срок;
      4. обект без редове — без писмо; тема и съдържание (esc, без телефон, без
         клиент при изпълнителя);
@@ -35,6 +35,19 @@
         пускане — нула писма";
      М4 изпълнителят без trim/lower (=== вместо soiNorm): пада 2, 3 „ ТРОЯН "
         и 4 (подгрупите, броят 3 / 1 / 2 / 1).
+
+   v20 (16.11.2026) — ЕФЕКТИВЕН СРОК: co_eta при processed с co_eta, иначе
+   delivery (решение на Тенчо 16.11). Случаите: A5 (срок днес, co_eta 20.11
+   след лимита → не е в писмото), A6 (минала co_eta → закъсняла, +2 от co_eta
+   = lateDays на реалния reportCoOverdueSections), A15 (co_eta в лимита,
+   delivery далеч → до 2 дни, двете дати; доказва и че заявката не реже по
+   delivery), A16 (processed без co_eta → по delivery), A17 (очаква се от ЦО
+   днес), A2 („срок днес" веднъж, без датата), подредба A17 → A10 → A15 → A18.
+   Мутации (16.11.2026, М1–М4 пуснати отново — пак падат):
+     М5 ефективният срок винаги delivery: пада 2, 3 (14 проверки, вкл. A5, A6);
+     М6 просрочието от delivery вместо от ефективния срок: пада 3 (A6 = 7,
+        разминаване с co_overdue 2 vs 7) и 4 („+2 работни дни");
+     М7 върната крайна бележка „срок днес": пада 4 (A2 — два пъти, A17).
 
    Пускане:  node tests/store-open-items.test.js .
 */
@@ -176,8 +189,9 @@ const ORDERS = [
   O('A2', { delivery: '2026-11-16' }),                                         // днес → до 2 дни
   O('A3', { status: 'sent', delivery: '2026-11-18' }),                         // втори работен ден → до 2 дни
   O('A4', { delivery: '2026-11-19' }),                                         // трети → нищо
-  O('A5', { status: 'processed', co_eta: '2026-11-16', delivery: '2026-11-10' }), // co_eta днес → не е закъсняла
-  O('A6', { status: 'processed', co_eta: '2026-11-15', delivery: '2026-11-12' }), // co_eta вчера → закъсняла, 2
+  /* v20 — ефективният срок е co_eta при processed (решение 16.11.2026). */
+  O('A5', { status: 'processed', co_eta: '2026-11-20', delivery: '2026-11-16' }), // срок днес, ЦО обещава 20.11 (след лимита) → нищо (Силистра-0107)
+  O('A6', { status: 'processed', co_eta: '2026-11-12', delivery: '2026-11-05' }), // co_eta чт 12.11 → закъсняла, 2 от co_eta (от delivery биха били 7)
   O('A7', { status: 'postponed', delivery: '2026-11-10' }),
   O('A8', { status: 'arrived', delivery: '2026-11-10' }),
   O('A9', { store_name: LV, fulfiller: ' ТРОЯН ', customer_name: 'Тайна Клиентка', delivery: '2026-11-13' }), // изпълнител, регистър
@@ -186,6 +200,11 @@ const ORDERS = [
   O('A12', { status: 'done', delivery: '2026-11-10' }),
   O('A13', { status: 'refused', delivery: '2026-11-10' }),
   O('A14', { delivery: null }),
+  /* Ловеч (заявител) — ефективният срок: */
+  O('A15', { store_name: LV, status: 'processed', co_eta: '2026-11-17', delivery: '2026-11-30' }), // co_eta в лимита, delivery далеч → до 2 дни, двете дати
+  O('A16', { store_name: LV, status: 'processed', delivery: '2026-11-13' }),                       // processed без co_eta → по delivery, закъсняла 1
+  O('A17', { store_name: LV, status: 'processed', co_eta: '2026-11-16', delivery: '2026-11-10' }), // очаква се от ЦО днес
+  O('A18', { store_name: LV, delivery: '2026-11-18' }),                                            // pending, втори работен ден
 ];
 function db(over) {
   return Object.assign({
@@ -248,21 +267,41 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     const C = L.ctx;
     const c = C.soiClassify(ORDERS, TR, '2026-11-16', C.soiAddWorkdays('2026-11-16', 2));
     ok('границата в понеделник е сряда 18.11', C.soiAddWorkdays('2026-11-16', 2) === '2026-11-18');
-    /* По срок, после по № като низ: 12.11 → A11, A6; 15.11 → A1. */
-    ok('закъснели като заявител: A11, A6 (co_eta вчера), A1 (срок вчера)', ids(c.late_req) === 'A11,A6,A1', ids(c.late_req));
+    /* По ефективния срок, после по № като низ: 12.11 → A11, A6 (co_eta); 15.11 → A1. */
+    ok('закъснели като заявител: A11, A6 (минала co_eta), A1 (срок вчера)', ids(c.late_req) === 'A11,A6,A1', ids(c.late_req));
     ok('закъснели като изпълнител: A9 („ ТРОЯН ")', ids(c.late_ful) === 'A9', ids(c.late_ful));
     ok('до 2 дни като заявител: A2 (днес), A3 (втори работен ден)', ids(c.soon_req) === 'A2,A3', ids(c.soon_req));
     ok('до 2 дни като изпълнител: A10', ids(c.soon_ful) === 'A10', ids(c.soon_ful));
     const all = [].concat(c.late_req, c.late_ful, c.soon_req, c.soon_ful).map(o => o.in_num);
     ok('трети работен ден (A4) — няма', all.indexOf('A4') < 0);
-    ok('processed с co_eta днес (A5) — няма', all.indexOf('A5') < 0);
+    ok('processed, срок днес, co_eta след лимита (A5) — няма', all.indexOf('A5') < 0);
     ok('postponed (A7) и arrived (A8) — няма', all.indexOf('A7') < 0 && all.indexOf('A8') < 0);
     ok('done / refused / без срок — няма', ['A12', 'A13', 'A14'].every(x => all.indexOf(x) < 0));
     ok('заявител = изпълнител (A11) — веднъж', all.filter(x => x === 'A11').length === 1);
-    ok('просрочие: A1 (нд → пн) = 1, A6 (чт 12 → пн) = 2', C.soiLateDays(ORDERS[0], '2026-11-16') === 1 && C.soiLateDays(ORDERS[5], '2026-11-16') === 2);
+    ok('просрочие: A1 (нд → пн) = 1, A6 (от co_eta чт 12 → пн) = 2', C.soiLateDays(ORDERS[0], '2026-11-16') === 1 && C.soiLateDays(ORDERS[5], '2026-11-16') === 2,
+      C.soiLateDays(ORDERS[5], '2026-11-16'));
     ok('стока: първият артикул + „и още 2"', C.soiItemText(ORDERS[0]) === 'Диван „Лале" и още 2' && C.soiItemText(ORDERS[1]) === 'Стока A2');
     const lv = C.soiClassify(ORDERS, LV, '2026-11-16', '2026-11-18');
-    ok('Ловеч: заявител A9, изпълнител A1', ids(lv.late_req) === 'A9' && ids(lv.late_ful) === 'A1', JSON.stringify([ids(lv.late_req), ids(lv.late_ful)]));
+    ok('Ловеч: закъснели като заявител A16 (processed без co_eta → по delivery), A9; изпълнител A1',
+      ids(lv.late_req) === 'A16,A9' && ids(lv.late_ful) === 'A1', JSON.stringify([ids(lv.late_req), ids(lv.late_ful)]));
+    /* A10 (Ловеч заявява, Троян изпълнява, delivery 17) и A15 (co_eta 17) — един ден, по № като низ. */
+    ok('Ловеч: до 2 дни по ЕФЕКТИВНИЯ срок — A17 (co_eta днес), A10 (17), A15 (co_eta 17, delivery 30), A18 (18)',
+      ids(lv.soon_req) === 'A17,A10,A15,A18', ids(lv.soon_req));
+    ok('A16 (без co_eta): просрочие по delivery = 1', C.soiLateDays(ORDERS[15], '2026-11-16') === 1);
+    /* Сверка с co_overdue: същата заявка, изпълнител ЦО, през РЕАЛНИЯ
+       reportCoOverdueSections на send-scheduled-report. */
+    const ssr = (() => {
+      const w = process.emitWarning; process.emitWarning = function () {};
+      const js = nodeModule.stripTypeScriptTypes(fs.readFileSync(path.join(ROOT, 'supabase/functions/send-scheduled-report/index.ts'), 'utf8'));
+      process.emitWarning = w;
+      const c = { console: { log() {}, warn() {}, error() {} }, Intl, JSON, Math, Object, Array, String, Number, Promise, Date, Response, setTimeout,
+        Deno: { env: { get: () => 'https://x.supabase.co' }, serve: () => {} }, fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) };
+      vm.createContext(c); vm.runInContext(js, c, { filename: 'send-scheduled-report.js' });
+      return c;
+    })();
+    const co = ssr.reportCoOverdueSections([Object.assign({}, ORDERS[5], { fulfiller: 'Централен офис', created_at: '2026-11-01T08:00:00Z' })], new Date(2026, 10, 16));
+    const coDays = co.processed[0] && co.processed[0].lateDays;
+    ok('просрочието на A6 = lateDays в co_overdue (reportLateDays върху co_eta)', coDays === C.soiLateDays(ORDERS[5], '2026-11-16'), coDays + ' vs ' + C.soiLateDays(ORDERS[5], '2026-11-16'));
   }
   {
     const L = load(db(), MON);
@@ -308,6 +347,29 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     ok('ред на изпълнител: „Заявил: Ловеч", БЕЗ име на клиента', tr.indexOf('Заявил: Ловеч') > 0 && tr.indexOf('Тайна Клиентка') < 0);
     ok('статус на български', tr.indexOf('Изчаква') > 0 && tr.indexOf('Обработена от ЦО') > 0 && tr.indexOf('Изпратена') > 0);
     ok('без телефон', tr.indexOf('0888') < 0);
+    /* v20 — редовете с ефективния срок. row() връща текста от „№ X ·" до
+       следващия ред (без таговете). */
+    const lvh = mails.filter(m => /Ловеч/.test(m.body.subject))[0].body.html;
+    const row = (html, id) => {
+      const plain = html.replace(/<[^>]+>/g, ' ').replace(/ +/g, ' ');
+      const a = plain.indexOf('№ ' + id + ' ·'); if (a < 0) return '';
+      const b = plain.indexOf('№ ', a + 3);
+      return plain.slice(a, b < 0 ? plain.length : b);
+    };
+    const cnt = (s, sub) => s.split(sub).length - 1;
+    const a2 = row(tr, 'A2');
+    ok('срок днес (A2): „срок днес · Изчаква", веднъж, без датата', a2.indexOf('срок днес · Изчаква') >= 0 && cnt(a2, 'срок днес') === 1 && a2.indexOf('16.11.2026') < 0, a2);
+    ok('processed, co_eta след лимита (A5) — не е в писмото', tr.indexOf('№ A5') < 0);
+    const a6 = row(tr, 'A6');
+    ok('закъсняла по co_eta (A6): двете дати и „+2 работни дни"', a6.indexOf('срок към клиента 05.11.2026 · очаква се от ЦО 12.11.2026 · Обработена от ЦО') >= 0 && a6.indexOf('+2 работни дни') >= 0, a6);
+    const a15 = row(lvh, 'A15');
+    ok('до 2 дни по co_eta (A15): двете дати, „остава 1 работен ден"', a15.indexOf('срок към клиента 30.11.2026 · очаква се от ЦО 17.11.2026 · Обработена от ЦО · остава 1 работен ден') >= 0, a15);
+    const a17 = row(lvh, 'A17');
+    ok('очаква се от ЦО днес (A17): „днес" вместо датата, без крайна бележка', a17.indexOf('срок към клиента 10.11.2026 · очаква се от ЦО днес · Обработена от ЦО') >= 0 &&
+      a17.indexOf('срок днес') < 0 && a17.indexOf('остава') < 0 && a17.indexOf('16.11.2026') < 0, a17);
+    const a16 = row(lvh, 'A16');
+    ok('processed без co_eta (A16): една дата, по delivery, „+1 работни дни"', a16.indexOf('срок 13.11.2026 · Обработена от ЦО') >= 0 && a16.indexOf('очаква се') < 0 && a16.indexOf('+1 работни дни') >= 0, a16);
+    ok('подредба в писмото по ефективния срок: A17 → A15 → A18', lvh.indexOf('№ A17') > 0 && lvh.indexOf('№ A17') < lvh.indexOf('№ A15') && lvh.indexOf('№ A15') < lvh.indexOf('№ A18'));
     ok('esc: името на клиента и заглавието на задачата', tr.indexOf('Иван &lt;b&gt;И&lt;/b&gt;') > 0 && tr.indexOf('<b>И</b>') < 0 &&
       mails.filter(m => /Ловеч/.test(m.body.subject))[0].body.html.indexOf('Ревизия &lt;група А&gt;') > 0);
     ok('бутон „Отвори портала"', tr.indexOf('Отвори портала') > 0);
