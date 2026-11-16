@@ -1,5 +1,12 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v20 (16.11.2026) — ЕДНО нещо: „Няма нужда" в секция „Зареждане". Обект с
+   ред в supply_no_need за бланката и седмицата (и без нито една бройка за
+   нея) вече НЕ е в „Без данни": брои се в „Попълнили N от M" и излиза в
+   отделен сив ред „Няма нужда: …". Бройките печелят — обект с данни остава
+   попълнил, както в матрицата на ЦО (supplyOvMatrix) и в supply_store_done().
+   supply_no_need се чете с останалите заявки; провал → червеният ред.
+
    v19 — текстът на линка: Портал › Ревизии и преоценка › Зареждане (15.11)
 
    v18 (12.11.2026) — ЕДНО нещо: CORS. OPTIONS → 200 и CORS заглавките на всеки
@@ -1211,8 +1218,11 @@ async function collectSupplyReport(weekStart: string, reportable: any[]){
     var ids = tpls.map(function(t: any){ return t.id; });
     var res: any[] = await Promise.all([
       supplyRest('supply_template_items', 'active=eq.true&template_id=in.(' + ids.join(',') + ')&order=sort_order.asc&select=id,template_id,sap_code,name,active,sort_order'),
-      supplyRestAll('supply_entries', 'week_start=eq.' + weekStart + '&template_id=in.(' + ids.join(',') + ')&select=id,template_id,item_id,store_name,week_start,qty1,qty2,note')
+      supplyRestAll('supply_entries', 'week_start=eq.' + weekStart + '&template_id=in.(' + ids.join(',') + ')&select=id,template_id,item_id,store_name,week_start,qty1,qty2,note'),
+      /* v20: „Нямам нужда тази седмица" (supply.js) — без него обектът излиза „Без данни". */
+      supplyRestAll('supply_no_need', 'week_start=eq.' + weekStart + '&template_id=in.(' + ids.join(',') + ')&select=id,template_id,store_name,week_start')
     ]);
+    var noNeedRows = res[2].filter(function(n: any){ return String(n.week_start).slice(0,10) === weekStart; });
     var items = res[0].filter(function(i: any){ return i.active !== false; });
     var entries = res[1].filter(function(e: any){ return String(e.week_start).slice(0,10) === weekStart; });
     var rep = (Array.isArray(reportable) ? reportable : []).slice();
@@ -1246,9 +1256,15 @@ async function collectSupplyReport(weekStart: string, reportable: any[]){
           var sap = supplyHasVal(i.sap_code) ? String(i.sap_code).trim() : '';
           rows.push({ sap:sap, name:i.name || '', parts:parts, notes:notes, tot1:tot1, tot2:tot2 });
         });
+      /* v20: „Няма нужда" = ред в supply_no_need И нито една бройка за бланката. */
+      var noNeed: any = {};
+      noNeedRows.forEach(function(n: any){
+        if (n.template_id === t.id && scope.indexOf(n.store_name) >= 0 && !filled[n.store_name]) noNeed[n.store_name] = true;
+      });
       return { name:t.name, col1:t.col1_label, col2:t.col2_label || null, two:two,
         scope:scope, filled:scope.filter(function(s: any){ return filled[s]; }),
-        missing:scope.filter(function(s: any){ return !filled[s]; }), rows:rows };
+        noNeed:scope.filter(function(s: any){ return noNeed[s]; }),
+        missing:scope.filter(function(s: any){ return !filled[s] && !noNeed[s]; }), rows:rows };
     });
     return { ok:true, week:weekStart, blocks:blocks };
   } catch (e: any) {
@@ -1271,10 +1287,16 @@ function supplyReportSectionHtml(rep: any){
     rep.blocks.forEach(function(b: any){
       h += '<div style="background:#F9FAFC;border-radius:8px;padding:10px 12px;margin-bottom:8px;">';
       h += '<div style="font-size:13px;font-weight:700;color:#1F2937;">' + esc(b.name) + '</div>';
-      h += '<div style="font-size:12px;color:#6B7280;margin-top:2px;">Попълнили ' + b.filled.length + ' от ' + b.scope.length + '</div>';
+      var nn = b.noNeed || [];
+      /* „Няма нужда" се брои за попълнил (v20) — като отметката в Бюлетина. */
+      h += '<div style="font-size:12px;color:#6B7280;margin-top:2px;">Попълнили ' + (b.filled.length + nn.length) + ' от ' + b.scope.length + '</div>';
       if (b.missing.length) {
         h += '<div style="font-size:12px;color:#B91C1C;margin-top:2px;">Без данни: ' +
           b.missing.map(function(s: any){ return esc(s); }).join(', ') + '</div>';
+      }
+      if (nn.length) {
+        h += '<div style="font-size:12px;color:#94A3B8;margin-top:2px;">Няма нужда: ' +
+          nn.map(function(s: any){ return esc(s); }).join(', ') + '</div>';
       }
       /* Редове само с коментар (v16) не са „попълнени данни": без бройки
          остава „Няма попълнени данни", без легенда и без „Общо". */
@@ -1317,7 +1339,8 @@ function supplyReportSummary(rep: any){
   if (!rep || !rep.ok) return { ok:false, week:rep && rep.week, error:rep && rep.error };
   return { ok:true, week:rep.week, templates: rep.blocks.map(function(b: any){
     /* rows = артикули С БРОЙКИ, както преди v16; notes = брой коментари отделно. */
-    return { name:b.name, filled:b.filled.length, of:b.scope.length, missing:b.missing,
+    return { name:b.name, filled:b.filled.length + (b.noNeed || []).length, of:b.scope.length, missing:b.missing,
+      no_need:b.noNeed || [],
       rows:b.rows.filter(function(r: any){ return r.parts.length > 0; }).length,
       notes:b.rows.reduce(function(s: any, r: any){ return s + r.notes.length; }, 0) };
   }) };

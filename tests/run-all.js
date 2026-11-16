@@ -388,6 +388,7 @@ const TESTS = [
   'task-report-schedule.test.js',
   'task-report-responder.test.js',
   'task-report-supply.test.js',
+  'task-report-supply-no-need.test.js',
   'task-report-recurring.test.js',
   'task-span-weeks.test.js',
   'task-notice-dept-block.test.js',
