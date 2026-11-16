@@ -83,6 +83,7 @@ async function openForm(h) {
   if (cp.options.length > 1) cp.selectedIndex = 1;
   else cp.innerHTML = '<option>ТЕСИ ООД</option>';
   h.doc.getElementById('diff-docnum').value = '180486328';
+  if (h.doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
   const rows = h.doc.querySelectorAll('#diff-items .diff-item-row');
   rows[0].querySelector('.di-name').value = 'ПЛАНКА ЪГЛОВА'; rows[0].querySelector('.di-qty').value = '3';
 }

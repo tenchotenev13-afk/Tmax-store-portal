@@ -118,6 +118,7 @@ const TESTS = [
   'diff-submit-validation.test.js',
   'razliki-etap1.test.js',
   'razliki-etap2.test.js',
+  'razliki-etap3.test.js',
   'diff-report-no-document.test.js',
   'diff-qty-guard.test.js',
   'stock-returns-manual-order.test.js',

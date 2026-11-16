@@ -68,6 +68,7 @@ async function openForm(h, direction) {
      покрита в diff-order-required.test.js; тук само валидна стойност. */
   const ord = h.doc.getElementById('diff-order-num');
   if (ord) ord.value = '4100135756';
+  if (h.doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
 }
 const rowsOf = h => h.doc.querySelectorAll('#diff-items .diff-item-row');
 function fillRow(row, vals) {

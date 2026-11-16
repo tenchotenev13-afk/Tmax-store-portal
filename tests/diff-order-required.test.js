@@ -68,6 +68,7 @@ async function openForm(h, direction) {
   else cp.innerHTML = '<option>ТЕСИ ООД</option>';
   h.doc.getElementById('diff-docnum').value = '180486328';
   realClick(h.w, btn(h.doc.getElementById('diff-submit-ov'), '+ Добави артикул'));
+  if (h.doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
   const rows = h.doc.querySelectorAll('#diff-items .diff-item-row');
   rows[0].querySelector('.di-name').value = 'ПЛАНКА ЪГЛОВА'; rows[0].querySelector('.di-qty').value = '3';
   rows[1].querySelector('.di-name').value = 'ЩУЦЕР'; rows[1].querySelector('.di-qty').value = '2';

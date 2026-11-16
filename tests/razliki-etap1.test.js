@@ -225,6 +225,7 @@ const chipKeys = doc => typeChips(doc).map(b => b.dataset.f);
     await pickCounterpart(h);
     h.doc.getElementById('diff-order-num').value = '4100135756';
     h.doc.getElementById('diff-docnum').value = '180486328';
+    if (h.doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
     const r = rowsOf(h);
     r[0].querySelector('.di-name').value = 'ПЛАНКА'; r[0].querySelector('.di-qty').value = '3';
     ok('редът е без категория', r[0].querySelector('.di-cat').value === '');

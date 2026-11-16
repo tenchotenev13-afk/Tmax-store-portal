@@ -67,6 +67,7 @@ async function fill(h) {
   if (!Array.prototype.some.call(cp.options, o => o.value === 'ТЕСИ ООД')) cp.innerHTML = '<option>ТЕСИ ООД</option>';
   cp.value = 'ТЕСИ ООД';
   h.doc.getElementById('diff-docnum').value = 'ФК-4600179694';
+  if (h.doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
   realClick(h.w, btn(ov(h), '+ Добави артикул'));
   const rows = h.doc.querySelectorAll('#diff-items .diff-item-row');
   rows[0].querySelector('.di-name').value = 'ЛАЙСНА АЛ. 10ММ'; rows[0].querySelector('.di-qty').value = '3';

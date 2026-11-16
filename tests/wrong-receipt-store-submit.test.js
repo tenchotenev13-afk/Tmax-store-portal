@@ -85,6 +85,7 @@ async function fillAndSubmit(h, over) {
   /* От 30.09.2026 „Поръчка №" (41…) е задължителна и при сторна. */
   const ord = doc.getElementById('diff-order-num');
   if (ord) ord.value = over.order !== undefined ? over.order : '4100135756';
+  if (doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
   doc.querySelector('#diff-items .di-name').value = over.name || 'ЛАЙСНА АЛ. 10ММ';
   doc.querySelector('#diff-items .di-qty').value = '3';
   if (over.store !== undefined) doc.getElementById('diff-store').value = over.store;

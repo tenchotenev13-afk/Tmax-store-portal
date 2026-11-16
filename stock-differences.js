@@ -152,6 +152,18 @@ function sdFmtDayTime(val){
   function p(n){ return (n<10?'0':'')+n; }
   return p(d.getDate())+'.'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());
 }
+/* „дд.мм.гггг чч:мм" в местно време — „подадена …" в картата на бланката
+   (етап 3, 16.11.2026). sdFmtDateTime отрязва часа, sdFmtDayTime - годината. */
+function sdFmtDateTimeFull(val){
+  var d=new Date(val);
+  if(!val||isNaN(d.getTime())) return '—';
+  function p(n){ return (n<10?'0':'')+n; }
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+/* Стоковата разписка на доставчика (етап 3, 16.11.2026) лежи в СЪЩИЯ масив
+   differences_reports.photos като {url,name,kind:'stokova'}; снимките са без
+   kind. Всяко място, което чете photos, ги разделя оттук. */
+function diffIsStokova(p){ return !!p && p.kind==='stokova'; }
 /* Логистични складове - отделни физически обекти (не роля), чиито служители
    влизат с обичайните си профили, но с store_name = точно името на склада.
    Те виждат само разликите, при които ТЕ са насрещната страна (counterpart)
@@ -1146,7 +1158,7 @@ function diffReportPhotoThumbs(reportId, size){
     if(isImg){
       h += '<a href="'+esc(p.url)+'" target="_blank" title="'+esc(p.name||'Снимка')+'"><img src="'+esc(p.url)+'" style="width:'+px+'px;height:'+px+'px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;"></a>';
     } else {
-      h += '<a href="'+esc(p.url)+'" target="_blank" title="'+esc(p.name||'Файл')+'" style="display:inline-flex;align-items:center;justify-content:center;width:'+px+'px;height:'+px+'px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:13px;text-decoration:none;">📄</a>';
+      h += '<a href="'+esc(p.url)+'" target="_blank" title="'+(diffIsStokova(p)?'Стокова: ':'')+esc(p.name||'Файл')+'" style="display:inline-flex;align-items:center;justify-content:center;width:'+px+'px;height:'+px+'px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:13px;text-decoration:none;">📄</a>';
     }
   });
   h += '</div>';
@@ -2439,7 +2451,9 @@ function sdUploadLineAttachment(input,lineId){
    всички снимки на бланки на едно място в bucket-а, а форматът на записа е
    {url,name} - точно както submitDiffReport записва photos. НЕ е форматът
    {type,url,filename} на attachments по ред: двете колони са различни. */
-function sdUploadReportPhoto(input,reportId){
+/* kind (по избор): 'stokova' - от „📄 Добави стокова" (етап 3); записва се
+   като {url,name,kind:'stokova'}. Без kind - снимка, както досега. */
+function sdUploadReportPhoto(input,reportId,kind){
   var file=input.files[0]; if(!file)return;
   input.value='';
   var rep=diffReports.find(function(x){return String(x.id)===String(reportId);});
@@ -2463,7 +2477,7 @@ function sdUploadReportPhoto(input,reportId){
         /* Копие на съществуващия масив + новият елемент. Записване на масив с
            един елемент би изтрило снимките от подаването. */
         var arr=(Array.isArray(rep.photos)?rep.photos:[]).slice();
-        arr.push({url:pub,name:file.name});
+        arr.push(kind==='stokova'?{url:pub,name:file.name,kind:'stokova'}:{url:pub,name:file.name});
         sbPatch('differences_reports','id=eq.'+reportId,{photos:arr}).then(function(res){
           if(!res.ok){toast('Грешка при запис','#dc2626');return;}
           rep.photos=arr;
@@ -3708,7 +3722,10 @@ function renderDiffReportsSection(){
        (rep.no_document?'<span style="margin-left:6px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:600;">📄 Без документ</span>':'')+
        '</div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
-       '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+
+       '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+
+         /* Кога е подадена бланката - за всички роли (етап 3, 16.11.2026). */
+         (rep.created_at?'<span class="sd-rep-submitted"> · подадена '+sdFmtDateTimeFull(rep.created_at)+'</span>':'')+
+         (rep.document_number?' · Док. '+esc(rep.document_number):'')+
          /* „Поръчка" - от редовете, само ако е ЕДНА И СЪЩА за всички. */
          (function(){
            var ords=lines.map(function(l){ return String(l.order_number||'').trim(); });
@@ -3823,12 +3840,28 @@ function renderDiffReportsSection(){
       h+='</table></div>';
     }
     if(rep.general_comment) h+='<div style="font-size:12px;color:#374151;background:#f8fafc;border-radius:6px;padding:6px 8px;margin-bottom:6px;">💬 '+esc(rep.general_comment)+'</div>';
-    var photos = Array.isArray(rep.photos)?rep.photos:[];
+    var photosAll = Array.isArray(rep.photos)?rep.photos:[];
+    /* Стоковата (kind 'stokova') - отделно, с надпис „📄 Стокова"; снимките
+       (без kind, вкл. всички заварени бланки) - както досега. */
+    var photos = photosAll.filter(function(p){ return !diffIsStokova(p); });
+    var stkFiles = photosAll.filter(diffIsStokova);
     /* Контейнерът се рендира и при НУЛА снимки, стига този потребител да може
        да прикачва - бланка, подадена без снимка, също трябва да може да получи
        такава. Преди целият блок беше под if(photos.length) и точно тези бланки
        оставаха без изход. */
     var canAddPhoto = canAttachDiffReport(rep);
+    if(stkFiles.length){
+      h+='<div class="sd-rep-stokova" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">'+
+        '<span style="font-size:11.5px;font-weight:700;color:#0f766e;">📄 Стокова</span>';
+      stkFiles.forEach(function(p){
+        if(!p || !p.url) return;
+        var isImgS = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(p.url);
+        h+= isImgS
+          ? '<a href="'+esc(p.url)+'" target="_blank" title="Стокова: '+esc(p.name||'')+'"><img src="'+esc(p.url)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #99f6e4;"></a>'
+          : '<a href="'+esc(p.url)+'" target="_blank" title="Стокова: '+esc(p.name||'Файл')+'" style="display:flex;align-items:center;justify-content:center;width:56px;height:56px;background:#f0fdfa;border:1px solid #99f6e4;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>';
+      });
+      h+='</div>';
+    }
     if(photos.length || canAddPhoto){
       h+='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">';
       photos.forEach(function(p){
@@ -3849,6 +3882,13 @@ function renderDiffReportsSection(){
         h+='<label title="Добави пропусната снимка към бланката" data-add-photo-rid="'+rep.id+'" style="display:inline-flex;align-items:center;gap:5px;border:1px solid #c4b5fd;background:#f5f3ff;color:#5b21b6;border-radius:6px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer;">'+
           '📷 Добави снимка<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx" style="display:none;" data-rid="'+rep.id+'" onchange="sdUploadReportPhoto(this,this.dataset.rid)">'+
         '</label>';
+        /* „📄 Добави стокова" - същите права; стара или непълна бланка се
+           допълва. При междускладов стокова няма. */
+        if(rep.direction!=='interstore'){
+          h+='<label title="Добави стоковата разписка на доставчика към бланката" data-add-stokova-rid="'+rep.id+'" style="display:inline-flex;align-items:center;gap:5px;border:1px solid #99f6e4;background:#f0fdfa;color:#0f766e;border-radius:6px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer;">'+
+            '📄 Добави стокова<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf" style="display:none;" data-rid="'+rep.id+'" onchange="sdUploadReportPhoto(this,this.dataset.rid,\'stokova\')">'+
+          '</label>';
+        }
       }
       h+='</div>';
     }
@@ -4312,15 +4352,21 @@ function diffCompressImage(file,maxDim,quality){
    снимка остава в storage-а, но вече не се прикача към бланката). */
 function diffRemovePendingPhoto(url){
   diffPendingPhotos = diffPendingPhotos.filter(function(p){return p.url!==url;});
-  var wrap=document.getElementById('diff-photos-wrap');
-  if(!wrap)return;
-  var btn=wrap.querySelector('button[data-url="'+url.replace(/"/g,'\\"')+'"]');
-  if(btn && btn.parentElement) btn.parentElement.remove();
+  /* Снимките и стоковата разписка са в отделни контейнери - търси и в двата. */
+  ['diff-photos-wrap','diff-stokova-wrap'].forEach(function(id){
+    var wrap=document.getElementById(id);
+    if(!wrap)return;
+    var btn=wrap.querySelector('button[data-url="'+url.replace(/"/g,'\\"')+'"]');
+    if(btn && btn.parentElement) btn.parentElement.remove();
+  });
 }
-function diffUploadPhoto(input){
+/* kind (по избор): 'stokova' - файлът е стоковата разписка (етап 3) и отива в
+   diff-stokova-wrap; без kind - снимка, както досега. */
+function diffUploadPhoto(input,kind){
   var files=Array.from(input.files||[]);
   if(!files.length)return;
-  var wrap=document.getElementById('diff-photos-wrap');
+  var isStk=kind==='stokova';
+  var wrap=document.getElementById(isStk?'diff-stokova-wrap':'diff-photos-wrap');
   files.forEach(function(file){
     var placeholderId='ph-'+Math.random().toString(36).slice(2,10);
     if(wrap) wrap.insertAdjacentHTML('beforeend','<div id="'+placeholderId+'" style="width:56px;height:56px;border-radius:6px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:10px;color:#94a3b8;">⏳</div>');
@@ -4339,7 +4385,7 @@ function diffUploadPhoto(input){
           var ph=document.getElementById(placeholderId);
           if(!ok){ if(ph) ph.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>'; return; }
           var pub=DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path;
-          diffPendingPhotos.push({url:pub,name:file.name});
+          diffPendingPhotos.push(isStk?{url:pub,name:file.name,kind:'stokova'}:{url:pub,name:file.name});
           var removeBtn='<button type="button" data-url="'+esc(pub)+'" onclick="diffRemovePendingPhoto(this.dataset.url)" style="position:absolute;top:-5px;right:-5px;width:16px;height:16px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:9px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;">✕</button>';
           if(ph){
             if(isImg){
@@ -4357,6 +4403,66 @@ function diffUploadPhoto(input){
     });
   });
   input.value='';
+}
+
+/* ── „📄 Стокова разписка" във формата (етап 3, 16.11.2026, Цвети) ──
+   Само при доставчик и сторна. Блокът НЕ стои в diffSubmitModalHtml(): там
+   модалът е закован байт по байт (tests/loading-diff-prefill.test.js) при
+   посока по подразбиране „Междускладов", където полето го няма. Вмъква се
+   над „Снимки" от updateDiffCounterpartLabel() и оцелява при смяна
+   Доставчик ↔ Сторна (качените файлове не се губят). При Междускладов се
+   маха - заедно с качените стокови от diffPendingPhotos, иначе невидими
+   файлове биха влезли в бланката. */
+function diffStokovaRequiredNow(dir){
+  if(dir==='wrong_receipt') return true;
+  if(dir!=='supplier') return false;
+  var nd=document.getElementById('diff-no-doc');
+  return !(nd && nd.checked);
+}
+function diffStokovaHintRefresh(){
+  var h=document.getElementById('diff-stokova-hint');
+  var dirEl=document.getElementById('diff-direction');
+  if(!h||!dirEl) return;
+  h.textContent=diffStokovaRequiredNow(dirEl.value)?'(задължителна — снимка или PDF, може няколко страници)':'(без документ — по избор)';
+}
+function diffStokovaBlockSync(dir){
+  var block=document.getElementById('diff-stokova-block');
+  if(dir!=='supplier' && dir!=='wrong_receipt'){
+    if(block) block.remove();
+    diffPendingPhotos=diffPendingPhotos.filter(function(p){ return !diffIsStokova(p); });
+    return;
+  }
+  if(!block){
+    var hintEl=document.getElementById('diff-photo-hint');
+    var anchor=hintEl?hintEl.parentElement:null;
+    if(!anchor) return;
+    anchor.insertAdjacentHTML('beforebegin',
+      '<div id="diff-stokova-block" style="margin-bottom:12px;">'+
+        '<label class="fl">📄 Стокова разписка <span id="diff-stokova-hint" style="color:#94a3b8;font-weight:400;"></span></label>'+
+        '<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
+          '<label style="border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">'+
+            '📷 Снимай стоковата<input type="file" id="diff-stokova-cam" accept="image/*" capture="environment" onchange="diffUploadPhoto(this,\'stokova\')" style="display:none;">'+
+          '</label>'+
+          '<label style="border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">'+
+            '📁 Избери файл (снимка или PDF)<input type="file" id="diff-stokova-file" accept="image/*,application/pdf,.pdf" multiple onchange="diffUploadPhoto(this,\'stokova\')" style="display:none;">'+
+          '</label>'+
+        '</div>'+
+        '<div id="diff-stokova-wrap" style="display:flex;gap:6px;flex-wrap:wrap;"></div>'+
+      '</div>');
+  }
+  diffStokovaHintRefresh();
+}
+/* Редове (1-базирани, както на екрана) с код, който е само цифри и е 8+
+   цифри - баркод вместо SAP код. Само редове с наименование (празните не
+   влизат в бланката, започнатите без име спират по-рано). */
+function diffRowsBarcodeLike(){
+  var out=[];
+  document.querySelectorAll('#diff-items .diff-item-row').forEach(function(row,i){
+    if(!(row.querySelector('.di-name').value||'').trim()) return;
+    var code=String(row.querySelector('.di-sap').value||'').trim();
+    if(/^\d{8,}$/.test(code)) out.push(i+1);
+  });
+  return out;
 }
 
 /* ── Модал за подаване ── */
@@ -4454,12 +4560,13 @@ function updateDiffCounterpartLabel(){
       : '')+
       (dir==='supplier'
       ? '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:-2px 0 10px;cursor:pointer;">'+
-          '<input type="checkbox" id="diff-no-doc" onchange="var h=document.getElementById(\'diff-photo-hint\');if(h)h.textContent=this.checked?\'(без документ — по избор)\':diffPhotoHintText(\'supplier\');">'+
-          ' 📄 Стоката е без документ (снимки не са задължителни)</label>'
+          '<input type="checkbox" id="diff-no-doc" onchange="var h=document.getElementById(\'diff-photo-hint\');if(h)h.textContent=this.checked?\'(без документ — по избор)\':diffPhotoHintText(\'supplier\');diffStokovaHintRefresh();">'+
+          ' 📄 Стоката е без документ (стоковата и снимките по категория не са задължителни; при баркод снимка на артикула е нужна)</label>'
       : '');
     var newOrderEl=document.getElementById('diff-order-num');
     if(newOrderEl) newOrderEl.value=noDocWrap.getAttribute('data-order-num')||'';
   }
+  diffStokovaBlockSync(dir);
   /* Сторната по грешен прием също тръгва от фактура на ДОСТАВЧИК - списъкът е
      същият като при посока "Доставчик", не списъкът с обекти. */
   if(dir==='supplier'||dir==='wrong_receipt'){
@@ -5174,6 +5281,28 @@ function submitDiffReport(){
     return;
   }
 
+  /* Етап 3 (16.11.2026, Цвети): стоковата разписка е отделно задължително
+     поле при доставчик без „Без документ" и при сторна (вкл. „🧾 Направи
+     сторно" от счетоводителя - същата форма). Спира ПРЕДИ POST-а. Снимките
+     (файлове без kind) и стоковата се броят поотделно. */
+  var stokovaFiles=diffPendingPhotos.filter(diffIsStokova);
+  var itemPhotos=diffPendingPhotos.filter(function(p){ return !diffIsStokova(p); });
+  var noDocStk=direction==='supplier' && !!(noDocEarly && noDocEarly.checked);
+  if(((direction==='supplier' && !noDocStk) || direction==='wrong_receipt') && !stokovaFiles.length){
+    toast('Прикачете стоковата разписка на доставчика','#dc2626');
+    return;
+  }
+  /* Баркод (само цифри, 8+) вместо SAP код → поне една СНИМКА на артикула.
+     „Без документ" НЕ отменя това - снимката е на артикула, не на документа;
+     стоковата не се брои за снимка. */
+  if(direction==='supplier' || direction==='wrong_receipt'){
+    var bcRows=diffRowsBarcodeLike();
+    if(bcRows.length && !itemPhotos.length){
+      toast((bcRows.length===1?'Ред ':'Редове ')+bcRows.join(', ')+': кодът изглежда като баркод — прикачете снимка на артикула','#dc2626');
+      return;
+    }
+  }
+
   /* Реална проверка за задължителни снимки (не само текстова подсказка) -
      ако поне 1 артикул е с категория, изискваща снимки, а няма качена нито 1 */
   var needsPhotos=items.some(function(it){
@@ -5184,7 +5313,7 @@ function submitDiffReport(){
      отметката не се рисува, но проверката е и тук, за да не зависи от DOM-а. */
   var noDocEl=document.getElementById('diff-no-doc');
   var noDocument = direction==='supplier' && !!(noDocEl && noDocEl.checked);
-  if(needsPhotos&&!noDocument&&!diffPendingPhotos.length){
+  if(needsPhotos&&!noDocument&&!itemPhotos.length){
     var catsNeeding=items.filter(function(it){var m=it.category?diffCatMeta(it.category):null;return m&&m[3];})
       .map(function(it){return diffCategoryLabel(it.category);})
       .filter(function(v,i,arr){return arr.indexOf(v)===i;});
@@ -5441,7 +5570,11 @@ function diffEmailBodyHtml(rep,lines,note){
   h+='</table>';
   if(rep.general_comment) h+='<p><strong>Допълнителна информация:</strong> '+esc(rep.general_comment)+'</p>';
   var photos=Array.isArray(rep.photos)?rep.photos:[];
-  if(photos.length) h+='<p>📎 Прикачени са '+photos.length+' снимк'+(photos.length===1?'а':'и')+' към този имейл.</p>';
+  /* Стоковата тръгва с писмото като всеки файл от photos; в текста се казва
+     отделно. Бланка без стокова - старият ред без промяна. */
+  var stkN=photos.filter(diffIsStokova).length, picN=photos.length-stkN;
+  if(stkN) h+='<p>📎 Към този имейл са прикачени стоковата разписка ('+stkN+' файл'+(stkN===1?'':'а')+')'+(picN?' и '+picN+' снимк'+(picN===1?'а':'и'):'')+'.</p>';
+  else if(photos.length) h+='<p>📎 Прикачени са '+photos.length+' снимк'+(photos.length===1?'а':'и')+' към този имейл.</p>';
   if(note) h+='<p>'+esc(note).replace(/\n/g,'<br>')+'</p>';
   /* resolution_comment НЕ влиза в писмото. Той е вътрешният коментар на
      счетоводството към МАГАЗИНА - реално изпратено писмо е носило „Няма
@@ -5678,7 +5811,11 @@ function renderDiffPrint(rep){
      данни, не като неприложима. Същото условие като repIsSupplier в картата
      и isSupplier в имейла. */
   var printSupplierDoc = (rep.direction||'supplier') === 'supplier';
-  var photos = Array.isArray(rep.photos) ? rep.photos : [];
+  var photosAll = Array.isArray(rep.photos) ? rep.photos : [];
+  /* Стоковата (kind 'stokova') - в своя секция „📄 Стокова"; снимките и
+     прикачените документи без kind - както досега (етап 3). */
+  var photos = photosAll.filter(function(p){ return !diffIsStokova(p); });
+  var stkAll = photosAll.filter(function(p){ return diffIsStokova(p) && p.url; });
   var imgs  = photos.filter(function(p){ return p && p.url && DIFF_IMG_RE.test(p.url); });
   var files = photos.filter(function(p){ return p && p.url && !DIFF_IMG_RE.test(p.url); });
   /* general_comment е празен НИЗ, не NULL, във всичките заварени бланки -
@@ -5848,6 +5985,12 @@ function renderDiffPrint(rep){
           '</tr></thead>'+
           '<tbody>'+(rowsHtml||'<tr><td colspan="'+(printSupplierDoc?11:10)+'" style="text-align:center;color:#666;">Няма редове по тази бланка.</td></tr>')+'</tbody>'+
         '</table>'+
+        (stkAll.length?'<div class="dp-sec">📄 Стокова ('+stkAll.length+')</div>'+
+          '<div class="dp-photos" id="dp-stokova">'+stkAll.map(function(p,i){
+            return DIFF_IMG_RE.test(p.url)
+              ? '<img src="'+esc(p.url)+'" alt="'+esc(p.name||'стокова')+'">'
+              : '<div class="dp-files">'+(i+1)+'. '+esc(p.name||p.url)+'</div>';
+          }).join('')+'</div>':'')+
         (imgs.length?'<div class="dp-sec">Снимки към бланката ('+imgs.length+')</div>'+
           '<div class="dp-photos" id="dp-photos">'+imgs.map(function(p){
             return '<img src="'+esc(p.url)+'" alt="'+esc(p.name||'снимка')+'">';
@@ -5871,7 +6014,7 @@ function renderDiffPrint(rep){
      маха веднага. */
   var note = document.getElementById('dp-imgwait');
   if(!note) return;
-  var imgEls = wrap.querySelectorAll('#dp-photos img');
+  var imgEls = wrap.querySelectorAll('#dp-photos img, #dp-stokova img');
   var pending = imgEls.length;
   if(!pending){ note.style.display='none'; return; }
   var done = function(){ pending--; if(pending<=0) note.style.display='none'; };

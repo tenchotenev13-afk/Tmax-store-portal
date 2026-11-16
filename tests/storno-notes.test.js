@@ -241,6 +241,7 @@ async function reply(h, id, text) {
       doc.getElementById('diff-counterpart').value);
     ok('документът е попълнен', doc.getElementById('diff-docnum').value === 'ФК-111');
     doc.getElementById('diff-order-num').value = '4100135756';
+    if (doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
     doc.querySelector('#diff-items .di-name').value = 'ЛАЙСНА';
     doc.querySelector('#diff-items .di-qty').value = '2';
     realClick(h.w, btn(doc.getElementById('diff-submit-ov'), 'Подай бланка')); await settle();
@@ -266,6 +267,7 @@ async function reply(h, id, text) {
     realClick(h.w, btn(card(h, 'n-troyan'), '🧾 Направи сторно')); await settle();
     const doc = h.doc;
     doc.getElementById('diff-order-num').value = '4100135756';
+    if (doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
     doc.querySelector('#diff-items .di-name').value = 'ЛАЙСНА';
     doc.querySelector('#diff-items .di-qty').value = '2';
     realClick(h.w, btn(doc.getElementById('diff-submit-ov'), 'Подай бланка')); await settle();
@@ -290,6 +292,7 @@ async function reply(h, id, text) {
     realClick(h.w, btn(card(h, 'n-troyan'), '🧾 Направи сторно')); await settle();
     const doc = h.doc;
     doc.getElementById('diff-order-num').value = '4100135756';
+    if (doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
     doc.querySelector('#diff-items .di-name').value = 'ЛАЙСНА';
     doc.querySelector('#diff-items .di-qty').value = '2';
     realClick(h.w, btn(doc.getElementById('diff-submit-ov'), 'Подай бланка')); await settle();
