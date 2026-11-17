@@ -15,4 +15,15 @@
   - `tests/sd-badge-store-align.test.js` („склад: заявката — постарому плюс id на реда“) — очакване сменено по решение: заявката на пулса на склада носи и `direction` + `difference_category`.
   - `tests/sd-waiting-filter-align.test.js` („заявката на склада тегли id на реда“) — очакване сменено по решение, същият низ.
   - `tests/stock-differences.test.js` — вход поправен: fixture ред `l3` (междускладов, Враца / Логистичен склад Добрич) от `damaged` на `undelivered`; очакванията — непипнати.
-- Комит: <попълва се>.
+- Комит: `b71d509` (върху `e9aa531`), пушнат по SHA 17.11; Pages сверен — `stock-differences.js` и `admin.js` байт в байт с комита, маркер `sdRouteNotify` (0 в `98de7de`).
+- **Групи (17.11, execute_sql, една транзакция, гард „точно 1 активен ред на човек“, array_append само ако стойността я няма)** — прочетено обратно:
+  - Миглена Павлова: `{controlling,razliki_co,razliki_barcode}`
+  - Василка Шикова: `{co,razliki_barcode}`
+  - Жеко Желязков: `{co,razliki_barcode}`
+  - Rollback:
+    ```sql
+    update users set notify_groups = array_remove(array_remove(notify_groups,'razliki_co'),'razliki_barcode')
+     where display_name = 'Миглена Павлова' and active = true;
+    update users set notify_groups = array_remove(notify_groups,'razliki_barcode')
+     where display_name in ('Василка Шикова','Жеко Желязков') and active = true;
+    ```
