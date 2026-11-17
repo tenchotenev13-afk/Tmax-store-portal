@@ -12,6 +12,14 @@
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //   store_open_items — Незавършено за обекта: по едно писмо на обект (v19)
 //
+// v24 (17.11.2026; деплой 19.11, след v23) — store_open_items, етап 2,
+//   първа секция: „Разлики — чакат вас" (SOI_SECTIONS → 'razliki'). Правилото е това на „Решени
+//   редове" за обекта (sdStoreMustAct → sdRowAwaitsMark, копие от
+//   stock-differences.js): „Заприхождаване" / „Връщане", неотбелязан,
+//   неприключен, не 'received'. Две подгрупи, най-старите първи (от
+//   resolved_at), до 10 на подгрупа + „и още N". Обект само с разлики вече
+//   получава писмо. Задачите, заявките, получателите, логът — непроменени.
+//   Пращането — през пътя на v23 (едно писмо на обект, postSendFn).
 // v23 (18.11.2026) — ТАВАН на изходящите обаждания: Supabase спира
 //   обажданията към resend-email след ~30 в едно пускане (17.11 и 18.11 —
 //   30 POST-а, после всяко fetch хвърля RateLimitError „Retry after ~39 000
@@ -3016,10 +3024,78 @@ function soiOrdersFor(data: any, store: string) {
   return { n: n, counts: counts, html: html };
 }
 
+/* ── v24: секция „Разлики — чакат вас" (етап 2, първа секция) ──────────
+   Правилото е ТОЧНО това на „Решени редове" за обекта (етап 2 на Разлики,
+   16.11.2026): sdStoreMustAct → sdRowAwaitsMark. Копие от
+   stock-differences.js под същите имена — сверено в
+   tests/store-open-items.test.js („синхрон на копието"). Сменя ли се там,
+   сменя се и тук. Редовете на обекта — store_name = обекта (storeQ), във
+   всички посоки (подтабовете само ги разделят). „Чака от" — resolved_at
+   (решението на ЦО, което дава типа), резерва created_at. */
+function sdIsTaken(r){ return r.status==='taken' || r.status==='capitalized'; }
+function sdIsCompleted(r){ return !!r && r.status==='completed'; }
+function sdRowAwaitsMark(r){
+  return !!r && !sdIsTaken(r) && !sdIsCompleted(r) && r.status !== 'received' && r.type !== 'not_invoiced';
+}
+function sdStoreMustAct(r){
+  return !!r && (r.type === 'writein' || r.type === 'return') && sdRowAwaitsMark(r);
+}
+const SOI_SD_COLS = 'id,store_name,supplier,material_code,material_name,quantity,unit,order_number,type,status,resolved_at,created_at';
+const SOI_SD_MAX = 10;
+async function soiLoadDiffs(supabase: any, bg: ReturnType<typeof bgNow>) {
+  let rows: any[] = [];
+  /* Страници по 1000 — таванът на PostgREST. Типът се отсява в базата,
+     останалото — от sdStoreMustAct. */
+  for (let off = 0; ; off += 1000) {
+    const { data, error } = await supabase.from('stock_differences').select(SOI_SD_COLS)
+      .in('type', ['writein', 'return'])
+      .order('id', { ascending: true }).range(off, off + 999);
+    if (error) throw new Error('stock_differences: ' + (error.message || String(error)));
+    rows = rows.concat(data || []);
+    if (!data || data.length < 1000) break;
+  }
+  return { rows: rows.filter(sdStoreMustAct), today: bg.dateStr };
+}
+/* Датата, от която редът чака обекта — по София. */
+function soiSdSince(r: any): string {
+  const t = r && (r.resolved_at || r.created_at);
+  return t ? bgNow(new Date(t)).dateStr : '';
+}
+function soiDiffsFor(data: any, store: string) {
+  const mine = (data.rows || []).filter((r: any) => r.store_name === store);
+  const byAge = (a: any, b: any) => soiSdSince(a).localeCompare(soiSdSince(b)) || String(a.material_name || '').localeCompare(String(b.material_name || ''));
+  const wi = mine.filter((r: any) => r.type === 'writein').sort(byAge);
+  const rt = mine.filter((r: any) => r.type === 'return').sort(byAge);
+  const counts = { zaprihozhdavane: wi.length, vrashtane: rt.length };
+  const n = wi.length + rt.length;
+  if (!n) return { n: 0, counts: counts, html: '' };
+  const line = (r: any) => {
+    const since = soiSdSince(r);
+    const k = since ? reportWorkdaysBetween(soiDay(since), soiDay(data.today)) : 0;
+    const qty = (r.quantity !== null && r.quantity !== undefined && r.quantity !== '') ? String(r.quantity) + (r.unit ? ' ' + r.unit : '') : '';
+    const main = esc(r.material_name || '—') + (r.material_code ? ' · SAP ' + esc(r.material_code) : '');
+    const meta = [r.supplier ? 'Доставчик: ' + esc(r.supplier) : '', r.order_number ? 'Поръчка: ' + esc(r.order_number) : '',
+      qty ? 'К-во: ' + esc(qty) : '',
+      since ? 'от ' + esc(bgDate(since).slice(0, 5)) + (k > 0 ? ' · ' + k + (k === 1 ? ' работен ден' : ' работни дни') : '') : ''].filter(Boolean).join(' · ');
+    return soiRow(main, meta);
+  };
+  let html = soiH3('Разлики (' + n + ')');
+  for (const g of [['За заприхождаване', wi], ['За връщане', rt]] as [string, any[]][]) {
+    if (!g[1].length) continue;
+    html += '<div style="font-size:13px;font-weight:700;color:#b45309;margin:10px 0 4px;">' + esc(g[0]) + ' (' + g[1].length + ')</div>';
+    for (const r of g[1].slice(0, SOI_SD_MAX)) html += line(r);
+    if (g[1].length > SOI_SD_MAX) {
+      html += '<div style="font-size:12px;color:#6b7280;padding:5px 0;">и още ' + (g[1].length - SOI_SD_MAX) + ' — вижте таб Разлики</div>';
+    }
+  }
+  return { n: n, counts: counts, html: html };
+}
+
 /* ЕДИНСТВЕНИЯТ списък със секциите на писмото — нова секция е нов ред. */
 const SOI_SECTIONS = [
   { key: 'zadachi', load: soiLoadTasks, forStore: soiTasksFor },
   { key: 'zayavki', load: soiLoadOrders, forStore: soiOrdersFor },
+  { key: 'razliki', load: soiLoadDiffs, forStore: soiDiffsFor },
 ];
 
 function soiH3(t: string): string {

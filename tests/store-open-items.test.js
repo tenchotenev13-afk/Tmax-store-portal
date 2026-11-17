@@ -88,6 +88,24 @@
      М22 тестов режим без last_run_at при неуспех: пада 5в;
      М23 без бюджета на пускането: пада 5в („80 с + 39,7 с > 100 с").
 
+   v24 (17.11.2026) — 7б, секция „Разлики": ред, който обектът вижда в
+   „Решени редове" → в писмото; taken / capitalized / completed / received /
+   not_invoiced / „Липса" / без тип → не; ред на друг обект → не; над 10 в
+   подгрупа → първите 10 и „и още N"; обект само с разлики → писмо; най-
+   старите първи; „от дд.мм · N работни дни". 7в — синхрон на копието
+   (sdIsTaken / sdIsCompleted / sdRowAwaitsMark / sdStoreMustAct) с
+   оригинала в stock-differences.js, заредени през harness-а.
+   Мутации (17.11.2026):
+     М13 sdRowAwaitsMark без проверката за 'received': пада 7б и 7в;
+     М14 sdStoreMustAct пуска всеки тип (без writein / return): пада 7в —
+         писмото го не вижда, защото заявката към базата вече отсява типа
+         (първата защита);
+     М15 без отрязването на 10: пада 7б („и още 3");
+     М16 без филтъра по обект (store_name): пада 7б (ред на Ловеч при Троян).
+   19.11.2026 — rebase върху v23: 7б проверява и реален режим (едно писмо на
+   обект с to = масив, само POST-ове към resend-email). М24 второ писмо за
+   обект с разлики: пада 7б (3). М13–М17 и М17–М23 пуснати отново — събарят.
+
    Пускане:  node tests/store-open-items.test.js .
 */
 'use strict';
@@ -95,7 +113,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const nodeModule = require('node:module');
-const { ok, section, report } = require('../.claude/skills/tmax-jsdom-test/harness');
+const { ok, section, report, boot } = require('../.claude/skills/tmax-jsdom-test/harness');
 
 const ROOT = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirname, '..');
 const SRC_PATH = process.env.SOI_SRC || path.join(ROOT, 'supabase/functions/bulletin-notify/index.ts');
@@ -270,6 +288,26 @@ function db(over) {
     client_orders: clone(ORDERS),
   }, over || {});
 }
+/* v23 — Разлики: ред от stock_differences. */
+const SD = (id, over) => Object.assign({ id, store_name: TR, supplier: 'Доставчик ' + id, material_code: '100' + id.slice(1), material_name: 'Артикул ' + id,
+  quantity: 2, unit: 'бр', order_number: 'PO-' + id, type: 'writein', status: 'pending', resolved_at: '2026-11-12T08:00:00Z', created_at: '2026-11-01T08:00:00Z' }, over || {});
+const SD_ROWS = [
+  SD('D1', { type: 'writein', resolved_at: '2026-11-10T08:00:00Z' }),   // вижда се; от 10.11 → 4 работни дни до 16.11
+  SD('D2', { type: 'return', status: null, resolved_at: '2026-11-13T08:00:00Z' }), // вижда се (status null)
+  SD('D3', { type: 'return', status: 'taken' }),
+  SD('D4', { type: 'writein', status: 'capitalized' }),
+  SD('D5', { type: 'return', status: 'completed' }),
+  SD('D6', { type: 'return', status: 'received' }),
+  SD('D7', { type: 'not_invoiced' }),
+  SD('D8', { type: 'missing' }),
+  SD('D9', { type: null }),
+  SD('D10', { type: 'writein', resolved_at: '2026-11-05T08:00:00Z' }), // по-стар от D1 → пръв
+  SD('E1', { store_name: LV, type: 'return' }),                         // друг обект
+];
+/* Ловеч: 12 за връщане → 10 + „и още 2". */
+for (let i = 2; i <= 13; i++) SD_ROWS.push(SD('E' + i, { store_name: LV, type: 'return', resolved_at: '2026-11-' + String(i).padStart(2, '0') + 'T08:00:00Z' }));
+/* Сливен (само info акаунт, без задачи и заявки) — само разлика. */
+SD_ROWS.push(SD('S1', { store_name: SL, type: 'writein' }));
 const ids = arr => (arr || []).map(o => o.in_num).join(',');
 
 (async function () {
@@ -622,6 +660,62 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     const L2 = load(db({ notification_matrix: [] }), MON);
     const t2 = (await L2.call({ recipients_only: true, topic_key: 'store_open_items' })).topics.store_open_items;
     ok('без ред в матрицата → празно правило', t2.personal.length === 0 && t2.matrix_channel === null, JSON.stringify(t2));
+  }
+
+  section('7б. v24 — секция „Разлики"');
+  {
+    const d = db({ stock_differences: clone(SD_ROWS) }); d.notification_topics[0].test_email = 'ten.tenev@temax.bg';
+    const Ld = load(db({ stock_differences: clone(SD_ROWS) }), MON);
+    const dr = (await Ld.call({ topic_key: 'store_open_items', dry_run: true })).result;
+    const by = {}; dr.planned.forEach(p => { by[p.obekt] = p; });
+    ok('dry_run: Троян — разлики 2 за заприхождаване (D10, D1), 1 за връщане (D2)', by[TR] && JSON.stringify(by[TR].razliki) === JSON.stringify({ zaprihozhdavane: 2, vrashtane: 1 }), JSON.stringify(by[TR] && by[TR].razliki));
+    ok('dry_run: Ловеч — 13 за връщане', by[LV] && by[LV].razliki.vrashtane === 13, JSON.stringify(by[LV] && by[LV].razliki));
+    ok('dry_run: Сливен (само разлика) има писмо', !!by[SL] && by[SL].redove === 1 && dr.bez_redove.indexOf(SL) < 0, JSON.stringify(dr.bez_redove));
+    const L = load(d, MON);
+    await L.call({ topic_key: 'store_open_items' });
+    const mail = s => (L.mails().filter(m => m.body.subject.indexOf('за ' + s + ' ') >= 0)[0] || { body: { html: '' } }).body.html;
+    const tr = mail(TR), lv = mail(LV), sl = mail(SL);
+    ok('Троян: „Разлики (3)", „За заприхождаване (2)", „За връщане (1)"', tr.indexOf('Разлики (3)') > 0 && tr.indexOf('За заприхождаване (2)') > 0 && tr.indexOf('За връщане (1)') > 0);
+    ok('Троян: видимите редове са вътре (D1, D2, D10)', ['Артикул D1', 'Артикул D2', 'Артикул D10'].every(x => tr.indexOf(x) > 0));
+    ok('Троян: taken / capitalized / completed / received / not_invoiced / Липса / без тип — не', ['D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'].every(x => tr.indexOf('Артикул ' + x + '<') < 0 && tr.indexOf('Артикул ' + x + ' ') < 0));
+    ok('Троян: ред на друг обект (Ловеч, E1) — не', tr.indexOf('Артикул E1') < 0);
+    ok('най-старите първи: D10 (05.11) преди D1 (10.11)', tr.indexOf('Артикул D10') > 0 && tr.indexOf('Артикул D10') < tr.indexOf('Артикул D1 '));
+    ok('ред: SAP, доставчик, поръчка, к-во, „от 10.11 · 4 работни дни"', tr.indexOf('Артикул D1 · SAP 1001') > 0 && tr.indexOf('Доставчик: Доставчик D1 · Поръчка: PO-D1 · К-во: 2 бр · от 10.11 · 4 работни дни') > 0);
+    ok('без суми и без бутони за действие', tr.indexOf('лв') < 0 && tr.indexOf('€') < 0 && tr.indexOf('Заприходена') < 0);
+    ok('Ловеч: „За връщане (13)", 10 реда и „и още 3 — вижте таб Разлики"', lv.indexOf('За връщане (13)') > 0 && lv.split('Артикул E').length - 1 === 10 && lv.indexOf('и още 3 — вижте таб Разлики') > 0, String(lv.split('Артикул E').length - 1));
+    /* E1 е с подразбиращата се дата 12.11 — заедно с E12 и E13 е сред трите най-нови. */
+    ok('Ловеч: най-новите отрязани (E13, E12, E1), най-старите вътре (E2 — 02.11, E11)', lv.indexOf('Артикул E13') < 0 && lv.indexOf('Артикул E12') < 0 && lv.indexOf('Артикул E1 ') < 0 &&
+      lv.indexOf('Артикул E2 ') > 0 && lv.indexOf('Артикул E11') > 0);
+    ok('Сливен: писмо само с разлики', sl.indexOf('Разлики (1)') > 0 && sl.indexOf('Артикул S1') > 0 && sl.indexOf('Клиентски заявки') < 0);
+    /* v24 върху v23: реален режим (не тестов) — Разлики минават през същото пращане:
+       ЕДНО писмо на обект, to = масив с адресите на обекта, през postSendFn (resend-email). */
+    const dR = db({ stock_differences: clone(SD_ROWS) });
+    const LR = load(dR, MON);
+    const rr = (await LR.call({ topic_key: 'store_open_items' })).result;
+    ok('реален режим с Разлики: 4 обекта → 4 писма, всяко с to = масив', LR.mails().length === 4 && LR.mails().every(m => Array.isArray(m.body.to)) && rr.sent_emails === 4 && rr.obekti === 4,
+      LR.mails().length + ' ' + JSON.stringify(rr));
+    ok('реален режим: адресите по обект (Сливен — само с разлики — едно писмо)', TOS(LR) === 'kardzhali@temax.bg,test.kardzhali@gmail.com | lovech@temax.bg | sliven@temax.bg | troyan@temax.bg,sklad.troyan@temax.bg', TOS(LR));
+    ok('реален режим: всички POST-ове са към resend-email (email), без друг път', LR.posts.every(p => p.body.type === 'email') && LR.posts.length === 4, JSON.stringify(LR.posts.map(p => p.body.type)));
+  }
+
+  section('7в. v24 — синхрон на копието с stock-differences.js');
+  {
+    const h = boot({ modules: ['stock-differences.js'], user: { email: 'a@temax.bg', display_name: 'А', role: 'admin', store_name: 'Централен офис' }, data: {} });
+    const C = load(db(), MON).ctx;
+    const types = ['writein', 'return', 'missing', 'not_invoiced', 'storno', null, undefined, ''];
+    const sts = ['pending', 'taken', 'capitalized', 'completed', 'received', null, undefined, '', 'sent'];
+    let n = 0; const diffs = [];
+    for (const t of types) for (const s of sts) {
+      const r = { type: t, status: s };
+      n++;
+      for (const fn of ['sdIsTaken', 'sdIsCompleted', 'sdRowAwaitsMark', 'sdStoreMustAct']) {
+        if (!!h.w[fn](r) !== !!C[fn](r)) diffs.push(fn + '(' + t + ',' + s + ')');
+      }
+    }
+    ok('четирите функции съществуват в оригинала', ['sdIsTaken', 'sdIsCompleted', 'sdRowAwaitsMark', 'sdStoreMustAct'].every(f => typeof h.w[f] === 'function'));
+    ok('копието дава същото за ' + n + ' комбинации тип × статус', !diffs.length, diffs.slice(0, 4).join(' | '));
+    ok('null / undefined ред — false и в двете', !h.w.sdStoreMustAct(null) && !C.sdStoreMustAct(null) && !h.w.sdRowAwaitsMark(null) && !C.sdRowAwaitsMark(null));
+    h.close();
   }
 
   section('8. Темата е регистрирана');
