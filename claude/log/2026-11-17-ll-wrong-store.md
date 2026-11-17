@@ -8,3 +8,4 @@
 - Схема: `loading-wrong-store-schema.sql`, миграция `20261117083038_loading_wrong_store` (+ `_down.sql`), приложена 17.11.2026, 7 nullable колони; RLS/права непипнати (anon_all_* + UPDATE на ниво таблица). Ред в `zhivko-opashka.md`.
 - Админ → „Кой какво получава" (`admin.js` WHO_BROWSER_MAILS): двете нови писма вписани (закотвено в `admin-who-gets.test.js`).
 - Тест `tests/ll-wrong-store.test.js` (77 проверки, реален клик); мутанти M1–M6 — 6 / 2 / 2 / 2 / 2 / 1 ❌. Пълен пакет: 483 теста, exit 0.
+- Push 17.11 — `b5dd7ba` (main, след rebase върху `c02a80d` и пълния пакет: 484 теста, exit 0). Pages сверен байт в байт с `b5dd7ba`: `loading.js` (маркер `llWrongOpenModal`, 0 в `c02a80d`), `notifications.js`, `admin.js`.

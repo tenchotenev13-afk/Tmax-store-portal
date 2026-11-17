@@ -8,10 +8,10 @@
   случай (или с тестов ред): писмата идват, линкът в портала води до листа,
   листът се затваря като partial.
 - **`bulletin-notify` — тема `loading_lists_pending` (за Code).** Функцията
-  `buildLoadingListsPending` (index.ts ~ред 2120; ползва я и
-  `runLoadingListsPending`, ~ред 2228) брои като чакащ всеки ред с
+  `buildLoadingListsPending` (index.ts, заявката ~ред 2141 в v37 / `c02a80d`;
+  ползва я и `runLoadingListsPending`) брои като чакащ всеки ред с
   `received=false` и `missing=false` — ред с `wrong_store` ще излиза като
   „неотметнат" в напомнянето след 48 ч, докато листът е `sent`.
   Нужно: `.is('wrong_store', null)` в заявката + деплой. НЕ е деплойвано
   в тази задача (изрично изключено). Банерът в портала
-  (`notifLoadingListsPending`, notifications.js) е поправен в същия комит.
+  (`notifLoadingListsPending`, notifications.js) е поправен в `b5dd7ba`.
