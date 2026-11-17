@@ -17,6 +17,12 @@
 (в базата от миграцията loading_client_order_link, loading-client-order-link-schema.sql, версия 20261117125425, приложена 17.11.2026)
 - 17.11 · loading_list_items.client_order_id — uuid, NULL, без default
 
+(данни, не схема — миграцията transferi_zachistvane_20261116, transferi-zachistvane-2026-11-16.sql, версия 20261116105503, приложена 16.11.2026)
+- 16.11 · transfers, transfer_cargo, transfer_cargo_events — ВСИЧКИ редове изтрити (старт на чисто от 17.11; 144 / 482 / 794 реда). Огледалото трябва да изтрие своите стари редове в тези три таблици; схемата им не е пипана. Таблиците transfers_archive_20261116, transfer_cargo_archive_20261116, transfer_cargo_events_archive_20261116 НЕ се огледалят (без права за anon). transfer_counters не е пипан — номерата продължават.
+(Живко, 18.11: трансферите са при него и броят им расте заедно с нашия; дали старите редове са изтрити и в огледалото — НЕ е потвърдено. Въпросът е зададен в имейла от 18.11.)
+
+## Потвърдено 18.11.2026
+
 (в базата от миграцията loading_wrong_store, loading-wrong-store-schema.sql, версия 20261117083038, приложена 17.11.2026)
 - 17.11 · loading_list_items.wrong_store — text, NULL, без default
 - 17.11 · loading_list_items.wrong_store_by — text, NULL, без default
@@ -29,9 +35,6 @@
 (в базата от миграцията differences_reports_no_inbound, differences-no-inbound-schema.sql, версия 20261117095851, приложена 17.11.2026)
 - 17.11 · differences_reports.no_inbound — boolean, NOT NULL, default false
 
-(данни, не схема — миграцията transferi_zachistvane_20261116, transferi-zachistvane-2026-11-16.sql, версия 20261116105503, приложена 16.11.2026)
-- 16.11 · transfers, transfer_cargo, transfer_cargo_events — ВСИЧКИ редове изтрити (старт на чисто от 17.11; 144 / 482 / 794 реда). Огледалото трябва да изтрие своите стари редове в тези три таблици; схемата им не е пипана. Таблиците transfers_archive_20261116, transfer_cargo_archive_20261116, transfer_cargo_events_archive_20261116 НЕ се огледалят (без права за anon). transfer_counters не е пипан — номерата продължават.
-
 (в базата от миграцията revaluation_approve, revaluation-approve-schema.sql, версия 20261114203015, приложена 14.11.2026)
 - 13.11 · revaluation_submissions.approved_at — timestamptz, NULL, без default
 - 13.11 · revaluation_submissions.approved_by — text, NULL, без default
@@ -42,6 +45,7 @@
 
 (в базата от миграцията minusi_co_comment, minusi-co-comment-schema.sql, версия 20261109102704, приложена 09.11.2026)
 - 09.11 · minus_movements.co_comment — text, NULL, без default (коментар на офиса)
+(потвърдено от Живко с писмо на 18.11: синхронът без грешки — loading_list_items 3051 реда, differences_reports 1229 реда (no_inbound false); revaluation_submissions и minus_movements.co_comment — при него от 15.11)
 
 ## Потвърдено 09.11.2026
 
