@@ -73,6 +73,13 @@ var llListQuery = '';         /* търсене в списъка на лист�
 var llStoreQuery = '';        /* търсене в картите на обекта */
 var llDocStore = '';          /* чип по обект; '' = всички */
 var llTransitError = false;   /* снимката НЕ се зареди — различно от „няма документи" */
+/* „📋 Дължими клиентски заявки" в редактора (етап 1, 17.11.2026): само
+   показване. llCoDue — заявките с изпълнител активния склад, които още не са
+   тръгнали; llCoError — заявката към базата падна (≠ „няма"); llCoWh — за кой
+   склад са заредени (празно = още не са). */
+var llCoDue = [];
+var llCoError = false;
+var llCoWh = '';
 /* Показва ли се блокът „Документи от Стока на път" в редактора. Ключът е
    app_settings 'loading_transit_docs' и се чете при всяко отваряне на
    редактора (llLoadEditorData). Изключено по подразбиране И в базата, И тук:
@@ -3154,9 +3161,89 @@ function llLoadFeatureFlags(){
     })
     .catch(function(){ return off; });
 }
+/* Дължимите клиентски заявки на склада: fulfiller = складът и статус, който
+   още не е тръгнал (sent / arrived / done / refused отпадат). През sbGetAll —
+   на страници по 1000, без тавана на PostgREST; паднала страница → partial,
+   което тук значи грешка, не „по-малко заявки". Само четене: блокът в
+   редактора няма отметки и не пише нищо. Без склад (admin без избор) —
+   заявка не тръгва. */
+function llLoadClientOrders(wh){
+  llCoDue = []; llCoError = false; llCoWh = '';
+  if(!wh || !llCanEdit()) return Promise.resolve();
+  return sbGetAll('client_orders',
+    'select=id,in_num,store_name,customer_name,status,created_at,delivery,product,sap,qty,unit,items' +
+    '&fulfiller=eq.' + encodeURIComponent(wh) +
+    '&status=not.in.(sent,arrived,done,refused)' +
+    '&order=store_name.asc,created_at.asc,id.asc').then(function(rows){
+    if(!Array.isArray(rows) || rows.partial) throw new Error('заявката не мина');
+    llCoDue = rows; llCoWh = wh;
+  }).catch(function(e){
+    console.error('llLoadClientOrders', e);
+    llCoDue = []; llCoError = true; llCoWh = wh;
+    toast('Клиентските заявки не се заредиха: ' + (e && e.message ? e.message : e), '#dc2626');
+  });
+}
+/* Етикет на заявката: „<№> · <клиент> · <артикул> · SAP <sap> · <к-во> <мярка>".
+   Копие на tfCoLabel() от transfers.js, не извикване: transfers.js се зарежда
+   СЛЕД loading.js и може да бъде скрит — листите не зависят от него. */
+function llCoLabel(o){
+  o = o || {};
+  var val = function(x){ var s = x === null || x === undefined ? '' : String(x).trim(); return s === '—' ? '' : s; };
+  var items = Array.isArray(o.items) ? o.items.filter(Boolean) : [];
+  var it = items.length ? items[0] : o;
+  var prod = val(it.product);
+  if(prod.length > 60) prod = prod.slice(0, 60) + '…';
+  var sap = val(it.sap);
+  var qty = val(it.qty);
+  var parts = [val(o.in_num) || '—', val(o.customer_name), prod, sap ? 'SAP ' + sap : '',
+    qty ? (qty + (val(it.unit) ? ' ' + val(it.unit) : '')) : ''].filter(Boolean);
+  return parts.join(' · ') + (items.length > 1 ? ' +' + (items.length - 1) + ' арт.' : '');
+}
+/* created_at е timestamp — fmtDate() разбира само 'гггг-мм-дд'. Денят е
+   местният (вечерна заявка в UTC е вече следващият ден тук). */
+function llCoDay(ts){
+  if(!ts) return '—';
+  var d = new Date(ts);
+  return isNaN(d.getTime()) ? String(ts) : fmtDate(toLocalISO(d));
+}
+/* Блокът в редактора. Само тук — НЕ в изгледа на обекта, в картата на
+   изпратен лист, в печата, в имейлите, в История и в „Днес". Без склад
+   (admin без избор) не се показва. */
+function llCoBlockHtml(){
+  if(!llActiveWarehouse()) return '';
+  var h = '<div data-ll-co="1" style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px;margin-bottom:12px;">'+
+    '<div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:8px;">📋 Дължими клиентски заявки'+
+      (llCoWh && !llCoError ? ' ('+llCoDue.length+')' : '')+'</div>';
+  if(llCoError){
+    h += '<div data-ll-co-error="1" style="font-size:12px;color:#dc2626;font-weight:600;">⚠️ Клиентските заявки не се заредиха. Листът може да се пише и без тях.</div>';
+  } else if(!llCoWh){
+    h += '<div style="font-size:12px;color:#92400e;">Зареждане…</div>';
+  } else if(!llCoDue.length){
+    h += '<div data-ll-co-empty="1" style="font-size:12px;color:#92400e;">Няма дължими клиентски заявки</div>';
+  } else {
+    var groups = [], byStore = {};
+    llCoDue.forEach(function(o){
+      var s = o.store_name || '—';
+      if(!byStore[s]){ byStore[s] = []; groups.push(s); }
+      byStore[s].push(o);
+    });
+    groups.forEach(function(s){
+      h += '<div data-ll-co-store="'+llAttr(s)+'" style="font-size:12px;font-weight:700;color:#78350f;margin:6px 0 2px;">'+esc(s)+' ('+byStore[s].length+')</div>';
+      byStore[s].forEach(function(o){
+        h += '<div data-ll-co-row="'+llAttr(o.id)+'" style="font-size:12px;padding:2px 0 2px 12px;border-top:1px solid #fef3c7;">'+
+          esc(llCoLabel(o))+
+          ' <span style="color:#a16207;">· заявена '+esc(llCoDay(o.created_at))+
+          ' · доставка '+(o.delivery ? esc(fmtDate(o.delivery)) : '—')+'</span></div>';
+      });
+    });
+  }
+  return h + '</div>';
+}
 function llLoadEditorData(){
   var wh = llActiveWarehouse();
   llTransitError = false;
+  /* Клиентските заявки не зависят от флаговете — тръгват веднага. */
+  llLoadClientOrders(wh).then(function(){ if(llView === 'edit') renderLoadingLists(); });
   /* Флаговете се четат ПРЕДИ снимката, не успоредно с нея: при изключен блок
      заявката към goods_transit изобщо не бива да тръгва — тя е най-скъпата
      в модула (хиляди реда) и без блок никой няма да види резултата ѝ. */
@@ -4370,6 +4457,9 @@ function llEditorHtml(){
   }
   h += '</div>';
   }
+
+  /* 📋 Дължими клиентски заявки — над единиците, винаги (без флаг). */
+  h += llCoBlockHtml();
 
   /* ⚡ Бързо добавяне — над „Редове", в карта като заглавието. */
   h += llQuickBarHtml();
