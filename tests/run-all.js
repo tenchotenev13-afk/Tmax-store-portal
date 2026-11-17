@@ -105,6 +105,7 @@ const TESTS = [
   'minusi-revision-template.test.js',
   'minusi-revision-split.test.js',
   'minusi-revision-groups.test.js',
+  'minusi-revision-preoc.test.js',
   'pilot-tabs.test.js',
   'picking.test.js',
   'transport-subnav-calendar.test.js',

@@ -17,7 +17,7 @@
 
    Мутационна проверка (13.11.2026) — всеки вариант пуснат и паднал:
      G1 старата подредба по код (sort на всички)            → пада 1, 3
-     G2 без каталога (mnRevLoadDescs не пита)                → пада 2
+     G2 без каталога (mnRevLoadCat не пита)                  → пада 2
      G3 празен ред между групите в mnRevAoa                  → пада 3
    Пускане: node tests/minusi-revision-groups.test.js . */
 'use strict';
@@ -123,8 +123,10 @@ async function env(cat) {
   ok('заметнат с име в каталога → името', desc(h, '60020') === 'КАТАЛОГ 60020' && desc(h, '60040') === 'КАТАЛОГ 60040');
   ok('заметнат без име в каталога → „—“', desc(h, '60030') === '—');
   const cq = db.log.filter(x => x.tbl === 'product_catalog');
-  ok('една заявка към каталога, само за липсващите', cq.length === 1 && /sap_code=in\.\(/.test(cq[0].q) &&
-    ['60020', '60030', '60040'].every(c => cq[0].q.indexOf('"' + c + '"') >= 0) && ['60001', '60005', '60010', '60050'].every(c => cq[0].q.indexOf('"' + c + '"') < 0), cq[0] && cq[0].q);
+  /* От 17.11 (minusi-rev-no-preoc) заявката е за ВСИЧКИ кодове и носи category —
+     преоценен може да е и минус-кодът. Кодът се пита веднъж. */
+  ok('една заявка към каталога, за всички кодове, с category', cq.length === 1 && /select=sap_code,product_name,category&sap_code=in\.\(/.test(cq[0].q) &&
+    ORDER.every(c => cq[0].q.indexOf('"' + c + '"') >= 0), cq[0] && cq[0].q);
 
   section('3. Excel');
   const cap = { aoa: null, ws: null, n: 0 };

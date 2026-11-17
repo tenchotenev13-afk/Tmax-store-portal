@@ -1164,7 +1164,25 @@ function mnRevReasonOk(id){
   for(var i = 0; i < mnReasons.length; i++) if(String(mnReasons[i].id) === String(id)) return mnReasons[i].excluded_from_revision === false;
   return false;
 }
-function mnRevRows(calc){
+/* Преоценен код (Миглена 17.11, решение на Тенчо) НЕ влиза в темплейта —
+   нито като минус, нито като заметнат. Преоценен е, ако описанието от
+   движенията започва с „ПРЕОЦ“, или в product_catalog category = 'Преоценка',
+   или product_name започва с „ПРЕОЦ“. Каталогът се пита при отваряне на
+   прегледа и преди Excel; гърми ли — само по описанието. */
+var MN_REV_PREOC_RE = /^\s*ПРЕОЦ/i;
+function mnRevIsPreoc(e){
+  if(MN_REV_PREOC_RE.test(e.desc || '')) return true;
+  var p = mnRevCat[e.code];
+  return !!p && (p.cat === 'Преоценка' || MN_REV_PREOC_RE.test(p.name || ''));
+}
+/* Всички кандидати (преди изключването) — rows: за файла; out: преоценените. */
+function mnRevRows(calc){ return mnRevSplit(calc).rows; }
+function mnRevSplit(calc){
+  var all = mnRevAll(calc), ex = all.filter(mnRevIsPreoc);
+  var keep = all.filter(function(e){ return !mnRevIsPreoc(e); });
+  return { rows: mnRevGroup(keep), out: ex, all: all };
+}
+function mnRevAll(calc){
   var map = {}, out = [], descOf = {};
   mnMovs.forEach(function(m){ var c = mnCoKey(m.material); if(c && m.material_desc && !descOf[c]) descOf[c] = m.material_desc; });
   var add = function(code, id, of){
@@ -1180,14 +1198,23 @@ function mnRevRows(calc){
     add(mat, String(r.id), null);
     mnRevRealCodes(real).forEach(function(c){ if(c !== mat) add(c, String(r.id), mat); });
   });
-  /* Групи (Теодор 13.11): минусите по код (числово), под всеки — заметнатите
-     му кодове (числово). Код, който е и минус, стои като глава на своя група;
-     заметнат към няколко минуса — под първия по подредбата. Всеки код веднъж. */
+  return out;
+}
+/* Групи (Теодор 13.11): минусите по код (числово), под всеки — заметнатите
+   му кодове (числово). Код, който е и минус, стои като глава на своя група;
+   заметнат към няколко минуса — под първия по подредбата. Всеки код веднъж.
+   Заметнат, чиито минуси са всички преоценени (изключени), е глава сам
+   („заметнат към 8090757“, 17.11). */
+function mnRevGroup(out){
   var cmp = function(a, b){ return a.code.localeCompare(b.code, undefined, { numeric: true }); };
-  var heads = out.filter(function(e){ return e.minus; }).sort(cmp), pos = {}, kids = {};
+  var isHead = {};
+  out.forEach(function(e){ if(e.minus) isHead[e.code] = 1; });
+  var parentOf = function(e){ return e.realOf.filter(function(c){ return isHead[c]; }); };
+  out.forEach(function(e){ e.head = !!e.minus || !parentOf(e).length; });
+  var heads = out.filter(function(e){ return e.head; }).sort(cmp), pos = {}, kids = {};
   heads.forEach(function(e, i){ pos[e.code] = i; kids[e.code] = []; e.group = e.code; });
-  out.filter(function(e){ return !e.minus; }).sort(cmp).forEach(function(e){
-    var g = e.realOf.slice().sort(function(a, b){ return pos[a] - pos[b]; })[0];
+  out.filter(function(e){ return !e.head; }).sort(cmp).forEach(function(e){
+    var g = parentOf(e).sort(function(a, b){ return pos[a] - pos[b]; })[0];
     e.group = g;
     kids[g].push(e);
   });
@@ -1195,26 +1222,25 @@ function mnRevRows(calc){
   heads.forEach(function(e){ res.push(e); res = res.concat(kids[e.code]); });
   return res;
 }
-/* Описание на заметнатите (нямат движение) — от product_catalog при отваряне
-   на прегледа. Грешка / липса → „—“; прегледът не чака и не спира. */
-var mnRevDescs = {};
-function mnRevDesc(e){ return e.desc || mnRevDescs[e.code] || '—'; }
-function mnRevLoadDescs(rows){
-  var miss = rows.filter(function(e){ return !e.desc && !mnRevDescs[e.code]; }).map(function(e){ return e.code; });
-  if(!miss.length) return Promise.resolve();
-  var q = 'select=sap_code,product_name&sap_code=in.(' + miss.map(function(c){ return '"' + c + '"'; }).join(',') + ')';
-  var fill = function(res){
-    if(!res || !res.ok) return;
-    res.rows.forEach(function(p){ if(p && p.sap_code && p.product_name) mnRevDescs[String(p.sap_code)] = String(p.product_name); });
-    var ov = document.getElementById('mn-rev-ov');
-    if(!ov) return;
-    Array.prototype.forEach.call(ov.querySelectorAll('tr.mn-rev-row'), function(tr){
-      var c = tr.getAttribute('data-code'), td = tr.querySelector('.mn-rev-desc');
-      if(td && td.textContent === '—' && mnRevDescs[c]) td.textContent = mnRevDescs[c];
-    });
-  };
-  try { return sbGetOk('product_catalog', encodeURI(q)).then(fill).catch(function(){}); }
-  catch(err){ return Promise.resolve(); }
+/* Каталогът (име + категория) за всички кандидати — при отваряне на прегледа
+   и преди Excel. Кодът се пита веднъж; грешка → mnRevCatFail, следващото
+   отваряне пита пак. Прегледът не чака и не спира. */
+var mnRevCat = {}, mnRevCatAsked = {}, mnRevCatFail = false;
+function mnRevDesc(e){ return e.desc || (mnRevCat[e.code] && mnRevCat[e.code].name) || '—'; }
+function mnRevLoadCat(entries){
+  var miss = entries.map(function(e){ return e.code; }).filter(function(c, i, a){ return !mnRevCatAsked[c] && a.indexOf(c) === i; });
+  if(!miss.length) return Promise.resolve(true);
+  var q = 'select=sap_code,product_name,category&sap_code=in.(' + miss.map(function(c){ return '"' + c + '"'; }).join(',') + ')';
+  var fail = function(){ mnRevCatFail = true; return false; };
+  try {
+    return sbGetOk('product_catalog', encodeURI(q)).then(function(res){
+      if(!res || !res.ok) return fail();
+      mnRevCatFail = false;
+      miss.forEach(function(c){ mnRevCatAsked[c] = 1; });
+      res.rows.forEach(function(p){ if(p && p.sap_code) mnRevCat[String(p.sap_code)] = { name: p.product_name ? String(p.product_name) : '', cat: p.category ? String(p.category) : '' }; });
+      return true;
+    }).catch(fail);
+  } catch(err){ return Promise.resolve(fail()); }
 }
 function mnRevReady(calc){
   return (calc.open || []).filter(function(r){ return !mnUnfilled(r) && mnRevReasonOk(r.reason_id); });
@@ -1270,29 +1296,48 @@ function mnRevOverlay(){
 function mnRevOpen(){
   var calc = mnCompute(mnMovs, mnThresholds), why = mnRevWhyOff(calc);
   if(why){ toast('Темплейт за ревизия: ' + why, '#d97706'); return false; }
-  var rows = mnRevRows(calc), ov = mnRevOverlay();
+  mnRevRender(calc);
+  mnRevOverlay().classList.add('open');
+  /* След каталога — наново: описания, преоценени по каталог, бутонът отвън. */
+  mnRevLoadCat(mnRevSplit(calc).all).then(function(){
+    var ov = document.getElementById('mn-rev-ov');
+    if(ov && ov.classList.contains('open')) mnRevRender(calc);
+    mnRevRefreshBtn(calc);
+  });
+  return true;
+}
+function mnRevRefreshBtn(calc){
+  var b = document.getElementById('mn-rev');
+  if(!b || !b.parentNode) return;
+  var hint = document.getElementById('mn-rev-hint');
+  if(hint && hint.parentNode) hint.parentNode.removeChild(hint);
+  b.outerHTML = mnRevBtnHtml(calc);
+}
+function mnRevRender(calc){
+  var sp = mnRevSplit(calc), rows = sp.rows, ov = mnRevOverlay();
   var h = '<div class="modal" style="width:680px;"><h3>📄 Темплейт за ревизия — ' + esc(mnStore) + '</h3>' +
     '<div class="modal-sub">Кодове за броене в ZINVCOUNT: незакритите попълнени минуси (без причините извън ревизия) и заметнатите кодове. „Преброено количество“ се попълва след броенето.</div>' +
     '<table id="mn-rev-tbl"><thead><tr><th>Код</th><th>Описание</th><th>Откъде е</th><th>Брой минуси</th></tr></thead><tbody>';
   /* Заметнатите — синьо; нова група — дебела линия отгоре (само на екрана). */
   rows.forEach(function(e, i){
-    var sub = !e.minus, gs = e.minus && i > 0;
+    var sub = !e.head, gs = e.head && i > 0;
     var st = (sub ? 'color:#1d4ed8;background:#eff6ff;' : '') + (gs ? 'border-top:2px solid #475569;' : '');
     var td = function(cls, x, extra){ return '<td' + (cls ? ' class="' + cls + '"' : '') + ((st || extra) ? ' style="' + st + (extra || '') + '"' : '') + '>' + x + '</td>'; };
     h += '<tr class="mn-rev-row' + (sub ? ' mn-rev-sub' : '') + (gs ? ' mn-rev-gstart' : '') + '" data-code="' + escAttrVal(e.code) + '" data-group="' + escAttrVal(e.group) + '">' +
       td('', esc(e.code)) + td('mn-rev-desc', esc(mnRevDesc(e))) + td('mn-rev-origin', esc(mnRevOrigin(e))) + td('mn-rev-n', e.n, 'text-align:right;') + '</tr>';
   });
+  if(!rows.length) h += '<tr id="mn-rev-empty"><td colspan="4" style="color:#94a3b8;text-align:center;">няма минуси за ревизия</td></tr>';
+  if(mnRevCatFail) h += '<tr id="mn-rev-catfail"><td colspan="4" style="color:#94a3b8;font-size:12px;">Каталогът не се зареди — преоценените се разпознават само по описание</td></tr>';
   h += '</tbody></table>';
+  if(sp.out.length) h += '<div id="mn-rev-preoc" style="margin-top:10px;color:#64748b;background:#f1f5f9;padding:8px 10px;border-radius:6px;font-size:13px;">Не влизат (преоценени): ' +
+    sp.out.map(function(e){ return '<span class="mn-rev-preoc-item" data-code="' + escAttrVal(e.code) + '">' + esc(e.code) + ' — ' + esc(mnRevDesc(e)) + '</span>'; }).join(', ') + '</div>';
   var bad = mnRevBad(calc);
   if(bad.length) h += '<div id="mn-rev-bad" style="margin-top:10px;color:#b91c1c;font-size:13px;">⚠ Заметнат код без число от 4 до 7 цифри — НЕ е във файла; оправи го в реда или го добави ръчно: ' +
     bad.map(function(x){ return '„' + esc(x.real) + '“ (към ' + esc(x.of) + ')'; }).join(', ') + '</div>';
   h += '<div class="modal-actions">' +
     '<button class="btn" onclick="closeModal(\'mn-rev-ov\')">Затвори</button>' +
-    '<button id="mn-rev-xlsx" class="btn btn-green" onclick="mnRevDownload()">📥 Свали Excel (' + rows.length + ')</button></div></div>';
+    '<button id="mn-rev-xlsx" class="btn btn-green" onclick="mnRevDownload()"' + (rows.length ? '' : ' disabled title="няма минуси за ревизия" style="opacity:.55;cursor:not-allowed;"') + '>📥 Свали Excel (' + rows.length + ')</button></div></div>';
   ov.innerHTML = h;
-  ov.classList.add('open');
-  mnRevLoadDescs(rows);
-  return true;
 }
 /* Точно 3 колони; „ref" в първата (Тенчо 30.10 — SAP го хваща); третата празна.
    Редът е групиран като прегледа (13.11), но без празни редове, цвят и
@@ -1304,7 +1349,13 @@ function mnRevName(){ return 'Ревизия минуси ' + mnStore + ' ' + fm
 function mnRevDownload(){
   var calc = mnCompute(mnMovs, mnThresholds);
   if(mnRevWhyOff(calc)) return;
-  var aoa = mnRevAoa(mnRevRows(calc)), name = mnRevName();
+  /* Каталогът — преди файла (обикновено вече е в паметта от прегледа). */
+  return mnRevLoadCat(mnRevSplit(calc).all).then(function(){ mnRevWrite(calc); });
+}
+function mnRevWrite(calc){
+  var rows = mnRevRows(calc);
+  if(!rows.length){ toast('Темплейт за ревизия: няма минуси за ревизия', '#d97706'); return; }
+  var aoa = mnRevAoa(rows), name = mnRevName();
   mnWithXlsx(function(){
     var ws = XLSX.utils.aoa_to_sheet(aoa);
     /* Кодът — текст: без загуба на водещи нули, без 1,23E+12. */
