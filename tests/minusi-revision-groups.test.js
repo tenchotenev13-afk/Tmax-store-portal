@@ -116,7 +116,7 @@ async function env(cat) {
   const gs = rowsOf(h).filter(tr => tr.classList.contains('mn-rev-gstart')).map(tr => tr.getAttribute('data-code'));
   ok('разделител пред всяка група без първата', J(gs) === J(['60005', '60010', '60050']), J(gs));
   ok('… дебела линия на клетките', Array.from(row(h, '60010').children).every(td => /border-top:2px solid/.test(td.getAttribute('style') || '')));
-  ok('колоните са същите 4', J(Array.from(h.w.document.querySelectorAll('#mn-rev-tbl th')).map(th => th.textContent)) === J(['Код', 'Описание', 'Откъде е', 'Брой минуси']));
+  ok('колоните: същите 4 + „Количество минус“ (17.11)', J(Array.from(h.w.document.querySelectorAll('#mn-rev-tbl th')).map(th => th.textContent)) === J(['Код', 'Описание', 'Откъде е', 'Брой минуси', 'Количество минус']));
 
   section('2. Описание от каталога');
   ok('минусът — от реда', desc(h, '60010') === 'ТЕСТ 60010');
@@ -143,7 +143,9 @@ async function env(cat) {
   ok('файлът е записан', cap.n === 1);
   ok('заглавният ред както досега', J(cap.aoa[0]) === J(['Референция', 'SAP код', 'Преброено количество']));
   ok('точно 3 колони на всеки ред', cap.aoa.every(r => r.length === 3));
-  ok('без празни редове', cap.aoa.slice(1).every(r => r[0] === 'ref' && typeof r[1] === 'string' && r[1] !== '' && r[2] == null));
+  const isMin = c => /^минус/.test(h.w.document.querySelector('#mn-rev-ov tr.mn-rev-row[data-code="' + c + '"] .mn-rev-origin').textContent);
+  ok('без празни редове', cap.aoa.slice(1).every(r => r[0] === 'ref' && typeof r[1] === 'string' && r[1] !== ''));
+  ok('трета: число за минус, празно за заметнат', cap.aoa.slice(1).every(r => isMin(r[1]) ? typeof r[2] === 'number' : r[2] == null));
   const xc = cap.aoa.slice(1).map(r => r[1]);
   ok('групиран ред = прегледа', J(xc) === J(ORDER), J(xc));
   ok('всеки код веднъж', new Set(xc).size === xc.length);

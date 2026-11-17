@@ -126,7 +126,9 @@ const J = x => JSON.stringify(x);
   };
   realClick(w, $(h, '#mn-rev-xlsx'), 'Свали Excel');
   await ticks(2);
-  ok('Excel: същите кодове, „ref", празна трета', J(cap.aoa.slice(1).map(r => r[1])) === J(codes) && cap.aoa.slice(1).every(r => r[0] === 'ref' && r[2] == null));
+  const isMin = c => /^минус/.test(w.document.querySelector('#mn-rev-ov tr.mn-rev-row[data-code="' + c + '"] .mn-rev-origin').textContent);
+  ok('Excel: същите кодове, „ref", трета — число за минус, празна за заметнат', J(cap.aoa.slice(1).map(r => r[1])) === J(codes) && cap.aoa.slice(1).every(r => r[0] === 'ref' && (isMin(r[1]) ? typeof r[2] === 'number' : r[2] == null)));
+  ok('Excel: разделените заметнати 38554 / 38619 — празна трета', ['38554', '38619'].every(c => cap.aoa.find(r => r[1] === c)[2] == null));
   ok('Excel: разделените кодове са текст', ['38554', '38619'].every(c => { const i = cap.aoa.findIndex(r => r[1] === c); return i > 0 && cap.ws['B' + (i + 1)].t === 's' && cap.ws['B' + (i + 1)].z === '@'; }));
   ok('нищо не се записва', db.log.filter(x => x.m !== 'GET').length === 0);
 

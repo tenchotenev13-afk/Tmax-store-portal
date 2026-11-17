@@ -3,7 +3,8 @@
 
    „📄 Темплейт за ревизия" в „📋 Дневен" → преглед (код · описание · откъде е ·
    брой минуси) → Excel с ТОЧНО 3 колони „Референция | SAP код | Преброено
-   количество", редове „ref | <код> | (празно)". Влиза минус: незакрит,
+   количество", редове „ref | <код> | (празно)" (от 17.11 — количеството на минуса, виж
+   minusi-revision-qty.test.js). Влиза минус: незакрит,
    попълнен (не mnUnfilled), причина с excluded_from_revision = false (от
    данните). Кодове: материалът + заметнатият (ако е различен), всеки веднъж.
    Нищо не се записва.
@@ -190,7 +191,10 @@ function xlsxMock(w) {
   ok('заглавният ред — точно 3 колони', JSON.stringify(cap.aoa[0]) === JSON.stringify(['Референция', 'SAP код', 'Преброено количество']));
   ok('всеки ред е от 3 колони', cap.aoa.every(r => r.length === 3));
   ok('„ref" в първата колона на всеки ред', cap.aoa.slice(1).every(r => r[0] === 'ref'));
-  ok('третата колона е празна (клетка няма)', cap.aoa.slice(1).every((r, i) => r[2] == null && !cap.ws['C' + (i + 2)]));
+  /* От 17.11: C = количеството на минуса (число) на кода с минус, празно за заметнатия. */
+  const isMin = c => /^минус/.test(modalRow(h, c).querySelector('.mn-rev-origin').textContent);
+  ok('третата: число за минус, празно (клетка няма) за заметнат', cap.aoa.slice(1).every((r, i) => isMin(r[1]) ? (typeof r[2] === 'number' && r[2] > 0 && cap.ws['C' + (i + 2)].t === 'n') : (r[2] == null && !cap.ws['C' + (i + 2)])));
+  ok('10007 (два минуса по 1) → 2; 20001 (заметнат) → празно', cap.aoa.find(r => r[1] === '10007')[2] === 2 && cap.aoa.find(r => r[1] === '20001')[2] == null);
   ok('кодовете в Excel = кодовете в модала', JSON.stringify(cap.aoa.slice(1).map(r => r[1])) === JSON.stringify(codes));
   ok('кодът е текст (t=s, формат @)', cap.aoa.slice(1).every((r, i) => { const c = cap.ws['B' + (i + 2)]; return typeof r[1] === 'string' && c.t === 's' && c.z === '@'; }));
   const zi = cap.aoa.findIndex(r => r[1] === '00012345');
@@ -211,7 +215,7 @@ function xlsxMock(w) {
     const ws = wb.Sheets.Ревизия;
     ok('обхватът е точно A1:C' + (codes.length + 1), ws['!ref'] === 'A1:C' + (codes.length + 1), ws['!ref']);
     const back = X.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-    ok('прочетено обратно: ref | код | празно', back.slice(1).every((r, i) => r[0] === 'ref' && r[1] === codes[i] && r[2] === null));
+    ok('прочетено обратно: ref | код | число за минус / празно за заметнат', back.slice(1).every((r, i) => r[0] === 'ref' && r[1] === codes[i] && (isMin(codes[i]) ? typeof r[2] === 'number' && ws['C' + (i + 2)].t === 'n' : r[2] === null)));
     const zr = back.findIndex(r => r[1] === '00012345');
     ok('00012345 е текстова клетка и след запис', zr > 0 && ws['B' + (zr + 1)].t === 's');
   }

@@ -1158,7 +1158,9 @@ function mnOverHtml(rows, early){
    причина, чийто minus_reasons.excluded_from_revision е false (флагът — от
    базата; липсва → не влиза). Кодове: материалът + заметнатият (real_code),
    ако е попълнен и различен; trim; всеки код веднъж. „Преброено количество"
-   остава празно — попълва го обектът. */
+   (Миглена 17.11, решение на Тенчо): на кода с минус — сборът от незакрития
+   остатък (_rest) на влезлите му минуси, за ориентация; на заметнатия —
+   празно. Обектът го сменя с преброеното преди ZINVCOUNT. */
 function mnRevReasonOk(id){
   if(id == null) return false;
   for(var i = 0; i < mnReasons.length; i++) if(String(mnReasons[i].id) === String(id)) return mnReasons[i].excluded_from_revision === false;
@@ -1185,17 +1187,22 @@ function mnRevSplit(calc){
 function mnRevAll(calc){
   var map = {}, out = [], descOf = {};
   mnMovs.forEach(function(m){ var c = mnCoKey(m.material); if(c && m.material_desc && !descOf[c]) descOf[c] = m.material_desc; });
-  var add = function(code, id, of){
+  /* qty / uom — само от собствените минуси на кода (заметнатият не добавя). */
+  var add = function(code, id, of, r){
     var e = map[code];
-    if(!e){ e = map[code] = { code: code, desc: descOf[code] || '', minus: false, realOf: [], ids: {}, n: 0 }; out.push(e); }
-    if(of == null) e.minus = true;
+    if(!e){ e = map[code] = { code: code, desc: descOf[code] || '', minus: false, realOf: [], ids: {}, n: 0, qty: 0, uom: '' }; out.push(e); }
+    if(of == null){
+      e.minus = true;
+      e.qty = mnRound(e.qty + (Number(r._rest) || 0));
+      if(!e.uom && r.uom) e.uom = String(r.uom);
+    }
     else if(e.realOf.indexOf(of) < 0) e.realOf.push(of);
     if(!e.ids[id]){ e.ids[id] = 1; e.n++; }
   };
   mnRevReady(calc).forEach(function(r){
     var mat = mnCoKey(r.material), real = mnCoKey(r.real_code);
     if(!mat) return;
-    add(mat, String(r.id), null);
+    add(mat, String(r.id), null, r);
     mnRevRealCodes(real).forEach(function(c){ if(c !== mat) add(c, String(r.id), mat); });
   });
   return out;
@@ -1315,35 +1322,38 @@ function mnRevRefreshBtn(calc){
 }
 function mnRevRender(calc){
   var sp = mnRevSplit(calc), rows = sp.rows, ov = mnRevOverlay();
-  var h = '<div class="modal" style="width:680px;"><h3>📄 Темплейт за ревизия — ' + esc(mnStore) + '</h3>' +
+  var h = '<div class="modal" style="width:780px;"><h3>📄 Темплейт за ревизия — ' + esc(mnStore) + '</h3>' +
     '<div class="modal-sub">Кодове за броене в ZINVCOUNT: незакритите попълнени минуси (без причините извън ревизия) и заметнатите кодове. „Преброено количество“ се попълва след броенето.</div>' +
-    '<table id="mn-rev-tbl"><thead><tr><th>Код</th><th>Описание</th><th>Откъде е</th><th>Брой минуси</th></tr></thead><tbody>';
+    '<table id="mn-rev-tbl"><thead><tr><th>Код</th><th>Описание</th><th>Откъде е</th><th>Брой минуси</th><th>Количество минус</th></tr></thead><tbody>';
   /* Заметнатите — синьо; нова група — дебела линия отгоре (само на екрана). */
   rows.forEach(function(e, i){
     var sub = !e.head, gs = e.head && i > 0;
     var st = (sub ? 'color:#1d4ed8;background:#eff6ff;' : '') + (gs ? 'border-top:2px solid #475569;' : '');
     var td = function(cls, x, extra){ return '<td' + (cls ? ' class="' + cls + '"' : '') + ((st || extra) ? ' style="' + st + (extra || '') + '"' : '') + '>' + x + '</td>'; };
     h += '<tr class="mn-rev-row' + (sub ? ' mn-rev-sub' : '') + (gs ? ' mn-rev-gstart' : '') + '" data-code="' + escAttrVal(e.code) + '" data-group="' + escAttrVal(e.group) + '">' +
-      td('', esc(e.code)) + td('mn-rev-desc', esc(mnRevDesc(e))) + td('mn-rev-origin', esc(mnRevOrigin(e))) + td('mn-rev-n', e.n, 'text-align:right;') + '</tr>';
+      td('', esc(e.code)) + td('mn-rev-desc', esc(mnRevDesc(e))) + td('mn-rev-origin', esc(mnRevOrigin(e))) + td('mn-rev-n', e.n, 'text-align:right;') +
+      td('mn-rev-qty', e.minus ? esc(mnFmtQty(e.qty)) + (e.uom ? ' ' + esc(e.uom) : '') : '', 'text-align:right;white-space:nowrap;') + '</tr>';
   });
-  if(!rows.length) h += '<tr id="mn-rev-empty"><td colspan="4" style="color:#94a3b8;text-align:center;">няма минуси за ревизия</td></tr>';
-  if(mnRevCatFail) h += '<tr id="mn-rev-catfail"><td colspan="4" style="color:#94a3b8;font-size:12px;">Каталогът не се зареди — преоценените се разпознават само по описание</td></tr>';
+  if(!rows.length) h += '<tr id="mn-rev-empty"><td colspan="5" style="color:#94a3b8;text-align:center;">няма минуси за ревизия</td></tr>';
+  if(mnRevCatFail) h += '<tr id="mn-rev-catfail"><td colspan="5" style="color:#94a3b8;font-size:12px;">Каталогът не се зареди — преоценените се разпознават само по описание</td></tr>';
   h += '</tbody></table>';
   if(sp.out.length) h += '<div id="mn-rev-preoc" style="margin-top:10px;color:#64748b;background:#f1f5f9;padding:8px 10px;border-radius:6px;font-size:13px;">Не влизат (преоценени): ' +
     sp.out.map(function(e){ return '<span class="mn-rev-preoc-item" data-code="' + escAttrVal(e.code) + '">' + esc(e.code) + ' — ' + esc(mnRevDesc(e)) + '</span>'; }).join(', ') + '</div>';
   var bad = mnRevBad(calc);
   if(bad.length) h += '<div id="mn-rev-bad" style="margin-top:10px;color:#b91c1c;font-size:13px;">⚠ Заметнат код без число от 4 до 7 цифри — НЕ е във файла; оправи го в реда или го добави ръчно: ' +
     bad.map(function(x){ return '„' + esc(x.real) + '“ (към ' + esc(x.of) + ')'; }).join(', ') + '</div>';
+  if(rows.length) h += '<div id="mn-rev-qtywarn" style="margin-top:10px;color:#b45309;background:#fef3c7;padding:8px 10px;border-radius:6px;font-size:13px;font-weight:600;">⚠ В колона „Преброено количество“ е попълнено количеството на минуса. Сменете го с реално преброеното, преди да качите файла в ZINVCOUNT.</div>';
   h += '<div class="modal-actions">' +
     '<button class="btn" onclick="closeModal(\'mn-rev-ov\')">Затвори</button>' +
     '<button id="mn-rev-xlsx" class="btn btn-green" onclick="mnRevDownload()"' + (rows.length ? '' : ' disabled title="няма минуси за ревизия" style="opacity:.55;cursor:not-allowed;"') + '>📥 Свали Excel (' + rows.length + ')</button></div></div>';
   ov.innerHTML = h;
 }
-/* Точно 3 колони; „ref" в първата (Тенчо 30.10 — SAP го хваща); третата празна.
+/* Точно 3 колони; „ref" в първата (Тенчо 30.10 — SAP го хваща); третата —
+   количеството на минуса като число (17.11), празна за заметнатите.
    Редът е групиран като прегледа (13.11), но без празни редове, цвят и
    описание — файлът отива в ZINVCOUNT. */
 function mnRevAoa(rows){
-  return [['Референция', 'SAP код', 'Преброено количество']].concat(rows.map(function(e){ return ['ref', String(e.code), null]; }));
+  return [['Референция', 'SAP код', 'Преброено количество']].concat(rows.map(function(e){ return ['ref', String(e.code), e.minus ? mnRound(e.qty) : null]; }));
 }
 function mnRevName(){ return 'Ревизия минуси ' + mnStore + ' ' + fmtDate(today()) + '.xlsx'; }
 function mnRevDownload(){

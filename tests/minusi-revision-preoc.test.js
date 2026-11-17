@@ -150,7 +150,8 @@ function xlsxMock(w) {
   await ticks(4);
   ok('файлът е записан', cap.n === 1);
   ok('заглавен ред — 3 колони', J(cap.aoa[0]) === J(['Референция', 'SAP код', 'Преброено количество']));
-  ok('всеки ред: ref | код | празно', cap.aoa.slice(1).every(r => r.length === 3 && r[0] === 'ref' && r[1] && r[2] == null));
+  const isMin = c => /^минус/.test(h.w.document.querySelector('#mn-rev-ov tr.mn-rev-row[data-code="' + c + '"] .mn-rev-origin').textContent);
+  ok('всеки ред: ref | код | число за минус / празно за заметнат', cap.aoa.slice(1).every(r => r.length === 3 && r[0] === 'ref' && r[1] && (isMin(r[1]) ? typeof r[2] === 'number' : r[2] == null)));
   const xc = cap.aoa.slice(1).map(r => r[1]);
   ok('кодовете = прегледа, без преоценените', J(xc) === J(KEEP), J(xc));
   ok('нито един преоценен във файла', OUT.every(c => xc.indexOf(c) < 0));
