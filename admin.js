@@ -2509,10 +2509,13 @@ function deleteAdminNotifSchedule(id){
      в базата допуска само co / controlling / regional / owner / store;
    - в NOTIFY_GROUP_ORDER я няма — той е = REPORT_GROUP_KEYS (bulletin.js),
      групите на отчетите по задача, които решава send-routed-report.
-   Затова е в отделен списък, показван само в редактора на групите. */
-var NOTIFY_GROUP_LABELS = { co: 'ЦО', controlling: 'Контролинг', regional: 'Регионален', owner: 'Собственик', revaluation: 'Преоценка' };
+   Затова е в отделен списък, показван само в редактора на групите.
+   'razliki' (17.11.2026, Разлики етап 4) — същият вид група: кой получава
+   „Разлики · <обект> · <доставчик>: бланка без документ / няма входяща
+   доставка в системата" (sdRazlikiNotify в stock-differences.js). */
+var NOTIFY_GROUP_LABELS = { co: 'ЦО', controlling: 'Контролинг', regional: 'Регионален', owner: 'Собственик', revaluation: 'Преоценка', razliki: 'Разлики' };
 var NOTIFY_GROUP_ORDER  = ['co','controlling','regional','owner'];
-var NOTIFY_GROUP_USER_ONLY = ['revaluation'];
+var NOTIFY_GROUP_USER_ONLY = ['revaluation','razliki'];
 
 function notifyGroupsOf(u){
   var g = u && u.notify_groups;
@@ -2658,6 +2661,7 @@ var WHO_BROWSER_MAILS = [
   { mail: 'Товарен лист — уреден товар за друг обект', on: 'складът „✅ Уредено"', who: 'акаунтите на обекта, който е маркирал (+ push)', sites: ['loading.js:llNotifyWrongSettled'] },
   { mail: 'Пикинг — „🚚 Тръгна"', on: 'складът пуска транспорта', who: 'акаунтите на обекта, които са в app_settings.picking_users', sites: ['picking.js:pkNotifyShipment'] },
   { mail: 'Разлики — до доставчик', on: '„✉️ Изпрати" (Ц. Тенева, admin)', who: 'ръчно въведени адреси (до / копие / отговор)', sites: ['stock-differences.js:sendDiffEmail'] },
+  { mail: 'Разлики — без документ / няма входяща', on: 'обектът подава бланка към доставчик с една от двете отметки', who: 'група „Разлики" (+ push)', sites: ['stock-differences.js:sdRazlikiNotify'] },
   { mail: 'Разлики — сторно бележка / отговор', on: 'бележка или отговор по разлика', who: 'бележка → управител и склад на обекта; отговор → авторът', sites: ['stock-differences.js:sdNoteNotify'] },
   { mail: 'Преоценка — подадено', on: 'обектът подава', who: 'регионалните на обекта + одобряващите от app_settings.revaluation_approvers; без тях — група „преоценка"', sites: ['revaluation.js:rvNotify'] },
   { mail: 'Преоценка — одобрено', on: 'регионалният одобрява бланката', who: 'група „преоценка"', sites: ['revaluation.js:rvNotifyApproved'] },
@@ -2669,7 +2673,7 @@ var WHO_BROWSER_MAILS = [
   { mail: 'Общи отчети — „Тест до мен"', on: 'бутон в „📧 Общи отчети"', who: 'натиснилият (тема с „(тест)")', sites: ['report.js:sendDailyReportTest', 'report.js:sendWeeklyReportTest', 'report.js:sendPalletsReportTest', 'report.js:sendWarehouseReportTest', 'report.js:sendMinusMultiReportTest'] },
   { mail: 'Седмичен по задачи — тест', on: 'функцията стои, бутонът е махнат (02.09.2026)', who: 'въведеният тестов адрес', sites: ['report.js:sendWeeklyReportRouted'] }
 ];
-var WHO_ROLE_CATS = ['регионален', 'управител', 'склад', 'контролинг', 'ЦО', 'owner', 'преоценка', 'друг', 'външен адрес'];
+var WHO_ROLE_CATS = ['регионален', 'управител', 'склад', 'контролинг', 'ЦО', 'owner', 'преоценка', 'разлики', 'друг', 'външен адрес'];
 var WHO_DAY_SHORT = ['нд', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 var WHO_ISO_SHORT = { 1: 'пн', 2: 'вт', 3: 'ср', 4: 'чт', 5: 'пт', 6: 'сб', 7: 'нд' };
 var WHO_DOW_KEY = { mon: 'пн', tue: 'вт', wed: 'ср', thu: 'чт', fri: 'пт', sat: 'сб', sun: 'нд' };
@@ -2767,6 +2771,7 @@ function whoRoleOf(u){
   if (g.indexOf('co') >= 0) put('ЦО', 'ЦО');
   if (g.indexOf('owner') >= 0) put('owner', 'owner');
   if (g.indexOf('revaluation') >= 0) put('преоценка', 'преоценка');
+  if (g.indexOf('razliki') >= 0) put('разлики', 'разлики');
   if (!cats.length) put('друг', (u.role || '—') + (u.store_name ? ' · ' + u.store_name : ''));
   return { label: parts.join(' · '), cats: cats };
 }

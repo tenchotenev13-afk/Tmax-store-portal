@@ -164,6 +164,27 @@ function sdFmtDateTimeFull(val){
    differences_reports.photos като {url,name,kind:'stokova'}; снимките са без
    kind. Всяко място, което чете photos, ги разделя оттук. */
 function diffIsStokova(p){ return !!p && p.kind==='stokova'; }
+/* Баджовете до „Доставчик — X" в картата на бланката (етап 4, 17.11.2026).
+   „Без документ": докато в photos няма файл с kind 'stokova' — сивият бадж
+   + „— чака документ"; щом Цвети го добави през „📄 Добави стокова" —
+   „📄 Документът е добавен". Важи и за заварените бланки. „📭 Няма входяща" —
+   само бадж. */
+function sdDocFlagBadgesHtml(rep){
+  if(!rep) return '';
+  var pill='margin-left:6px;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:600;';
+  var h='';
+  if(rep.no_document){
+    var hasStk=(Array.isArray(rep.photos)?rep.photos:[]).some(diffIsStokova);
+    h+= hasStk
+      ? '<span class="sd-nodoc-added" style="'+pill+'background:#f0fdfa;color:#0f766e;border:1px solid #99f6e4;">📄 Документът е добавен</span>'
+      : '<span style="'+pill+'background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;">📄 Без документ</span>'+
+        '<span class="sd-nodoc-wait" style="margin-left:4px;color:#b45309;font-size:10.5px;font-weight:600;">— чака документ</span>';
+  }
+  if(rep.no_inbound){
+    h+='<span class="sd-noinb-badge" style="'+pill+'background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;">📭 Няма входяща</span>';
+  }
+  return h;
+}
 /* Логистични складове - отделни физически обекти (не роля), чиито служители
    влизат с обичайните си профили, но с store_name = точно името на склада.
    Те виждат само разликите, при които ТЕ са насрещната страна (counterpart)
@@ -720,7 +741,7 @@ function sdExcelRows(list){
   var aoa = [['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Поръчка за връщане',
               'Дата потвърд.','Статус','Кредитно','Коментар','Коментар контролер']
              .concat(xShowWh?['Отговор на склада']:[])
-             .concat(['Дата на подаване','Документ №','Дата на документ'])];
+             .concat(['Дата на подаване','Документ №','Дата на документ','Няма входяща'])];
   list.forEach(function(r){
     var rep = diffReports.find(function(x){ return x.id===r.report_id; }) || {};
     var q = parseFloat(r.quantity);
@@ -742,7 +763,9 @@ function sdExcelRows(list){
     ].concat(xShowWh?[wh.join(' · ')]:[]).concat([
       rep.created_at ? fmtDate(localDateISO(new Date(rep.created_at))) : '',
       txt(rep.document_number),
-      fd(rep.doc_date)
+      fd(rep.doc_date),
+      /* Етап 4: „да" / празно - вътрешно за SAP, в имейла до доставчика не влиза. */
+      rep.no_inbound ? 'да' : ''
     ]));
   });
   return aoa;
@@ -762,7 +785,7 @@ function exportSDExcel(){
   var wb = window.XLSX.utils.book_new();
   var ws = window.XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [{wch:16},{wch:16},{wch:22},{wch:10},{wch:34},{wch:7},{wch:13},{wch:13},
-                 {wch:12},{wch:16},{wch:10},{wch:26},{wch:26},{wch:26},{wch:12},{wch:14},{wch:12}];
+                 {wch:12},{wch:16},{wch:10},{wch:26},{wch:26},{wch:26},{wch:12},{wch:14},{wch:12},{wch:12}];
   window.XLSX.utils.book_append_sheet(wb, ws, 'Разлики');
   var fname = 'razliki-'+(sdTypeFilter==='all' ? 'vsichki' : sdExcelTranslit(SD_TYPE_PLAIN[sdTypeFilter]||sdTypeFilter))+'-'+
               (sdStoreFilter ? sdExcelTranslit(sdStoreFilter) : 'vsichki')+'-'+today()+'.xlsx';
@@ -3719,7 +3742,7 @@ function renderDiffReportsSection(){
        (wasCorrected?' <span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✏️ КОРИГИРАНА</span>':'')+
        (totalCount?' <span title="'+(repIsInterstore?'Потвърдени редове от тази бланка':'Решени редове от тази бланка')+'" style="background:'+(inProgress?'#ecfdf5':'#f5f3ff')+';color:'+(inProgress?'#047857':'#6d28d9')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(repIsInterstore?'📬 '+doneCount+'/'+totalCount+' потвърдени':(doneCount?'⏳ '+doneCount+'/'+totalCount+' решени':'⬜ 0/'+totalCount+' — недокосната'))+'</span>':'')+
        '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+diffDirShortLabel(rep.direction)+' — '+esc(rep.counterpart||'')+'</span>'+
-       (rep.no_document?'<span style="margin-left:6px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:600;">📄 Без документ</span>':'')+
+       sdDocFlagBadgesHtml(rep)+
        '</div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+
@@ -4419,6 +4442,18 @@ function diffStokovaRequiredNow(dir){
   var nd=document.getElementById('diff-no-doc');
   return !(nd && nd.checked);
 }
+/* „📄 Без документ" и „📭 Няма входяща" (етап 4, 17.11.2026) се изключват
+   взаимно: отметка на едната маха другата. Надписите под „Снимки" и
+   „Стокова" следват само „без документ". */
+function diffDocFlagChange(el){
+  if(!el) return;
+  var other=document.getElementById(el.id==='diff-no-doc'?'diff-no-inbound':'diff-no-doc');
+  if(el.checked && other) other.checked=false;
+  var nd=document.getElementById('diff-no-doc');
+  var h=document.getElementById('diff-photo-hint');
+  if(h) h.textContent=(nd && nd.checked)?'(без документ — по избор)':diffPhotoHintText('supplier');
+  diffStokovaHintRefresh();
+}
 function diffStokovaHintRefresh(){
   var h=document.getElementById('diff-stokova-hint');
   var dirEl=document.getElementById('diff-direction');
@@ -4560,8 +4595,13 @@ function updateDiffCounterpartLabel(){
       : '')+
       (dir==='supplier'
       ? '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:-2px 0 10px;cursor:pointer;">'+
-          '<input type="checkbox" id="diff-no-doc" onchange="var h=document.getElementById(\'diff-photo-hint\');if(h)h.textContent=this.checked?\'(без документ — по избор)\':diffPhotoHintText(\'supplier\');diffStokovaHintRefresh();">'+
-          ' 📄 Стоката е без документ (стоковата и снимките по категория не са задължителни; при баркод снимка на артикула е нужна)</label>'
+          '<input type="checkbox" id="diff-no-doc" onchange="diffDocFlagChange(this)">'+
+          ' 📄 Стоката е без документ (стоковата и снимките по категория не са задължителни; при баркод снимка на артикула е нужна)</label>'+
+        /* Етап 4 (17.11.2026): само при доставчик, изключва се взаимно с
+           „без документ". Поръчката и стоковата остават задължителни. */
+        '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:-6px 0 10px;cursor:pointer;">'+
+          '<input type="checkbox" id="diff-no-inbound" onchange="diffDocFlagChange(this)">'+
+          ' 📭 Няма входяща доставка в системата (поръчката и стоковата остават задължителни)</label>'
       : '');
     var newOrderEl=document.getElementById('diff-order-num');
     if(newOrderEl) newOrderEl.value=noDocWrap.getAttribute('data-order-num')||'';
@@ -5211,6 +5251,55 @@ function sdNoteRenotify(kind, id){
   return sdNoteNotify(kind, rec, true);
 }
 
+/* ── Известие до групата „Разлики" (етап 4, 17.11.2026, Цвети) ──
+   Бланка към доставчик с „📄 Без документ" или „📭 Няма входяща" → push +
+   имейл до потребителите с 'razliki' в users.notify_groups (Администрация →
+   Групи). По модела на rvNotify / rvNoticeResult (revaluation.js). Вика се
+   СЛЕД успешния запис и не го отменя: провал → жълт toast. sendEmail стои
+   тук, за да го брои „Кой какво получава" (admin.js, WHO_BROWSER_MAILS). */
+var SD_RAZLIKI_USERS_Q = 'active=eq.true&select=email,display_name,notify_groups,active';
+function sdRazlikiGroupUsers(users){
+  var out = [], seen = {};
+  (users || []).forEach(function(u){
+    if(!u || u.active === false) return;
+    var g = typeof notifyGroupsOf === 'function' ? notifyGroupsOf(u) : (Array.isArray(u.notify_groups) ? u.notify_groups : []);
+    if(g.indexOf('razliki') < 0) return;
+    var key = u.email || u.display_name;
+    if(key && !seen[key]){ seen[key] = 1; out.push(u); }
+  });
+  return out;
+}
+function sdRazlikiNotifyText(info){
+  return 'Разлики · ' + info.store + ' · ' + info.counterpart + ': ' +
+    (info.no_inbound ? 'няма входяща доставка в системата' : 'бланка без документ');
+}
+function sdRazlikiNotify(info){
+  var text = sdRazlikiNotifyText(info);
+  var warn = function(msg){ toast('Подадено, но известието до Цвети ' + msg, '#d97706'); return false; };
+  return sbGetOk('users', SD_RAZLIKI_USERS_Q).then(function(res){
+    if(!res.ok) return warn('не тръгна (получателите не се прочетоха)');
+    var rec = sdRazlikiGroupUsers(res.rows);
+    if(!rec.length) return warn('няма получатели (група „Разлики" е празна)');
+    var names = rec.map(function(u){ return u.display_name; }).filter(Boolean);
+    var emails = rec.map(function(u){ return u.email; }).filter(Boolean);
+    var by = currentUser.display_name || currentUser.email;
+    var html = '<p>' + esc(text) + '</p>' +
+      '<p>Подаде: ' + esc(by) + '<br>Поръчка №: ' + esc(info.order || '—') + '<br>Брой редове: ' + info.lines + '</p>' +
+      '<p>Отворете в портала: Разлики → Бланки за преглед.</p>';
+    var pushText = text + ' · подаде ' + by + ' · поръчка № ' + (info.order || '—') + ' · ' + info.lines + ' ред' + (info.lines === 1 ? '' : 'а');
+    return Promise.all([
+      names.length && typeof pushToPeople === 'function' ? pushToPeople(names, 'Разлики', pushText) : Promise.resolve({ ok: false }),
+      emails.length && typeof sendEmail === 'function' ? sendEmail(emails, text, html) : Promise.resolve({ ok: false })
+    ]).then(function(r){
+      var bad = [];
+      if(!r[0] || !r[0].ok) bad.push('push');
+      if(!r[1] || !r[1].ok) bad.push('имейл');
+      if(bad.length) return warn('не тръгна (' + bad.join(', ') + ')');
+      return true;
+    });
+  }).catch(function(e){ return warn('не тръгна (' + ((e && e.message) || e) + ')'); });
+}
+
 function submitDiffReport(){
   var store=(document.getElementById('diff-store').value||'').trim();
   var direction=document.getElementById('diff-direction').value||'interstore';
@@ -5320,6 +5409,12 @@ function submitDiffReport(){
     toast('📸 Снимки са задължителни за: '+catsNeeding.join(', '),'#dc2626');
     return;
   }
+  /* „📭 Няма входяща" (етап 4) - само при доставчик и никога заедно с „без
+     документ" (отметките се изключват и в DOM-а, тук е твърдата защита).
+     Поръчката и стоковата вече са проверени по-горе като при обикновена
+     бланка - тази отметка не отменя нищо. */
+  var noInbEl=document.getElementById('diff-no-inbound');
+  var noInbound = direction==='supplier' && !noDocument && !!(noInbEl && noInbEl.checked);
 
   var reportData={
     direction:direction,
@@ -5332,6 +5427,7 @@ function submitDiffReport(){
     photos:diffPendingPhotos,
     /* Винаги булев - false, а не липсващ ключ, когато отметката е изключена. */
     no_document:noDocument,
+    no_inbound:noInbound,
     reviewed:false
   };
 
@@ -5383,6 +5479,12 @@ function submitDiffReport(){
         if(stornoNoteId){ sdNoteMarkStorno(stornoNoteId, report.id); return; }
         toast('✅ Бланката е подадена! Цветелина ще я прегледа.');
         loadStockDiff();
+        /* Етап 4: известие до групата „Разлики" - след успешния запис,
+           fire-and-forget (провалът дава жълт toast, бланката остава). */
+        if(direction==='supplier' && (noDocument || noInbound)){
+          sdRazlikiNotify({ store:store, counterpart:counterpart, no_document:noDocument,
+            no_inbound:noInbound, order:orderNum, lines:lines.length });
+        }
       });
     });
   });
@@ -5945,6 +6047,7 @@ function renderDiffPrint(rep){
         '<table class="dp-meta">'+
           '<tr><td>'+diffDirCounterpartLabel(rep.direction)+':</td><td>'+esc(rep.counterpart||'—')+'</td></tr>'+
           '<tr><td>Документ №:</td><td>'+(rep.no_document?'няма (стока без документ)':esc(rep.document_number||'—'))+'</td></tr>'+
+          (rep.no_inbound?'<tr class="dp-noinb"><td>Входяща доставка:</td><td>📭 няма в системата</td></tr>':'')+
           '<tr><td>Дата на документа:</td><td>'+fmtDate(rep.doc_date)+'</td></tr>'+
           '<tr><td>Подал:</td><td>'+esc(rep.submitted_by||'—')+'</td></tr>'+
           '<tr><td>Дата на подаване:</td><td>'+sdFmtDateTime(rep.created_at)+'</td></tr>'+
