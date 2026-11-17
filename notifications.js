@@ -431,7 +431,9 @@ function notifLoadingListsPending(cb){
        картата „N товарни листа за получаване" няма какво да го подкани да
        направи. Без &missing=eq.false банерът щеше да виси, докато складът
        не пипне листа, тоест точно там, където никой не гледа. */
-    sbGet('loading_list_items','received=eq.false&missing=eq.false&select=list_id'+storeQ(),true)
+    /* &wrong_store=is.null (17.11.2026): „🔀 За друг обект" също е решен
+       въпрос за обекта — същото като llHandled() в loading.js. */
+    sbGet('loading_list_items','received=eq.false&missing=eq.false&wrong_store=is.null&select=list_id'+storeQ(),true)
   ]).then(function(r){
     var lists=Array.isArray(r[0])?r[0]:[];
     var items=Array.isArray(r[1])?r[1]:[];

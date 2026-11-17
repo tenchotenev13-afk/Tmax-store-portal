@@ -449,7 +449,7 @@ function llCounts(items){
   /* Отхвърленият извънреден ред не се брои никъде (Пакет Г2). Филтърът е ТУК,
      а не в осемте call site-а — едно копие по-малко, което да се разминава. */
   items = llLiveRows(items);
-  var c = { pallet:0, oversize:0, roll:0, bulk:0, stores:0, received:0, missing:0, total:0 };
+  var c = { pallet:0, oversize:0, roll:0, bulk:0, stores:0, received:0, missing:0, wrong:0, total:0 };
   var seen = {};
   /* Броят се ТОВАРНИТЕ ЕДИНИЦИ, не редовете: четири документа на един палет
      са един палет. Преди консолидацията двете съвпадаха и това число лъжеше. */
@@ -460,6 +460,7 @@ function llCounts(items){
     c.total++;
     if(it.received) c.received++;
     if(it.missing)  c.missing++;
+    if(it.wrong_store) c.wrong++;
     if(it.store_name && !seen[it.store_name]){ seen[it.store_name] = 1; c.stores++; }
   });
   return c;
@@ -469,7 +470,7 @@ function llSummaryByStore(items){
   items = llLiveRows(items);   /* същото като в llCounts() */
   var by = {}, order = [];
   var ensure = function(s){
-    if(!by[s]){ by[s] = { store:s, pallet:0, oversize:0, roll:0, bulk:0, received:0, missing:0, total:0, products:0, qty:0 }; order.push(s); }
+    if(!by[s]){ by[s] = { store:s, pallet:0, oversize:0, roll:0, bulk:0, received:0, missing:0, wrong:0, total:0, products:0, qty:0 }; order.push(s); }
     return by[s];
   };
   /* Товарните единици — по същата причина като в llCounts(). */
@@ -483,6 +484,7 @@ function llSummaryByStore(items){
     e.total++;
     if(it.received) e.received++;
     if(it.missing)  e.missing++;
+    if(it.wrong_store) e.wrong++;
     /* Бройките се сумират НАПРАВО, през мерните единици — така е поискано.
        Смесен палет (бр. + кв.м) дава число, което не е нито едното; колоната
        е за бърз поглед „има ли стока", не за инвентаризация. */
@@ -621,7 +623,7 @@ function llLoadStoreSide(){
              чакащ ред). Обектът няма какво да реши — при него се свива,
              значката „⏳ N чака одобрение" е в заглавието. */
           if(it.some(function(x){ return llRowPending(x) && llCanApprove(l, x); })) return;
-          if(it.length && it.every(function(x){ return x.received || x.missing; })) llCollapsed[l.id] = true;
+          if(it.length && it.every(llHandled)) llCollapsed[l.id] = true;
         });
         renderLoadingLists();
       });
@@ -758,7 +760,12 @@ function llCanReceive(it){
 /* Редът е „обработен", когато обектът се е произнесъл по него — получено ИЛИ
    неполучено. Неотметнатият ред НЕ е трето състояние: той е чакащ. Две от
    местата долу (броячът и „Приключи приемането") питат точно това. */
-function llHandled(it){ return !!(it && (it.received || it.missing)); }
+/* Трето произнасяне (17.11.2026): „🔀 За друг обект" — стоката на реда
+   физически е за ДРУГ обект. Не е получена по листа и не е липса; редът е
+   обработен, а случаят чака склада да го уреди (wrong_store_done_at). */
+function llHandled(it){ return !!(it && (it.received || it.missing || it.wrong_store)); }
+function llWrongStore(it){ return !!(it && it.wrong_store); }
+function llWrongOpen(it){ return llWrongStore(it) && !it.wrong_store_done_at; }
 /* Може ли обектът още да се произнесе по този ред. Едно определение — иначе
    бутоните на реда и гейтът на „Приключи приемането" се разминават и
    бутонът остава сив при нула видими действия. */
@@ -1041,7 +1048,12 @@ function llWriteStoreRowProducts(itemId, products){
    НЕ се ползва return=representation (виж бележката при sbDelete в
    shared.js): то иска SELECT право върху всяка върната колона. */
 function llPatchIfPending(itemId, body){
-  var url = API + '/loading_list_items?id=eq.' + encodeURIComponent(itemId) + '&approval_status=eq.pending';
+  return llPatchItemWhere(itemId, '&approval_status=eq.pending', body);
+}
+/* Същото с произволно условие — „🔀 За друг обект" ползва за отмяната
+   (само докато складът не е уредил) и за „✅ Уредено" (само веднъж). */
+function llPatchItemWhere(itemId, extra, body){
+  var url = API + '/loading_list_items?id=eq.' + encodeURIComponent(itemId) + (extra || '');
   return fetch(url, {
     method: 'PATCH',
     headers: Object.assign({}, H, { 'Prefer': 'return=minimal,count=exact' }),
@@ -1228,8 +1240,10 @@ function llStoreCardHtml(l){
      Повод: 12 такива реда (13.10–29.10) никой не беше решил, а изцяло
      приетите листове висяха „изпратени" от седмици. */
   var aprPending = items.filter(llRowPending).length;
+  var wrongWait = live.filter(llWrongOpen).length;
+  var wrongAll = live.filter(llWrongStore).length;
   var allDone = pending === 0;
-  var gateTitle = 'Отметни всеки ред като получен или неполучен';
+  var gateTitle = 'Отметни всеки ред като получен, неполучен или за друг обект';
   var canAdd = l.status === 'sent' && items.some(llCanReceive);
   /* Обектът на картата — за печата. При глобален профил в един лист може да
      има няколко обекта; тогава филтър няма и се печата целият лист. */
@@ -1242,12 +1256,15 @@ function llStoreCardHtml(l){
      с липси (червено). Липсата не бива да изглежда като приключено наред. */
   var edge = !allDone ? ['#e2e8f0','#2563eb','#eff6ff','#1e40af']
            : (miss    ? ['#fecaca','#dc2626','#fef2f2','#dc2626']
-                      : ['#bbf7d0','#16a34a','#f0fdf4','#16a34a']);
+           /* Ред „за друг обект" без липси — не е „приета изцяло" (листът е partial). */
+           : (wrongAll ? ['#ddd6fe','#6d28d9','#f5f3ff','#6d28d9']
+                      : ['#bbf7d0','#16a34a','#f0fdf4','#16a34a']));
   var h = '<div id="ll-card-'+l.id+'" style="background:#fff;border:1px solid '+edge[0]+';border-left:4px solid '+edge[1]+';border-radius:10px;padding:12px;margin-bottom:10px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'+
       '<div style="font-size:13.5px;font-weight:700;">🚛 '+esc(l.warehouse||'')+' · '+fmtDate(l.list_date)+
-        ' <span style="background:'+edge[2]+';color:'+edge[3]+';padding:2px 8px;border-radius:20px;font-size:10.5px;">получени '+got+' · неполучени '+miss+' / '+live.length+'</span> '+
+        ' <span style="background:'+edge[2]+';color:'+edge[3]+';padding:2px 8px;border-radius:20px;font-size:10.5px;">получени '+got+' · неполучени '+miss+(wrongAll?' · за друг обект '+wrongAll:'')+' / '+live.length+'</span> '+
         (aprPending ? ' <span data-ll-apr-wait="'+aprPending+'" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">⏳ '+aprPending+' чака одобрение</span> ' : '')+
+        llWrongCountBadge(wrongWait)+
         llStatusBadge(l.status)+'</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
         (open && canAny ? '<button data-id="'+l.id+'" onclick="llMarkAllReceived(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">✅ Всичко получено</button>' : '')+
@@ -1306,11 +1323,12 @@ function llStoreCardHtml(l){
     if(multi){
       var gGot  = g.rows.filter(function(r){ return r.received; }).length;
       var gMiss = g.rows.filter(function(r){ return r.missing; }).length;
+      var gWrong = g.rows.filter(llWrongStore).length;
       var gCan  = g.rows.some(llOpenForStore);
       h += '<tr data-pallet-group="1" data-ll-unit-head="1"'+llHlAttrs(l.id, g)+' style="'+llHeadBg(l.id, g)+'border-bottom:1px solid #e2e8f0;">'+
         '<td colspan="4" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(g.store_name)+'">'+
           esc(llGroupHeading(g.rows, share))+' · '+g.rows.length+' документа · получени '+gGot+
-          (gMiss?' · неполучени '+gMiss:'')+'/'+g.rows.length+
+          (gMiss?' · неполучени '+gMiss:'')+(gWrong?' · за друг обект '+gWrong:'')+'/'+g.rows.length+
           (g.rows.some(function(r){ return r.partial; })?' '+llPartialBadge():'')+
           /* Коментарът на ЦЕЛИЯ палет. Стои тук, а не в prompt(): обяснението
              какво липсва се пише веднъж и се записва във всеки ред на палета,
@@ -1334,8 +1352,8 @@ function llStoreCardHtml(l){
        екрана е друг: влиза ли този ред в листа. */
     var bg = llRowPending(it) ? 'background:#fffbeb;'
            : (llRowRejected(it) ? 'background:#f8fafc;color:#94a3b8;'
-           : (it.received ? 'background:#f0fdf4;' : (it.missing ? 'background:#fef2f2;' : '')));
-    h += '<tr'+(failed?' data-doc-failed="1"':'')+(it.missing?' data-missing="1"':'')+
+           : (it.received ? 'background:#f0fdf4;' : (it.missing ? 'background:#fef2f2;' : (llWrongStore(it) ? 'background:#f5f3ff;' : ''))));
+    h += '<tr'+(failed?' data-doc-failed="1"':'')+(it.missing?' data-missing="1"':'')+llWrongAttr(it)+
       (it.added_by_store?' data-ll-added="'+escAttr(it.approval_status||'')+'"':'')+
       ' style="border-bottom:1px solid #f1f5f9;'+bg+(llRowRejected(it)?'text-decoration:line-through;':'')+'">'+
       '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+((headed||unnum)?'padding-left:22px;color:#94a3b8;':'')+'">'+((headed||unnum)?'↳':esc(llKindLabel(it)))+
@@ -1357,9 +1375,14 @@ function llStoreCardHtml(l){
           ? '<span style="color:#dc2626;font-weight:600;">⛔ '+esc(it.missing_by||'')+(it.missing_at?' · '+llFmtStamp(it.missing_at):'')+'</span>'+
             /* Отмяната е за сгрешен клик и за стока, която е дошла по-късно. */
             (llCanReceive(it)?' <button data-id="'+it.id+'" onclick="llUnmarkMissing(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">↩ Отмени</button>':'')
+          : llWrongStore(it)
+          ? llWrongBadgeHtml(it)+
+            /* Отмяната — само докато складът не е уредил случая. */
+            ((llCanReceive(it) && llWrongOpen(it))?' <button data-id="'+it.id+'" onclick="llWrongUndo(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">↩ Отмени</button>':'')
           : (llCanReceive(it)
             ? '<button data-id="'+it.id+'" onclick="llMarkReceived(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">'+LL_RECV_LABEL+'</button>'+
-              ' <button data-id="'+it.id+'" onclick="llMarkMissing(this.dataset.id)" title="Редът НЕ е пристигнал — описва се в „Моят коментар“" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">'+LL_MISS_LABEL+'</button>'+llDiffBtn(it.id)
+              ' <button data-id="'+it.id+'" onclick="llMarkMissing(this.dataset.id)" title="Редът НЕ е пристигнал — описва се в „Моят коментар“" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">'+LL_MISS_LABEL+'</button>'+
+              ' <button data-id="'+it.id+'" onclick="llWrongOpenModal(this.dataset.id)" title="Стоката на реда е за друг обект — складът научава веднага" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#6d28d9;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">'+LL_WRONG_LABEL+'</button>'+llDiffBtn(it.id)
             : '<span style="color:#cbd5e1;">—</span>')))+
       (failed?'<div style="margin-top:3px;font-size:10px;color:#b45309;font-weight:600;">⚠️ документът не е затворен</div>':'')+
       '</td></tr>';
@@ -1368,7 +1391,7 @@ function llStoreCardHtml(l){
        остава за отстъпа, артикулите — в останалите пет. */
     if((it.products || []).length){
       var so = !!llStoreProdOpen[it.id];
-      h += '<tr data-ll-sprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;'+(it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))+'">'+
+      h += '<tr data-ll-sprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;'+(it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':(llWrongStore(it)?'background:#f5f3ff;':'')))+'">'+
         '<td></td><td colspan="4" style="padding:0 9px 6px;">'+
         llProductsToggleHtml(it, so, 'llToggleStoreProducts')+(so ? llProductsTableHtml(it.products) : '')+'</td></tr>';
     }
@@ -1663,6 +1686,7 @@ function llMarkReceived(itemId){
      (виж миграцията loading_missing — check няма заради огледалото), значи
      единственото място, където правилото живее, е тук. */
   if(it.missing){ toast('Редът е отбелязан като неполучен — отмени го първо','#d97706'); return; }
+  if(it.wrong_store){ toast('Редът е отбелязан като стока за друг обект — отмени го първо','#d97706'); return; }
   if(!llCanReceive(it)){ toast('Само обектът получател може да отмята','#dc2626'); return; }
   var at = new Date().toISOString(), by = llActor();
   sbPatch('loading_list_items','id=eq.'+itemId,{received:true, received_by:by, received_at:at}).then(function(res){
@@ -1743,6 +1767,7 @@ function llMarkMissing(itemId){
   var it = llStoreItems.find(function(x){ return String(x.id) === String(itemId); });
   if(!it || it.missing) return;
   if(it.received){ toast('Редът вече е отметнат като получен','#d97706'); return; }
+  if(it.wrong_store){ toast('Редът е отбелязан като стока за друг обект — отмени го първо','#d97706'); return; }
   if(!llCanReceive(it)){ toast('Само обектът получател може да отмята','#dc2626'); return; }
 
   var inp = llStoreCommentInput(itemId);
@@ -1816,6 +1841,289 @@ function llUnmarkMissing(itemId){
     renderLoadingLists();
   });
 }
+/* ═══ „🔀 ЗА ДРУГ ОБЕКТ" (17.11.2026, сесия ll-wrong-store) ═══════════
+   Повод: на 17.11 Габрово получи в листа от 12.11 (Търговище) палет с
+   входяща стока за друг обект. Дотук това беше само свободен коментар и
+   складът не научаваше нищо.
+
+   ТРЕТО ПРОИЗНАСЯНЕ ПО РЕДА: не е received (стоката не е приета от обекта по
+   листа), не е missing (тя Е пристигнала). Редът е обработен (llHandled) —
+   „🏁 Приключи приемането" не чака заради него — но листът се затваря като
+   partial, а документът в Стока на път остава чакащ (llAutoCloseDoc иска
+   received за всички редове на документа).
+
+   wrong_store*        — обектът: за кой обект, кой, кога, коментар;
+   wrong_store_done_*  — складът: кой, кога, какво е направил.
+   Отмяна — само докато складът не е уредил (PATCH с wrong_store_done_at=is.null).
+   „✅ Уредено" работи и на затворен лист — случаят живее отделно от листа. */
+var LL_WRONG_LABEL = '🔀 За друг обект';
+var llWrong = null;   /* {itemId, stores:[…]} — отвореният прозорец */
+
+function llWrongAttr(it){
+  return llWrongStore(it) ? ' data-ll-wrong="'+(llWrongOpen(it) ? 'open' : 'done')+'"' : '';
+}
+/* Маркерът на реда — ЕДИН за картата на обекта и за прегледа на склада. */
+function llWrongBadgeHtml(it){
+  if(!llWrongStore(it)) return '';
+  var open = llWrongOpen(it);
+  var h = '<span data-ll-wrong-badge="'+(open ? 'open' : 'done')+'" style="background:'+(open ? '#f5f3ff' : '#f0fdf4')+';color:'+(open ? '#6d28d9' : '#15803d')+
+    ';border:1px solid '+(open ? '#ddd6fe' : '#bbf7d0')+';border-radius:20px;padding:1px 8px;font-size:11px;font-weight:700;white-space:nowrap;">🔀 за '+
+    esc(it.wrong_store)+(open ? ' — чака склада' : ' — уредено')+'</span>';
+  h += '<div style="font-size:10.5px;color:#64748b;margin-top:2px;white-space:normal;">'+esc(it.wrong_store_by || '—')+
+    (it.wrong_store_at ? ' · '+llFmtStamp(it.wrong_store_at) : '')+
+    (it.wrong_store_note ? ' · '+esc(it.wrong_store_note) : '')+'</div>';
+  if(!open){
+    h += '<div data-ll-wrong-done="1" style="font-size:10.5px;color:#15803d;margin-top:2px;white-space:normal;">✅ '+esc(it.wrong_store_done_by || '—')+
+      (it.wrong_store_done_at ? ' · '+llFmtStamp(it.wrong_store_done_at) : '')+
+      (it.wrong_store_done_note ? ' · '+esc(it.wrong_store_done_note) : '')+'</div>';
+  }
+  return h;
+}
+/* Значката в заглавието — броят НЕУРЕДЕНИТЕ. Уреденият случай е история. */
+function llWrongCountBadge(n){
+  if(!n) return '';
+  return ' <span data-ll-wrong-wait="'+n+'" style="background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">🔀 '+
+    n+' за друг обект</span> ';
+}
+
+/* ─── ОБЕКТЪТ: МАРКИРАНЕ ─────────────────────────────────── */
+function llWrongOpenModal(itemId){
+  var it = llStoreItems.find(function(x){ return String(x.id) === String(itemId); });
+  if(!it) return Promise.resolve(false);
+  if(!llCanReceive(it)){ toast('Само обектът получател може да отмята','#dc2626'); return Promise.resolve(false); }
+  if(llHandled(it)){ toast('Редът вече е отметнат','#d97706'); return Promise.resolve(false); }
+  return loadReportableStores().then(function(rows){
+    var own = it.store_name || '';
+    llWrong = { itemId: String(itemId), stores: (Array.isArray(rows) ? rows : []).filter(function(s){ return s && s !== own; }) };
+    llWrongRender();
+    return true;
+  });
+}
+function llWrongClose(){
+  llWrong = null;
+  var m = document.getElementById('ll-wrong-modal');
+  if(m && m.parentNode) m.parentNode.removeChild(m);
+}
+function llWrongRender(){
+  if(!llWrong) return;
+  var it = llStoreItems.find(function(x){ return String(x.id) === llWrong.itemId; });
+  if(!it){ llWrongClose(); return; }
+  var m = document.getElementById('ll-wrong-modal');
+  if(!m){
+    m = document.createElement('div');
+    m.id = 'll-wrong-modal';
+    m.style.cssText = 'position:fixed;inset:0;z-index:380;background:rgba(15,23,42,.6);display:flex;align-items:flex-start;justify-content:center;padding:14px;overflow-y:auto;';
+    document.body.appendChild(m);
+  }
+  m.innerHTML =
+    '<div style="width:100%;max-width:480px;background:#fff;border-radius:12px;padding:14px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">'+
+        '<div style="font-size:15px;font-weight:700;">'+LL_WRONG_LABEL+'</div>'+
+        '<button onclick="llWrongClose()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 13px;font-size:13px;cursor:pointer;">✕</button>'+
+      '</div>'+
+      '<div style="font-size:12.5px;color:#334155;margin-bottom:8px;"><b>'+esc(llKindLabel(it))+'</b> · '+
+        (it.purchase_doc ? esc(it.purchase_doc) : 'без документ')+' · по листа за '+esc(it.store_name || '—')+'</div>'+
+      '<div style="background:#f5f3ff;border:1px solid #ddd6fe;color:#5b21b6;border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:10px;">'+
+        'Редът НЕ се отмята като получен. Складът, регионалният мениджър и обектът, за който е стоката, научават веднага.</div>'+
+      '<select id="ll-wrong-store" style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-size:13px;margin-bottom:8px;">'+
+        '<option value="">-- За кой обект е стоката? --</option>'+
+        llWrong.stores.map(function(s){ return '<option value="'+escAttr(s)+'">'+esc(s)+'</option>'; }).join('')+
+      '</select>'+
+      '<textarea id="ll-wrong-note" placeholder="Какво е дошло — задължително (напр. „палет входяща с адрес Шумен“)" style="width:100%;box-sizing:border-box;min-height:64px;border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:13px;"></textarea>'+
+      '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">'+
+        '<button onclick="llWrongClose()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+        '<button id="ll-wrong-submit" onclick="llWrongSubmit()" style="border:none;background:#6d28d9;color:#fff;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;">🔀 Запиши</button>'+
+      '</div>'+
+    '</div>';
+}
+function llWrongSubmit(){
+  if(!llWrong) return Promise.resolve(false);
+  var it = llStoreItems.find(function(x){ return String(x.id) === llWrong.itemId; });
+  if(!it){ llWrongClose(); return Promise.resolve(false); }
+  var sel = document.getElementById('ll-wrong-store');
+  var noteEl = document.getElementById('ll-wrong-note');
+  var target = sel ? String(sel.value || '').trim() : '';
+  var note = noteEl ? String(noteEl.value == null ? '' : noteEl.value).trim() : '';
+  if(!target){ toast('Избери за кой обект е стоката','#dc2626'); return Promise.resolve(false); }
+  if(target === (it.store_name || '')){ toast('Това е собственият обект на реда','#dc2626'); return Promise.resolve(false); }
+  if(!note){
+    toast('Опиши какво е дошло — коментарът е задължителен','#dc2626');
+    if(noteEl && noteEl.focus) noteEl.focus();
+    return Promise.resolve(false);
+  }
+  if(llHandled(it)){ toast('Редът вече е отметнат','#d97706'); llWrongClose(); return Promise.resolve(false); }
+  var at = new Date().toISOString(), by = llActor();
+  var body = { wrong_store: target, wrong_store_by: by, wrong_store_at: at, wrong_store_note: note };
+  var btnEl = document.getElementById('ll-wrong-submit');
+  if(btnEl) btnEl.disabled = true;
+  return sbPatch('loading_list_items','id=eq.'+it.id, body).then(function(res){
+    if(!res.ok){
+      if(btnEl) btnEl.disabled = false;
+      toast('НЕ беше записано: '+sbErrMsg(res),'#dc2626');
+      return false;
+    }
+    Object.keys(body).forEach(function(k){ it[k] = body[k]; });
+    llWrongClose();
+    toast('🔀 Отбелязано: стоката е за '+target+'. Складът е известен.');
+    renderLoadingLists();
+    /* Известието е СЛЕД записа: провалът му не отменя маркирането. */
+    llNotifyWrongStore(it);
+    return true;
+  });
+}
+function llWrongUndo(itemId){
+  var it = llStoreItems.find(function(x){ return String(x.id) === String(itemId); });
+  if(!it || !llWrongStore(it)) return Promise.resolve(false);
+  if(!llCanReceive(it)){ toast('Само обектът получател може да отмята','#dc2626'); return Promise.resolve(false); }
+  if(!llWrongOpen(it)){ toast('Складът вече е уредил случая — не може да се отмени','#d97706'); return Promise.resolve(false); }
+  var clear = { wrong_store:null, wrong_store_by:null, wrong_store_at:null, wrong_store_note:null };
+  return llPatchItemWhere(it.id, '&wrong_store_done_at=is.null', clear).then(function(res){
+    if(!res.ok){ toast('Отмяната НЕ беше записана: '+(res.error || ''),'#dc2626'); return false; }
+    if(!res.rows){
+      toast('Складът вече е уредил случая — не може да се отмени','#d97706');
+      loadLoadingLists();
+      return false;
+    }
+    Object.keys(clear).forEach(function(k){ it[k] = null; });
+    toast('↩ Върнато в изчакване');
+    renderLoadingLists();
+    return true;
+  });
+}
+
+/* ─── СКЛАДЪТ: „✅ УРЕДЕНО" ────────────────────────────────── */
+/* Складовият изглед (llCanEdit — склад, logistics, admin) или акаунтът на
+   самия склад-изпращач. */
+function llCanSettleWrong(list){
+  if(!currentUser || !list) return false;
+  if(llCanEdit()) return true;
+  return !!list.warehouse && currentUser.store_name === list.warehouse;
+}
+function llWrongSettleHtml(list, it){
+  if(!llWrongOpen(it) || !llCanSettleWrong(list)) return '';
+  return '<div data-ll-wrong-settle="'+escAttr(it.id)+'" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;white-space:normal;">'+
+    '<input id="ll-wsd-'+escAttr(it.id)+'" placeholder="какво е направено — трансфер, връщане… (задължително)" style="flex:1 1 200px;min-width:160px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-size:11.5px;">'+
+    '<button data-l="'+escAttr(list.id)+'" data-i="'+escAttr(it.id)+'" onclick="llWrongSettle(this.dataset.l,this.dataset.i)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Уредено</button>'+
+    '</div>';
+}
+function llWrongSettle(listId, itemId){
+  var list = llLists.find(function(x){ return String(x.id) === String(listId); }) ||
+             llStoreLists.find(function(x){ return String(x.id) === String(listId); });
+  var row = llItems.concat(llStoreItems).find(function(x){ return String(x.id) === String(itemId); });
+  if(!list || !row) return Promise.resolve(false);
+  if(!llCanSettleWrong(list)){ toast('Нямаш права за това действие','#dc2626'); return Promise.resolve(false); }
+  if(!llWrongOpen(row)){ toast('Случаят вече е уреден','#d97706'); return Promise.resolve(false); }
+  var inp = document.getElementById('ll-wsd-' + itemId);
+  var note = inp ? String(inp.value == null ? '' : inp.value).trim() : '';
+  if(!note){
+    toast('Опиши какво е направено — коментарът е задължителен','#dc2626');
+    if(inp && inp.focus) inp.focus();
+    return Promise.resolve(false);
+  }
+  var body = { wrong_store_done_by: llActor(), wrong_store_done_at: new Date().toISOString(), wrong_store_done_note: note };
+  return llPatchItemWhere(itemId, '&wrong_store=not.is.null&wrong_store_done_at=is.null', body).then(function(res){
+    if(!res.ok){ toast('НЕ беше записано: '+(res.error || ''),'#dc2626'); return false; }
+    if(!res.rows){
+      toast('Случаят вече е уреден или обектът го е отменил','#d97706');
+      loadLoadingLists();
+      return false;
+    }
+    Object.keys(body).forEach(function(k){ row[k] = body[k]; });
+    toast('✅ Уредено');
+    llNotifyWrongSettled(list, row);
+    loadLoadingLists();
+    return true;
+  });
+}
+
+/* ─── ИЗВЕСТИЯТА ─────────────────────────────────────────────
+   При маркиране: складът-изпращач (push + имейл), регионалният на обекта
+   (имейл — push по „Централен офис" би отишъл до целия офис, виж
+   llRegionalEmails) и обектът, за който е стоката (push + имейл).
+   При „✅ Уредено": обектът, който е маркирал (push + имейл). */
+function llWrongMailHtml(list, it, title, color, intro){
+  var body = '<h2 style="color:'+color+';margin:0 0 4px;font-size:19px;">'+title+'</h2>'+
+    '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">'+intro+'</p>'+
+    llMailMeta(list)+
+    '<table style="width:100%;border-collapse:collapse;"><tr>'+
+    '<th '+LL_MAIL_TH+'>Товарна единица</th><th '+LL_MAIL_TH+'>Стокова №</th>'+
+    '<th '+LL_MAIL_TH+'>По листа за</th><th '+LL_MAIL_TH+'>Стоката е за</th><th '+LL_MAIL_TH+'>Коментар</th></tr><tr>'+
+    '<td '+LL_MAIL_TD+'><b>'+esc(llKindLabel(it))+'</b></td>'+
+    '<td '+LL_MAIL_TD+'>'+(it.purchase_doc ? esc(it.purchase_doc) : 'без')+'</td>'+
+    '<td '+LL_MAIL_TD+'>'+esc(it.store_name || '—')+'</td>'+
+    '<td '+LL_MAIL_TD+'><b>'+esc(it.wrong_store || '—')+'</b></td>'+
+    '<td '+LL_MAIL_TD+'>'+esc(it.wrong_store_note || '—')+
+      '<div style="font-size:10.5px;color:#64748b;">'+esc(it.wrong_store_by || '—')+
+      (it.wrong_store_at ? ' · '+llFmtStamp(it.wrong_store_at) : '')+'</div></td></tr>';
+  if(it.wrong_store_done_at){
+    body += '<tr><td colspan="5" style="padding:6px 7px;font-size:12px;border:1px solid #e2e8f0;background:#f0fdf4;">✅ Уредено: <b>'+
+      esc(it.wrong_store_done_note || '—')+'</b> · '+esc(it.wrong_store_done_by || '—')+' · '+llFmtStamp(it.wrong_store_done_at)+'</td></tr>';
+  }
+  body += '</table>'+llMailBtn();
+  return emailWrap(body, 'Товарен лист · ТеМАХ Вътрешна платформа');
+}
+function llNotifyWrongStore(it){
+  var list = llStoreLists.find(function(x){ return String(x.id) === String(it.list_id); }) ||
+             llLists.find(function(x){ return String(x.id) === String(it.list_id); });
+  if(!list) return Promise.resolve(null);
+  var wh = list.warehouse || '', from = it.store_name || '', target = it.wrong_store || '';
+  var dateTxt = fmtDate(list.list_date);
+  var title = '🔀 Товар за ' + target + ' при ' + from;
+  var msg = 'Товарен лист ' + dateTxt + ' от ' + wh + ' · ' + (it.wrong_store_note || '');
+  var subject = 'Товар за друг обект: ' + from + ' → ' + target + ' · товарен лист ' + dateTxt;
+  return Promise.all([llStoreEmails([wh, target]), llRegionalEmails(from)]).then(function(r){
+    var to = [];
+    [r[0][wh] || [], r[1], r[0][target] || []].forEach(function(a){
+      a.forEach(function(e){ if(to.indexOf(e) < 0) to.push(e); });
+    });
+    return Promise.all([
+      llPushTo(wh, title, msg),
+      llPushTo(target, title, msg),
+      llMailTo(to, subject, function(){
+        return llWrongMailHtml(list, it, '🔀 Товар за друг обект', '#6d28d9',
+          '<b>'+esc(from)+'</b> е получил по товарния лист стока, която е за <b>'+esc(target)+'</b>. Складът трябва да я уреди.');
+      })
+    ]);
+  }).then(function(r){
+    /* Писмото е основният канал (складът, регионалният и обектът са в него). */
+    if(!r[2].ok || (!r[0].ok && !r[1].ok)){
+      console.error('llNotifyWrongStore: известието не тръгна изцяло', r);
+      toast('⚠️ Отбелязано, но известието до ' + (wh || 'склада') + ' не тръгна' +
+        (!r[2].ok ? ' (имейл: ' + ((r[2].data || {}).message || r[2].status || 'грешка') + ')' : ''), '#d97706');
+    }
+    return { pushWh: r[0], pushTarget: r[1], mail: r[2] };
+  }).catch(function(err){
+    console.error('llNotifyWrongStore: грешка', err);
+    toast('⚠️ Отбелязано, но известието не тръгна', '#d97706');
+    return null;
+  });
+}
+function llNotifyWrongSettled(list, it){
+  var store = it.store_name || '';
+  var dateTxt = fmtDate(list.list_date);
+  var title = '✅ Уреден товар за ' + (it.wrong_store || '');
+  var msg = 'Товарен лист ' + dateTxt + ' · ' + (it.wrong_store_done_note || '');
+  var subject = 'Уреден товар за друг обект · товарен лист ' + dateTxt;
+  return llStoreEmails([store]).then(function(by){
+    return Promise.all([
+      llPushTo(store, title, msg),
+      llMailTo(by[store] || [], subject, function(){
+        return llWrongMailHtml(list, it, '✅ Товарът за друг обект е уреден', '#16a34a',
+          'Складът е уредил стоката за <b>'+esc(it.wrong_store || '')+'</b>, отбелязана от <b>'+esc(store)+'</b>.');
+      })
+    ]);
+  }).then(function(r){
+    if(!r[0].ok && !r[1].ok){
+      console.error('llNotifyWrongSettled: известието не тръгна', store, r);
+      toast('⚠️ Уредено, но известието до ' + store + ' не тръгна', '#d97706');
+    }
+    return { push: r[0], mail: r[1] };
+  }).catch(function(err){
+    console.error('llNotifyWrongSettled: грешка', err);
+    return null;
+  });
+}
+
 /* Обектът приключва СВОЕТО приемане. Листът се затваря само ако и другите
    обекти по него са приключили — това решава llAutoDoneList() със заявка,
    не от llStoreItems (чуждите редове са невидими тук). */
@@ -1823,7 +2131,7 @@ function llFinishReceiving(listId){
   var mine = llStoreItemsOf(listId);
   if(!mine.length) return;
   var left = llLiveRows(mine).filter(function(i){ return !llHandled(i); }).length;
-  if(left){ toast('Отметни всеки ред като получен или неполучен','#d97706'); return; }
+  if(left){ toast('Отметни всеки ред като получен, неполучен или за друг обект','#d97706'); return; }
   /* Чакащ одобрение ред НЕ спира приключването (13.11.2026, заменя гейта от
      Пакет Г2): той е received:true и се брои като получен при избора
      done/partial. Решението по него идва и след затварянето. */
@@ -1934,7 +2242,7 @@ function llAutoDoneList(listId){
   /* Обектът вижда САМО своите редове, затова проверката е със заявка, не от
      llStoreItems: другите обекти на същия лист са невидими тук и листът би
      се приключвал още на първия готов обект. */
-  return sbGet('loading_list_items','list_id=eq.'+listId+'&select=id,received,missing,approval_status').then(function(all){
+  return sbGet('loading_list_items','list_id=eq.'+listId+'&select=id,received,missing,wrong_store,approval_status').then(function(all){
     if(!Array.isArray(all) || !all.length) return;
     /* Ред, който чака одобрение, НЕ държи листа отворен (решение на Тенчо
        13.11.2026, заменя гейта от Пакет Г2). Той е received:true, тоест се
@@ -1945,14 +2253,18 @@ function llAutoDoneList(listId){
        останалите редове (изходът при l.status === want пази от второ писмо). */
     var rows = llLiveRows(all);
     if(!rows.length) return;
-    if(!rows.every(function(r){ return r.received || r.missing; })) return;
-    var want = rows.some(function(r){ return r.missing; }) ? 'partial' : 'done';
+    if(!rows.every(llHandled)) return;
+    /* „🔀 За друг обект" (17.11.2026) прави листа partial като липсата:
+       стоката не е приета от обекта по листа. */
+    var want = rows.some(function(r){ return r.missing || r.wrong_store; }) ? 'partial' : 'done';
     if(l.status === want) return;
     return sbPatch('loading_lists','id=eq.'+listId,{status:want, done_at:new Date().toISOString()}).then(function(res){
       if(!res.ok){ toast('⚠️ Листът НЕ беше приключен: '+sbErrMsg(res),'#dc2626'); return; }
       l.status = want;
       toast(want === 'partial'
-        ? '⛔ Товарният лист е приключен с липси'
+        ? (rows.some(function(r){ return r.missing; })
+          ? '⛔ Товарният лист е приключен с липси'
+          : '🔀 Товарният лист е приключен — с товар за друг обект')
         : '✅ Товарният лист е приключен');
       /* Тук смяната Е реална: горе има изход при l.status === want. */
       llNotifyClosed(l);
@@ -2355,11 +2667,17 @@ function llClosedHtmlFor(list, items){
      Писмото е за склада — той (или регионалният) решава по реда, затова
      броят стои до брояча, а редът е маркиран в таблицата. */
   var apr = items.filter(llRowPending).length;
-  var body = '<h2 style="color:'+(miss?'#b91c1c':'#16a34a')+';margin:0 0 4px;font-size:19px;">'+
-      (miss ? '⛔ Товарен лист — приключен с липси' : '✅ Товарен лист — приключен')+'</h2>'+
+  /* „🔀 За друг обект" (17.11.2026): брои се до брояча, а редът носи и
+     дали складът го е уредил. */
+  var wrongOpen = items.filter(llWrongOpen).length;
+  var body = '<h2 style="color:'+(miss?'#b91c1c':(c.wrong?'#6d28d9':'#16a34a'))+';margin:0 0 4px;font-size:19px;">'+
+      (miss ? '⛔ Товарен лист — приключен с липси'
+            : (c.wrong ? '🔀 Товарен лист — приключен, с товар за друг обект' : '✅ Товарен лист — приключен'))+'</h2>'+
     '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">получени <b>'+c.received+
       '</b> · неполучени <b style="color:'+(miss?'#b91c1c':'#64748b')+';">'+c.missing+
-      '</b> от '+c.total+' реда'+
+      '</b>'+(c.wrong ? ' · <b data-ll-mail-wrong="'+c.wrong+'" style="color:#6d28d9;">🔀 '+c.wrong+' за друг обект'+
+        (wrongOpen ? ' ('+wrongOpen+' чака склада)' : ' (уредени)')+'</b>' : '')+
+      ' от '+c.total+' реда'+
       (apr ? ' · <b data-ll-mail-apr="'+apr+'" style="color:#92400e;">⏳ '+apr+' '+(apr === 1 ? 'ред чака' : 'реда чакат')+' одобрение</b>' : '')+'</p>'+
     (apr ? '<p style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:6px;padding:8px 12px;font-size:12.5px;margin:0 0 14px;">'+
       'Обектът е добавил извънреден ред, по който още никой не е решил. Одобри или отхвърли го в портала — Транспорт → Товарни листи.</p>' : '')+
@@ -2373,17 +2691,24 @@ function llClosedHtmlFor(list, items){
       /* Червеният ред е СЪДЪРЖАНИЕ, не украса: писмото се чете по диагонал и
          липсата трябва да се хване от първия поглед. */
       var bg = it.missing ? ' style="background:#fef2f2;"'
-             : (llRowPending(it) ? ' style="background:#fffbeb;"' : '');
+             : (llRowPending(it) ? ' style="background:#fffbeb;"'
+             : (llWrongStore(it) ? ' style="background:#f5f3ff;"' : ''));
       var res = it.received
         ? '<span style="color:#16a34a;font-weight:600;">✅ получено</span>'
         : (it.missing
           ? '<span style="color:#dc2626;font-weight:700;">⛔ НЕПОЛУЧЕНО</span>'
-          : '<span style="color:#94a3b8;">не е отметнато</span>');
+          : (llWrongStore(it)
+            ? '<span data-ll-mail-wrong-row="'+(llWrongOpen(it)?'open':'done')+'" style="color:#6d28d9;font-weight:700;">🔀 за '+esc(it.wrong_store)+'</span>'+
+              (llWrongOpen(it)
+                ? ' <span style="color:#6d28d9;white-space:nowrap;">— чака склада</span>'
+                : '<div style="font-size:10.5px;color:#15803d;">✅ уредено: '+esc(it.wrong_store_done_note || '—')+' · '+
+                    esc(it.wrong_store_done_by || '—')+(it.wrong_store_done_at ? ' · '+llFmtStamp(it.wrong_store_done_at) : '')+'</div>')
+            : '<span style="color:#94a3b8;">не е отметнато</span>'));
       if(llRowPending(it)){
         res += ' <span data-ll-mail-appr="pending" style="color:#92400e;font-weight:700;white-space:nowrap;">⏳ чака одобрение</span>';
       }
-      var who = it.received ? it.received_by : (it.missing ? it.missing_by : null);
-      var when = it.received ? it.received_at : (it.missing ? it.missing_at : null);
+      var who = it.received ? it.received_by : (it.missing ? it.missing_by : (it.wrong_store ? it.wrong_store_by : null));
+      var when = it.received ? it.received_at : (it.missing ? it.missing_at : (it.wrong_store ? it.wrong_store_at : null));
       if(who || when){
         res += '<div style="font-size:10.5px;color:#64748b;">'+esc(who || '—')+
           (when ? ' · '+llFmtStamp(when) : '')+'</div>';
@@ -2395,7 +2720,8 @@ function llClosedHtmlFor(list, items){
         '<td '+LL_MAIL_TD+'>'+(it.purchase_doc ? esc(it.purchase_doc) : 'без')+'</td>'+
         '<td '+LL_MAIL_TD+'>'+esc(it.store_name || '—')+'</td>'+
         '<td '+LL_MAIL_TD+'>'+res+'</td>'+
-        '<td '+LL_MAIL_TD+'>'+esc(it.store_comment || '—')+'</td></tr>';
+        '<td '+LL_MAIL_TD+'>'+esc(it.store_comment || '—')+
+          (it.wrong_store_note ? '<div style="font-size:11px;color:#6d28d9;">🔀 '+esc(it.wrong_store_note)+'</div>' : '')+'</td></tr>';
     });
   });
   body += '</table>'+llMailBtn();
@@ -2491,11 +2817,14 @@ function llNotifyClosed(list){
     var dateTxt = fmtDate(list.list_date);
     var title = miss
       ? '⛔ Товарен лист ' + dateTxt + ' — с липси'
-      : '✅ Товарен лист ' + dateTxt + ' приключен';
+      : (c.wrong ? '🔀 Товарен лист ' + dateTxt + ' — с товар за друг обект'
+                 : '✅ Товарен лист ' + dateTxt + ' приключен');
     var apr = llLiveRows(items).filter(llRowPending).length;
-    var msg = 'получени ' + c.received + ' · неполучени ' + c.missing + ' от ' + c.total +
+    var msg = 'получени ' + c.received + ' · неполучени ' + c.missing +
+      (c.wrong ? ' · 🔀 ' + c.wrong + ' за друг обект' : '') + ' от ' + c.total +
       (apr ? ' · ⏳ ' + apr + ' чака одобрение' : '');
-    var subject = (miss ? 'Товарен лист с ЛИПСИ · ' : 'Товарен лист приключен · ') + dateTxt;
+    var subject = (miss ? 'Товарен лист с ЛИПСИ · '
+      : (c.wrong ? 'Товарен лист с товар за друг обект · ' : 'Товарен лист приключен · ')) + dateTxt;
     return llStoreEmails([wh]).then(function(byStore){
       return Promise.all([
         llPushTo(wh, title, msg),
@@ -2638,7 +2967,8 @@ function llListHtml(){
     h += '<tr style="border-bottom:1px solid #f1f5f9;">'+
       '<td style="padding:7px 10px;font-weight:600;white-space:nowrap;">'+fmtDate(l.list_date)+'</td>'+
       '<td style="padding:7px 10px;white-space:nowrap;">'+llStatusBadge(l.status)+
-        (llIncompleteSaves[l.id]?' <span title="Заглавието е записано, но редовете НЕ са. Отвори листа и запиши пак." style="background:#fef2f2;color:#dc2626;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">⚠️ непълен запис</span>':'')+'</td>'+
+        (llIncompleteSaves[l.id]?' <span title="Заглавието е записано, но редовете НЕ са. Отвори листа и запиши пак." style="background:#fef2f2;color:#dc2626;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">⚠️ непълен запис</span>':'')+
+        llWrongCountBadge(llLiveRows(llItemsOf(l.id)).filter(llWrongOpen).length)+'</td>'+
       llStoreNamesCell(llItemsOf(l.id))+
       '<td style="padding:7px 10px;text-align:center;">'+c.pallet+'</td>'+
       '<td style="padding:7px 10px;text-align:center;">'+c.roll+'</td>'+
@@ -4481,7 +4811,7 @@ function llDoneList(id){
     if(!confirm(msg + '\nПриключваш ли все пак?')) return;
   } else if(!confirm('Приключи товарния лист?')) return;
   /* Отхвърленият ред не е липса — за листа той не съществува. */
-  var miss = llLiveRows(llItemsOf(id)).some(function(i){ return i.missing; });
+  var miss = llLiveRows(llItemsOf(id)).some(function(i){ return i.missing || i.wrong_store; });
   var want = miss ? 'partial' : 'done';
   var l0 = llLists.find(function(x){ return String(x.id) === String(id); });
   /* Листът вече е в търсения статус — PATCH-ът минава, но НИЩО не се сменя.
@@ -4489,8 +4819,10 @@ function llDoneList(id){
   var changed = !l0 || l0.status !== want;
   sbPatch('loading_lists','id=eq.'+id,{status:want, done_at:new Date().toISOString()}).then(function(res){
     if(!res.ok){ toast('Грешка при приключване: '+sbErrMsg(res),'#dc2626'); return; }
-    toast(miss ? '⛔ Товарният лист е приключен с липси' : '✅ Товарният лист е приключен',
-      miss ? '#dc2626' : undefined);
+    var realMiss = llLiveRows(llItemsOf(id)).some(function(i){ return i.missing; });
+    toast(realMiss ? '⛔ Товарният лист е приключен с липси'
+      : (miss ? '🔀 Товарният лист е приключен — с товар за друг обект' : '✅ Товарният лист е приключен'),
+      realMiss ? '#dc2626' : undefined);
     var l = llLists.find(function(x){ return String(x.id) === String(id); });
     if(l) l.status = want;
     if(changed) llNotifyClosed(l || { id:id, warehouse:llActiveWarehouse() });
@@ -4553,10 +4885,12 @@ function llViewHtml(){
   /* Значката стои и на затворен лист (13.11.2026): листът вече се затваря с
      чакащ извънреден ред и складът решава по него след това. */
   var aprWait = items.filter(llRowPending).length;
+  var wrongWait = llLiveRows(items).filter(llWrongOpen).length;
 
   var h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">'+
     '<div class="pg-title" style="margin:0;">🚛 Товарен лист · '+fmtDate(l.list_date)+' '+llStatusBadge(l.status)+
-      (aprWait ? ' <span data-ll-apr-wait="'+aprWait+'" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">⏳ '+aprWait+' чака одобрение</span>' : '')+'</div>'+
+      (aprWait ? ' <span data-ll-apr-wait="'+aprWait+'" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">⏳ '+aprWait+' чака одобрение</span>' : '')+
+      llWrongCountBadge(wrongWait)+'</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llOpenEdit(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✏️ Редакция</button>':'')+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llSendList(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Изпрати към обектите</button>':'')+
@@ -4581,7 +4915,8 @@ function llViewHtml(){
   var sum = llSummaryByStore(items);
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:12px;">'+
     '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📊 По обекти ('+c.stores+' обекта · '+c.pallet+' палета · '+c.oversize+' извънгабаритни · '+c.roll+' рула · '+c.bulk+' насип'+
-      (c.missing?' · <span style="color:#dc2626;">'+c.missing+' неполучени</span>':'')+')</div>'+
+      (c.missing?' · <span style="color:#dc2626;">'+c.missing+' неполучени</span>':'')+
+      (c.wrong?' · <span style="color:#6d28d9;">'+c.wrong+' за друг обект</span>':'')+')</div>'+
     '<table id="ll-summary" style="width:100%;border-collapse:collapse;font-size:12px;">'+
     '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;text-align:right;">Палети</th><th style="padding:3px 6px;text-align:right;">Извънгаб.</th><th style="padding:3px 6px;text-align:right;">Рула</th><th style="padding:3px 6px;text-align:right;">Насип</th><th style="padding:3px 6px;text-align:right;">Получени</th><th style="padding:3px 6px;text-align:right;">Неполучени</th>'+
     '<th style="padding:3px 6px;text-align:right;">Артикули</th><th style="padding:3px 6px;text-align:right;">Бройки</th></tr>';
@@ -4591,7 +4926,8 @@ function llViewHtml(){
       '<td style="padding:3px 6px;text-align:right;">'+s.oversize+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.roll+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.bulk+'</td>'+
-      '<td style="padding:3px 6px;text-align:right;">'+s.received+'/'+s.total+'</td>'+
+      '<td style="padding:3px 6px;text-align:right;">'+s.received+'/'+s.total+
+        (s.wrong?' <span data-ll-sum-wrong="'+s.wrong+'" style="color:#6d28d9;font-weight:600;">· 🔀 '+s.wrong+'</span>':'')+'</td>'+
       /* Нулата остава сива — червено число, което значи „няма липси", е точно
          толкова подвеждащо, колкото липсващата колона. */
       '<td style="padding:3px 6px;text-align:right;'+(s.missing?'color:#dc2626;font-weight:700;':'color:#cbd5e1;')+'">'+s.missing+'</td>'+
@@ -4656,11 +4992,11 @@ function llViewHtml(){
         ' <button data-l="'+l.id+'" data-lk="'+escAttr(hk)+'" onclick="llLabels(this.dataset.l,this.dataset.lk)" title="Етикет с QR за този палет" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:4px;">🏷 Етикет</button>'+
         ' <button data-l="'+l.id+'" data-lk="'+escAttr(hk)+'" onclick="llDownloadLabelsPdf(this.dataset.l,this.dataset.lk)" title="Етикетът като PDF" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:2px;">⬇</button></td></tr>';
     }
-    h += '<tr'+(it.missing?' data-missing="1"':'')+
+    h += '<tr'+(it.missing?' data-missing="1"':'')+llWrongAttr(it)+
       (it.added_by_store?' data-ll-added="'+escAttr(it.approval_status||'')+'"':'')+
       ' style="border-bottom:1px solid #f1f5f9;'+
       (llRowPending(it)?'background:#fffbeb;':(llRowRejected(it)?'background:#f8fafc;color:#94a3b8;text-decoration:line-through;':
-        (it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))))+'">'+
+        (it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':(llWrongStore(it)?'background:#f5f3ff;':'')))))+'">'+
       '<td style="padding:6px 9px;color:#94a3b8;">'+(it.position!=null?it.position:'—')+'</td>'+
       '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+((isHeaded||isUnnum)?'padding-left:22px;color:#94a3b8;':'')+'">'+((isHeaded||isUnnum)?'↳':esc(llKindLabel(it)))+
         (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;white-space:normal;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+
@@ -4680,7 +5016,10 @@ function llViewHtml(){
         : (it.missing
           ? '<span style="color:#dc2626;font-weight:700;">⛔ Неполучено'+
             (it.missing_by?' · '+esc(it.missing_by):'')+(it.missing_at?' · '+llFmtStamp(it.missing_at):'')+'</span>'
-          : '<span style="color:#cbd5e1;">—</span>'))+'</td>'+
+          : (llWrongStore(it)
+            /* Работи и на затворен лист — случаят живее отделно от листа. */
+            ? '<div style="white-space:normal;min-width:200px;">'+llWrongBadgeHtml(it)+llWrongSettleHtml(l, it)+'</div>'
+            : '<span style="color:#cbd5e1;">—</span>')))+'</td>'+
       '</tr>';
     /* Артикулите — разгъваем под-ред, само ако има какво да се разгъне. */
     if((it.products || []).length){
@@ -4941,7 +5280,8 @@ function llRenderPrint(list, items, storeFilter){
           '<td class="lp-num">'+s.oversize+'</td>'+
           '<td class="lp-num">'+s.roll+'</td>'+
           '<td class="lp-num">'+s.bulk+'</td>'+
-          '<td class="lp-num">'+s.received+'/'+s.total+'</td></tr>';
+          '<td class="lp-num">'+s.received+'/'+s.total+
+            (s.wrong ? '<div class="lp-tag">'+s.wrong+' за друг обект</div>' : '')+'</td></tr>';
       }).join('')
     : '<tr class="lp-row"><td>—</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0/0</td></tr>';
 
@@ -4982,7 +5322,12 @@ function llRenderPrint(list, items, storeFilter){
             ? '<span class="lp-miss">НЕПОЛУЧЕНО</span>'+
               (it.store_comment ? '<div class="lp-mtag">'+esc(it.store_comment)+'</div>' : '')+
               (it.missing_at ? '<div class="lp-tag">'+llFmtStamp(it.missing_at)+'</div>' : '')
-            : '<span class="lp-box"></span>'))+'</td>'+
+            /* „🔀 За друг обект" — попълнен ред, не празно каре (същото като липсата). */
+            : (it.wrong_store
+              ? '<span class="lp-miss">ЗА '+esc(String(it.wrong_store).toUpperCase())+'</span>'+
+                (it.wrong_store_note ? '<div class="lp-mtag">'+esc(it.wrong_store_note)+'</div>' : '')+
+                '<div class="lp-tag">'+(it.wrong_store_done_at ? 'уредено · '+llFmtStamp(it.wrong_store_done_at) : 'чака склада')+'</div>'
+              : '<span class="lp-box"></span>')))+'</td>'+
       '</tr>'+
       /* 7 колони: № (празна) + Вид (покрита от rowspan) + 5 за артикулите. */
       (withProds(it)
@@ -5481,7 +5826,8 @@ function llDownloadLabelsPdf(listId, unitKey){
    всичко обработено, но има липса → missing; иначе чака. */
 function llUnitState(rows){
   if(rows.every(function(r){ return r.received; })) return 'received';
-  if(rows.every(function(r){ return r.received || r.missing; })) return 'missing';
+  /* „🔀 За друг обект" — обработен, но не получен по листа: брои се с липсите. */
+  if(rows.every(llHandled)) return 'missing';
   return 'waiting';
 }
 function llStoreUnits(listId){
@@ -5536,7 +5882,8 @@ function llHandleScannedPallet(listId, text){
   var open = rows.filter(llOpenForStore);
   if(!open.length){
     return Promise.resolve(llScanResult('done', label, rows.every(function(r){ return r.received; })
-      ? 'вече е получен' : 'вече е отбелязан като неполучен', { tag: tag }));
+      ? 'вече е получен'
+      : (rows.some(llWrongStore) ? 'вече е отбелязан като стока за друг обект' : 'вече е отбелязан като неполучен'), { tag: tag }));
   }
   return llPatchReceived(open, 'палета', true).then(function(res){
     if(res.bad.length) return llScanResult('unknown', 'Не се отметна', label + ' — грешка при запис', { tag: tag });

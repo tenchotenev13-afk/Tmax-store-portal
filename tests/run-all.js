@@ -176,6 +176,7 @@ const TESTS = [
   'loading-lists-pdf.test.js',
   'loading-lists-store-rows.test.js',
   'll-approval-nonblocking.test.js',
+  'll-wrong-store.test.js',
   'loading-lists-photos.test.js',
   'loading-transit-toggle.test.js',
   'loading-store-banner.test.js',

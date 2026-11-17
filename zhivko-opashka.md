@@ -14,6 +14,15 @@
 
 ## Чака изпращане
 
+(в базата от миграцията loading_wrong_store, loading-wrong-store-schema.sql, версия 20261117083038, приложена 17.11.2026)
+- 17.11 · loading_list_items.wrong_store — text, NULL, без default
+- 17.11 · loading_list_items.wrong_store_by — text, NULL, без default
+- 17.11 · loading_list_items.wrong_store_at — timestamptz, NULL, без default
+- 17.11 · loading_list_items.wrong_store_note — text, NULL, без default
+- 17.11 · loading_list_items.wrong_store_done_by — text, NULL, без default
+- 17.11 · loading_list_items.wrong_store_done_at — timestamptz, NULL, без default
+- 17.11 · loading_list_items.wrong_store_done_note — text, NULL, без default
+
 (данни, не схема — миграцията transferi_zachistvane_20261116, transferi-zachistvane-2026-11-16.sql, версия 20261116105503, приложена 16.11.2026)
 - 16.11 · transfers, transfer_cargo, transfer_cargo_events — ВСИЧКИ редове изтрити (старт на чисто от 17.11; 144 / 482 / 794 реда). Огледалото трябва да изтрие своите стари редове в тези три таблици; схемата им не е пипана. Таблиците transfers_archive_20261116, transfer_cargo_archive_20261116, transfer_cargo_events_archive_20261116 НЕ се огледалят (без права за anon). transfer_counters не е пипан — номерата продължават.
 

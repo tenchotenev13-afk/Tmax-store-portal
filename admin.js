@@ -2654,6 +2654,8 @@ var WHO_BROWSER_MAILS = [
   { mail: 'Товарен лист — извънреден ред', on: 'обектът добавя ред', who: 'акаунтите на склада + регионалните на обекта', sites: ['loading.js:llNotifyRowAdded'] },
   { mail: 'Товарен лист — одобрен / отхвърлен ред', on: 'складът решава', who: 'акаунтите на обекта', sites: ['loading.js:llNotifyRowDecided'] },
   { mail: 'Товарен лист — приключен / с липси', on: 'обектът приключва листа', who: 'акаунтите на склада', sites: ['loading.js:llNotifyClosed'] },
+  { mail: 'Товарен лист — товар за друг обект', on: 'обектът маркира „🔀 За друг обект"', who: 'акаунтите на склада + регионалните на обекта + акаунтите на обекта, за който е стоката (+ push до склада и до него)', sites: ['loading.js:llNotifyWrongStore'] },
+  { mail: 'Товарен лист — уреден товар за друг обект', on: 'складът „✅ Уредено"', who: 'акаунтите на обекта, който е маркирал (+ push)', sites: ['loading.js:llNotifyWrongSettled'] },
   { mail: 'Пикинг — „🚚 Тръгна"', on: 'складът пуска транспорта', who: 'акаунтите на обекта, които са в app_settings.picking_users', sites: ['picking.js:pkNotifyShipment'] },
   { mail: 'Разлики — до доставчик', on: '„✉️ Изпрати" (Ц. Тенева, admin)', who: 'ръчно въведени адреси (до / копие / отговор)', sites: ['stock-differences.js:sendDiffEmail'] },
   { mail: 'Разлики — сторно бележка / отговор', on: 'бележка или отговор по разлика', who: 'бележка → управител и склад на обекта; отговор → авторът', sites: ['stock-differences.js:sdNoteNotify'] },
