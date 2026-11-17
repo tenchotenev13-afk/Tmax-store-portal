@@ -24,6 +24,23 @@
         еквивалентен: за обект llActiveWarehouse() е '' и заявка не тръгва и
         без нея; проверката е втора защита, (е) пази резултата.
 
+   „➕" до заявката (сесия ll-co-add, 17.11.2026) — секции и)–т): реален клик
+   попълва първата празна единица (обект + „КЗ <№> · артикул · SAP · к-во" в
+   коментара на склада, без клиента), иначе нова; „✓ в листа" + disabled при
+   вече добавена (и за редове от базата), точен номер, не префикс; обект
+   извън листа → червен toast; запис само при „💾 Запази черновата".
+
+   Мутационна проверка на „➕" (17.11.2026), брой ❌ в скоби:
+     1) без „вече в листа" в llCoAdd и без disabled            → ПАДА (6)
+     1б) само без проверката в llCoAdd (бутонът пак disabled)  → ПАДА (4)
+     2) сравнение по префикс вместо точен номер                → ПАДА (3)
+     3) sbPatch към client_orders при клика                     → ПАДА (2)
+     4) без проверката „обектът е в списъка на листа"          → ПАДА (3)
+     5) името на клиента в коментара                            → ПАДА (14)
+     6) escVal() пак в полето за коментар (кавичка реже)        → ПАДА (1)
+     7) без обновяване на блока при писане в коментара          → ПАДА (1)
+     8) „➕" презаписва празна единица с ръчен коментар         → ПАДА (1)
+
    Пускане:  node tests/loading-client-orders.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
@@ -152,7 +169,9 @@ async function settle() { for (let k = 0; k < 6; k++) await ticks(); }
       }
       ok('над „📦 Редове"', !!mod(h).querySelector('tr[data-ll-unit]') &&
         !!(mod(h).querySelector('tr[data-ll-unit]').compareDocumentPosition(b) & 2));
-      ok('без чекбокс/бутон в блока', !b.querySelector('input,button,select'));
+      ok('без чекбокс/поле в блока', !b.querySelector('input,select,textarea'));
+      ok('бутоните в блока са само „➕" — по един на заявка',
+        b.querySelectorAll('button').length === 3 && b.querySelectorAll('button[data-ll-co-add]').length === 3);
     }
     ok('една заявка към client_orders', coGets(h).length === 1, JSON.stringify(coGets(h)));
   }
@@ -264,6 +283,191 @@ async function settle() { for (let k = 0; k < 6; k++) await ticks(); }
     ok('нула PATCH/POST към client_orders',
       !h.calls.patch.some(p => /client_orders/.test(p.url)) && !h.calls.post.some(p => /client_orders/.test(p.url)));
     ok('без notOk заявки', h.calls.notOk.length === 0, JSON.stringify(h.calls.notOk));
+  }
+
+  /* ─── „➕" (сесия ll-co-add, 17.11.2026) ─────────────────────────── */
+  const addBtn = (h, id) => mod(h).querySelector('[data-ll-co-add="' + id + '"]');
+  const coRow = (h, id) => mod(h).querySelector('[data-ll-co-row="' + id + '"]');
+  const filled = h => h.w.llDraft.units.filter(u => !h.w.llBlankRow(u));
+  const coWrites = h => h.calls.patch.concat(h.calls.post).filter(p => /client_orders/.test(p.url));
+
+  section('и) „➕" при нов лист — първата празна единица, броят не расте');
+  {
+    const h = env();
+    h.w.llNewList();
+    await settle();
+    const before = h.w.llDraft.units.length;
+    const b1 = addBtn(h, 'c1');
+    if (ok('бутон „➕" с title „Добави в листа"', !!b1 && b1.tagName === 'BUTTON' && b1.title === 'Добави в листа')) {
+      realClick(h.w, b1);
+      await ticks();
+      const u0 = h.w.llDraft.units[0];
+      ok('единица 0 получава обекта Варна', u0.store_name === 'Варна', u0.store_name);
+      ok('коментар „КЗ 1001 · Диван ъглов · SAP 500123 · 1 бр"',
+        u0.warehouse_comment === 'КЗ 1001 · Диван ъглов · SAP 500123 · 1 бр', JSON.stringify(u0.warehouse_comment));
+      ok('без името на клиента', String(u0.warehouse_comment).indexOf('Иван Петров') < 0);
+      ok('видът е по подразбиране (палет), с № 1', u0.kind === 'pallet' && u0.pallet_no === 1, u0.kind + ' ' + u0.pallet_no);
+      ok('броят единици не расте', h.w.llDraft.units.length === before, String(h.w.llDraft.units.length));
+      ok('една попълнена единица', filled(h).length === 1);
+      ok('toast „Добавена: КЗ 1001 → Варна"', h.toasts.some(t => t.msg === 'Добавена: КЗ 1001 → Варна'), JSON.stringify(h.toasts));
+      const inp = mod(h).querySelector('#ll-wc-0');
+      ok('полето за коментар показва текста', !!inp && inp.value === 'КЗ 1001 · Диван ъглов · SAP 500123 · 1 бр', inp && inp.value);
+      ok('нищо не е записано в базата при клика', h.calls.post.length === 0 && h.calls.patch.length === 0,
+        JSON.stringify(h.calls.post.concat(h.calls.patch).map(p => p.table)));
+    }
+
+    section('й) втори клик на същата заявка — без втори ред; „✓ в листа", disabled, в DOM-а');
+    const b1b = addBtn(h, 'c1');
+    ok('редът е „✓ в листа"', !!coRow(h, 'c1').querySelector('[data-ll-co-check]') && /✓ в листа/.test(coRow(h, 'c1').textContent));
+    ok('бутонът е в DOM-а и е disabled', !!b1b && b1b.disabled === true);
+    h.w.llCoAdd('c1');
+    await ticks();
+    ok('пак една попълнена единица', filled(h).length === 1, String(filled(h).length));
+
+    section('к) две заявки на един обект → два отделни реда');
+    realClick(h.w, addBtn(h, 'c2'));
+    await ticks();
+    const varna = h.w.llDraft.units.filter(u => u.store_name === 'Варна');
+    ok('два реда за Варна', varna.length === 2, String(varna.length));
+    ok('вторият е палет № 2', varna[1].pallet_no === 2, String(varna[1].pallet_no));
+    ok('коментар от items: „КЗ 1002 · Маса · SAP 700 · 2 бр +1 арт."',
+      varna[1].warehouse_comment === 'КЗ 1002 · Маса · SAP 700 · 2 бр +1 арт.', varna[1].warehouse_comment);
+    ok('без името „Мария"', varna[1].warehouse_comment.indexOf('Мария') < 0);
+
+    section('л) изтрит коментар / махнат ред → отметката изчезва');
+    const i2 = h.w.llDraft.units.indexOf(varna[1]);
+    const wc = mod(h).querySelector('#ll-wc-' + i2);
+    wc.value = '';
+    H.fire(h.w, wc, 'input');
+    ok('изтрит коментар → c2 без „✓", бутонът е активен',
+      !coRow(h, 'c2').querySelector('[data-ll-co-check]') && addBtn(h, 'c2').disabled === false);
+    ok('полето още е на екрана (без пълно прерисуване)', mod(h).querySelector('#ll-wc-' + i2) === wc);
+    realClick(h.w, mod(h).querySelector('button[onclick^="llRemoveRow"][data-i="' + h.w.llDraft.units.indexOf(varna[0]) + '"]'));
+    await ticks();
+    ok('махнат ред → c1 без „✓"', !coRow(h, 'c1').querySelector('[data-ll-co-check]') && addBtn(h, 'c1').disabled === false);
+  }
+
+  section('м) лист без празни единици → добавя се нова');
+  {
+    const h = env();
+    h.w.llNewList();
+    await settle();
+    h.w.llDraft.units = [Object.assign(h.w.llBlankUnit(), { store_name: 'Бургас', pallet_no: 1 }),
+                         Object.assign(h.w.llBlankUnit(), { warehouse_comment: 'чужд коментар' })];
+    h.w.renderLoadingLists();
+    realClick(h.w, addBtn(h, 'c1'));
+    await ticks();
+    ok('3 единици (нова в края)', h.w.llDraft.units.length === 3, String(h.w.llDraft.units.length));
+    ok('новата е за Варна с „КЗ 1001"', h.w.llDraft.units[2].store_name === 'Варна' &&
+      /^КЗ 1001 /.test(h.w.llDraft.units[2].warehouse_comment));
+    ok('единицата с ръчен коментар не е презаписана', h.w.llDraft.units[1].warehouse_comment === 'чужд коментар');
+  }
+
+  section('н) „💾 Запази черновата" след „➕" → редът е в POST-а; client_orders не се пипа');
+  {
+    const h = env();
+    h.w.llNewList();
+    await settle();
+    realClick(h.w, addBtn(h, 'c3'));
+    await ticks();
+    realClick(h.w, btn(mod(h), 'Запази черновата'));
+    await settle();
+    const ip = h.calls.post.filter(p => /loading_list_items/.test(p.url));
+    if (ok('един POST към loading_list_items', ip.length === 1, JSON.stringify(h.calls.post.map(p => p.table)))) {
+      const r = ip[0].body.find(x => x.store_name === 'Бургас');
+      ok('ред Бургас с „КЗ 1003 · Гардероб · SAP 800 · 1 бр"',
+        !!r && r.warehouse_comment === 'КЗ 1003 · Гардероб · SAP 800 · 1 бр', JSON.stringify(ip[0].body));
+    }
+    ok('нула PATCH/POST към client_orders', coWrites(h).length === 0, JSON.stringify(coWrites(h)));
+  }
+
+  section('о) редакция на чернова с „КЗ 1001" от базата → отметката излиза');
+  {
+    const items = [Object.assign({}, OLD_ITEMS[0], { warehouse_comment: 'КЗ 1001 · Диван ъглов · SAP 500123 · 1 бр' })];
+    const h = env({ lists: [L_DRAFT], items });
+    h.w.loadLoadingLists();
+    await settle();
+    h.w.llOpenEdit('L9');
+    await settle();
+    ok('c1 е „✓ в листа"', !!coRow(h, 'c1') && !!coRow(h, 'c1').querySelector('[data-ll-co-check]'));
+    ok('c1 „➕" е disabled', !!addBtn(h, 'c1') && addBtn(h, 'c1').disabled === true);
+    ok('c3 не е отметната', !coRow(h, 'c3').querySelector('[data-ll-co-check]') && addBtn(h, 'c3').disabled === false);
+  }
+
+  section('п) префикс на номера не дава фалшива отметка');
+  {
+    const PFX = [
+      { id: 'p36', in_num: 'Петрич-036', store_name: 'Варна', customer_name: 'А', status: 'pending',
+        created_at: '2026-11-12T09:00:00+00:00', delivery: null, fulfiller: DOB, product: 'Лампа', sap: '1', qty: 1, unit: 'бр', items: null },
+      { id: 'p368', in_num: 'Петрич-0368', store_name: 'Варна', customer_name: 'Б', status: 'pending',
+        created_at: '2026-11-12T10:00:00+00:00', delivery: null, fulfiller: DOB, product: 'Килим', sap: '2', qty: 1, unit: 'бр', items: null }
+    ];
+    const h = env({ orders: PFX });
+    h.w.llNewList();
+    await settle();
+    realClick(h.w, addBtn(h, 'p368'));
+    await ticks();
+    ok('Петрич-0368 е „✓"', !!coRow(h, 'p368').querySelector('[data-ll-co-check]'));
+    ok('Петрич-036 НЕ е „✓"', !coRow(h, 'p36').querySelector('[data-ll-co-check]') && addBtn(h, 'p36').disabled === false);
+    realClick(h.w, addBtn(h, 'p36'));
+    await ticks();
+    ok('и Петрич-036 се добавя като отделен ред', h.w.llDraft.units.filter(u => u.store_name === 'Варна').length === 2);
+    h.w.llDraft.units.forEach(u => { u.warehouse_comment = ''; });
+    h.w.llDraft.units[0].warehouse_comment = 'виж КЗ Петрич-0368, спешно';
+    ok('„КЗ Петрич-0368," в текст → 0368 да, 036 не', h.w.llCoInDraft(PFX[1]) === true && h.w.llCoInDraft(PFX[0]) === false);
+  }
+
+  section('р) обект извън списъка на листа → червен toast, нищо не се добавя');
+  {
+    const ALIEN = [{ id: 'al', in_num: '777', store_name: 'Несъществуващ', customer_name: 'А', status: 'pending',
+      created_at: '2026-11-12T09:00:00+00:00', delivery: null, fulfiller: DOB, product: 'Х', sap: '1', qty: 1, unit: 'бр', items: null }];
+    const h = env({ orders: ALIEN });
+    h.w.llNewList();
+    await settle();
+    const n0 = h.w.llDraft.units.length;
+    realClick(h.w, addBtn(h, 'al'));
+    await ticks();
+    ok('червен toast', h.toasts.some(t => t.col === '#dc2626' && /Несъществуващ/.test(t.msg)), JSON.stringify(h.toasts));
+    ok('нищо не е добавено', filled(h).length === 0 && h.w.llDraft.units.length === n0);
+    ok('без „Добавена"', !h.toasts.some(t => /^Добавена/.test(t.msg)));
+  }
+
+  section('с) <script> / кавичка в номер и артикул — ескейпнати в блока и в полето');
+  {
+    const EV = [{ id: 'ev', in_num: '<script>x()</script>', store_name: 'Варна', customer_name: 'К', status: 'pending',
+      created_at: '2026-11-12T09:00:00+00:00', delivery: null, fulfiller: DOB,
+      product: 'Маса "Лукс" \'2\' <img src=x onerror=y()>', sap: '9', qty: 1, unit: 'бр', items: null }];
+    const h = env({ orders: EV });
+    h.w.llNewList();
+    await settle();
+    const b = addBtn(h, 'ev');
+    ok('бутонът е цял (data-co = id)', !!b && b.dataset.co === 'ev' && b.title === 'Добави в листа');
+    realClick(h.w, b);
+    await ticks();
+    ok('няма <script>/<img> в модула', !mod(h).querySelector('script') && !mod(h).querySelector('img'));
+    const want = 'КЗ <script>x()</script> · Маса "Лукс" \'2\' <img src=x onerror=y()> · SAP 9 · 1 бр';
+    ok('коментарът в данните е буквален', h.w.llDraft.units[0].warehouse_comment === want, h.w.llDraft.units[0].warehouse_comment);
+    const inp = mod(h).querySelector('#ll-wc-0');
+    ok('полето показва буквалния текст', !!inp && inp.value === want, inp && inp.value);
+    ok('редът в блока е „✓ в листа"', !!coRow(h, 'ev').querySelector('[data-ll-co-check]'));
+  }
+
+  section('т) стар запис без items, празни полета → смислен коментар без „—"/„undefined"');
+  {
+    const OLD = [
+      { id: 'o1', in_num: 'Шумен-0240', store_name: 'Варна', customer_name: 'Клиент Стоянов', status: 'pending',
+        created_at: '2026-11-12T09:00:00+00:00', delivery: null, fulfiller: DOB, product: 'Матрак', sap: null, qty: null, unit: null },
+      { id: 'o2', in_num: 'Шумен-0241', store_name: 'Варна', customer_name: 'Клиент Димова', status: 'pending',
+        created_at: '2026-11-12T10:00:00+00:00', delivery: null, fulfiller: DOB, product: '—', sap: '', qty: 3, unit: undefined, items: [] }
+    ];
+    const h = env({ orders: OLD });
+    ok('o1 → „КЗ Шумен-0240 · Матрак"', h.w.llCoComment(OLD[0]) === 'КЗ Шумен-0240 · Матрак', h.w.llCoComment(OLD[0]));
+    ok('o2 → „КЗ Шумен-0241 · 3"', h.w.llCoComment(OLD[1]) === 'КЗ Шумен-0241 · 3', h.w.llCoComment(OLD[1]));
+    [OLD[0], OLD[1], ORDERS[0], ORDERS[1]].forEach(o => {
+      const c = h.w.llCoComment(o);
+      ok('без —/undefined/null: ' + o.id, !/—|undefined|null/.test(c), c);
+      ok('без името на клиента: ' + o.id, c.indexOf(o.customer_name) < 0, c);
+    });
   }
 
   report();

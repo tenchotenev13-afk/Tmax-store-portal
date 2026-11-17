@@ -3206,6 +3206,70 @@ function llCoDay(ts){
   var d = new Date(ts);
   return isNaN(d.getTime()) ? String(ts) : fmtDate(toLocalISO(d));
 }
+/* Коментарът на склада за ред от заявка (17.11.2026, „➕"):
+   „КЗ <№> · <артикул> · SAP <код> · <к-во мярка>" (+N арт.). БЕЗ името на
+   клиента — коментарът стига до обекта, печата, PDF-а и писмото. Празно
+   поле отпада, не става „—" / „undefined". llCoLabel() е за блока и не се
+   пипа. */
+function llCoComment(o){
+  o = o || {};
+  var val = function(x){ var s = x === null || x === undefined ? '' : String(x).trim(); return s === '—' ? '' : s; };
+  var items = Array.isArray(o.items) ? o.items.filter(Boolean) : [];
+  var it = items.length ? items[0] : o;
+  var num = val(o.in_num), prod = val(it.product), sap = val(it.sap), qty = val(it.qty), unit = val(it.unit);
+  if(prod.length > 60) prod = prod.slice(0, 60) + '…';
+  var parts = [num ? 'КЗ ' + num : '', prod, sap ? 'SAP ' + sap : '', qty ? (qty + (unit ? ' ' + unit : '')) : ''].filter(Boolean);
+  return parts.join(' · ') + (items.length > 1 ? ' +' + (items.length - 1) + ' арт.' : '');
+}
+/* В листа ли е заявката: „КЗ <№>" в коментара на някоя единица от
+   черновата, с ТОЧНИЯ номер — след него край, интервал или знак, не буква,
+   цифра, „-" или „_" („КЗ Петрич-036" не хваща „КЗ Петрич-0368").
+   Гледа само ТЕКУЩИЯ лист (етап 2 ще го направи с колона). */
+function llCoInDraft(o){
+  var num = o && o.in_num != null ? String(o.in_num).trim() : '';
+  if(!num || !llDraft) return false;
+  var needle = 'КЗ ' + num;
+  return (llDraft.units || []).some(function(u){
+    var c = String((u && u.warehouse_comment) || '');
+    for(var at = c.indexOf(needle); at >= 0; at = c.indexOf(needle, at + 1)){
+      var before = at ? c.charAt(at - 1) : '';
+      var after = c.charAt(at + needle.length);
+      if(!/[0-9A-Za-zА-Яа-яЁё_-]/.test(before) && !/[0-9A-Za-zА-Яа-яЁё_-]/.test(after)) return true;
+    }
+    return false;
+  });
+}
+/* „➕" до заявката: попълва черновата в паметта — нищо не се пише в базата
+   до „💾 Запази черновата". Първата недокосната единица (llBlankRow) с празен
+   коментар, иначе нова (както llAddFreeRow). Видът остава този на
+   llBlankUnit() — палет; складът го сменя сам. */
+function llCoAdd(id){
+  if(!llDraft) return;
+  var o = null;
+  (llCoDue || []).forEach(function(x){ if(String(x.id) === String(id)) o = x; });
+  if(!o) return;
+  if(llCoInDraft(o)){ toast('Заявката вече е в листа', '#d97706'); return; }
+  var store = String(o.store_name || '').trim();
+  if(!store || (llStores || []).indexOf(store) < 0 || store === llActiveWarehouse()){
+    toast('Обектът „' + (store || '—') + '" го няма в списъка на листа — редът не е добавен', '#dc2626');
+    return;
+  }
+  var u = null;
+  for(var i = 0; i < llDraft.units.length; i++){
+    var c = llDraft.units[i];
+    if(llBlankRow(c) && !String(c.warehouse_comment || '').trim()){ u = c; break; }
+  }
+  if(!u){ u = llBlankUnit(); llDraft.units.push(u); }
+  u.store_name = store;
+  u.warehouse_comment = llCoComment(o);
+  llAssignPalletNo(u);
+  renderLoadingLists();
+  toast('Добавена: КЗ ' + (o.in_num || '—') + ' → ' + store);
+}
+function llCoRefreshBlock(){
+  var el = document.querySelector('#mod-loading [data-ll-co]');
+  if(el) el.outerHTML = llCoBlockHtml();
+}
 /* Блокът в редактора. Само тук — НЕ в изгледа на обекта, в картата на
    изпратен лист, в печата, в имейлите, в История и в „Днес". Без склад
    (admin без избор) не се показва. */
@@ -3230,10 +3294,18 @@ function llCoBlockHtml(){
     groups.forEach(function(s){
       h += '<div data-ll-co-store="'+llAttr(s)+'" style="font-size:12px;font-weight:700;color:#78350f;margin:6px 0 2px;">'+esc(s)+' ('+byStore[s].length+')</div>';
       byStore[s].forEach(function(o){
-        h += '<div data-ll-co-row="'+llAttr(o.id)+'" style="font-size:12px;padding:2px 0 2px 12px;border-top:1px solid #fef3c7;">'+
+        /* „➕" остава в DOM-а и когато заявката вече е в листа — неактивен,
+           с „✓ в листа" до него, не скрит. */
+        var inList = llCoInDraft(o);
+        h += '<div data-ll-co-row="'+llAttr(o.id)+'"'+(inList ? ' data-ll-co-in="1"' : '')+' style="font-size:12px;padding:2px 0 2px 12px;border-top:1px solid #fef3c7;">'+
+          '<button type="button" data-ll-co-add="'+llAttr(o.id)+'" data-co="'+llAttr(o.id)+'" onclick="llCoAdd(this.dataset.co)" title="Добави в листа"'+
+            (inList ? ' disabled' : '')+
+            ' style="border:1px solid #fcd34d;background:'+(inList ? '#f8fafc' : '#fff')+';color:'+(inList ? '#cbd5e1' : '#b45309')+';border-radius:5px;padding:0 6px;font-size:11px;font-weight:700;cursor:'+(inList ? 'default' : 'pointer')+';margin-right:6px;">➕</button>'+
           esc(llCoLabel(o))+
           ' <span style="color:#a16207;">· заявена '+esc(llCoDay(o.created_at))+
-          ' · доставка '+(o.delivery ? esc(fmtDate(o.delivery)) : '—')+'</span></div>';
+          ' · доставка '+(o.delivery ? esc(fmtDate(o.delivery)) : '—')+'</span>'+
+          (inList ? ' <span data-ll-co-check="1" style="color:#15803d;font-weight:700;">✓ в листа</span>' : '')+
+          '</div>';
       });
     });
   }
@@ -3489,6 +3561,9 @@ function llSetRowField(i, field, val){
     return;
   }
   it[field] = (val === '') ? null : val;
+  /* Изтрит / сменен коментар сменя „✓ в листа" — само блокът, без целия
+     редактор (полето държи фокуса). */
+  if(field === 'warehouse_comment') llCoRefreshBlock();
   if(field === 'store_name'){
     /* Палет № е в рамките на обекта: нов обект → следващият свободен № там. */
     llAssignPalletNo(it);
@@ -4513,7 +4588,7 @@ function llEditorHtml(){
              червена рамка, докато е празно — иначе складът го подминава като
              всяко друго незадължително поле. */
           (llIsOversize(it.kind) ? '<div style="font-size:10px;font-weight:700;color:#92400e;margin-bottom:2px;">Какъв е товарът *</div>' : '')+
-          '<input id="ll-wc-'+i+'" value="'+escVal(it.warehouse_comment)+'" data-i="'+i+'"'+
+          '<input id="ll-wc-'+i+'" value="'+llAttr(it.warehouse_comment)+'" data-i="'+i+'"'+
           (llIsOversize(it.kind) ? ' placeholder="напр. стелажи, ламперия…"' : '')+
           ' oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value)" style="width:100%;min-width:120px;border:1px solid '+(llOversizeNeedsComment(it)?'#fca5a5':'#e2e8f0')+';border-radius:5px;padding:2px 6px;font-size:12px;">'+
           /* „Стока в стока" — по една група на ред; проверката е при запис. */
