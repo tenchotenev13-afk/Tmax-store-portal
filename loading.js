@@ -80,6 +80,20 @@ var llTransitError = false;   /* снимката НЕ се зареди — р�
 var llCoDue = [];
 var llCoError = false;
 var llCoWh = '';
+/* Етап 2 (17.11.2026, сесия ll-co-link): връзка ред ↔ заявка в колоната
+   loading_list_items.client_order_id (миграция 20261117125425).
+   llCoOther — {id на заявка: {list_id, list_date, status}} в ДРУГ неприключен
+   лист на склада (draft / sent / partial); llCoOtherError — тази проверка
+   падна (≠ „не е в друг лист"); llCoOtherReady — заредена е.
+   llCoSync — {id на лист: {state, pending, unverified}} за червения ред
+   „КЗ … не стана „Изпратена"" в изгледа на изпратен лист.
+   LL_CO_LINK_SINCE — редовете отпреди колоната; само те се броят по текста. */
+var llCoOther = {};
+var llCoOtherError = false;
+var llCoOtherReady = false;
+var llCoSync = {};
+var LL_CO_LINK_SINCE = '2026-11-17T12:54:25';
+var LL_CO_AUTO_FROM = ['pending', 'processed', 'approved'];
 /* Показва ли се блокът „Документи от Стока на път" в редактора. Ключът е
    app_settings 'loading_transit_docs' и се чете при всяко отваряне на
    редактора (llLoadEditorData). Изключено по подразбиране И в базата, И тук:
@@ -3020,7 +3034,8 @@ function llQuickReset(keepStore){
 function llBlankUnit(){
   return { kind: 'pallet', pallet_no: null, pallet_total: null,
            docs: [], clears_doc: null, store_name: '',
-           warehouse_comment: '', nested_codes: '', partial: false, products: [], _rowIds: [], _spareIds: [], _docDraft: '' };
+           warehouse_comment: '', nested_codes: '', partial: false, products: [], _rowIds: [], _spareIds: [], _docDraft: '',
+           client_order_id: null };
 }
 /* Единица, която човекът НЕ е пипал: без обект, без документ и без артикули.
    Коментарът не я прави „попълнена" сама по себе си — без обект единицата
@@ -3077,6 +3092,12 @@ function llUnitsFromRows(rows){
       if(doc && u.docs.indexOf(doc) < 0){ u.docs.push(doc); u._rowIds.push(r.id); }
       else if(r.id){ u._spareIds.push(r.id); }
       if(!u.warehouse_comment && r.warehouse_comment) u.warehouse_comment = r.warehouse_comment;
+      /* Връзката със заявка (етап 2) — на всичките редове на единицата е
+         една и съща; първият ред с нея я дава. */
+      if(!u.client_order_id && r.client_order_id) u.client_order_id = r.client_order_id;
+      /* Ред отпреди колоната (LL_CO_LINK_SINCE) без връзка се брои по
+         текста „КЗ <№>" в коментара, както в етап 1. */
+      if(r.created_at && String(r.created_at) < LL_CO_LINK_SINCE) u._coLegacy = true;
       if(!u.nested_codes && r.nested_codes) u.nested_codes = r.nested_codes;
       if(r.partial) u.partial = true;
       if(r.clears_doc && !u.clears_doc) u.clears_doc = r.clears_doc;
@@ -3221,16 +3242,23 @@ function llCoComment(o){
   var parts = [num ? 'КЗ ' + num : '', prod, sap ? 'SAP ' + sap : '', qty ? (qty + (unit ? ' ' + unit : '')) : ''].filter(Boolean);
   return parts.join(' · ') + (items.length > 1 ? ' +' + (items.length - 1) + ' арт.' : '');
 }
-/* В листа ли е заявката: „КЗ <№>" в коментара на някоя единица от
-   черновата, с ТОЧНИЯ номер — след него край, интервал или знак, не буква,
-   цифра, „-" или „_" („КЗ Петрич-036" не хваща „КЗ Петрич-0368").
-   Гледа само ТЕКУЩИЯ лист (етап 2 ще го направи с колона). */
+/* В листа ли е заявката (етап 2, 17.11.2026): по колоната client_order_id
+   на единица от ТЕКУЩАТА чернова. Текстът в коментара НЕ решава — изтрит или
+   написан на ръка „КЗ …" не слага и не маха връзката. Единствено изключение:
+   единица от редове отпреди колоната (_coLegacy) без връзка се брои по
+   „КЗ <№>" с ТОЧНИЯ номер — след него край, интервал или знак, не буква,
+   цифра, „-" или „_" („КЗ Петрич-036" не хваща „КЗ Петрич-0368"). */
 function llCoInDraft(o){
-  var num = o && o.in_num != null ? String(o.in_num).trim() : '';
-  if(!num || !llDraft) return false;
+  if(!o || !llDraft) return false;
+  var id = o.id != null ? String(o.id) : '';
+  var units = llDraft.units || [];
+  if(id && units.some(function(u){ return u && u.client_order_id && String(u.client_order_id) === id; })) return true;
+  var num = o.in_num != null ? String(o.in_num).trim() : '';
+  if(!num) return false;
   var needle = 'КЗ ' + num;
-  return (llDraft.units || []).some(function(u){
-    var c = String((u && u.warehouse_comment) || '');
+  return units.some(function(u){
+    if(!u || u.client_order_id || !u._coLegacy) return false;
+    var c = String(u.warehouse_comment || '');
     for(var at = c.indexOf(needle); at >= 0; at = c.indexOf(needle, at + 1)){
       var before = at ? c.charAt(at - 1) : '';
       var after = c.charAt(at + needle.length);
@@ -3239,16 +3267,70 @@ function llCoInDraft(o){
     return false;
   });
 }
+/* В друг неприключен лист на склада ли е заявката → {list_id, list_date,
+   status} или null. null и когато проверката е паднала — тогава блокът го
+   казва (llCoOtherError) и „➕" остава активен. */
+function llCoOtherOf(o){
+  if(!o || o.id == null) return null;
+  return llCoOther[String(o.id)] || null;
+}
+function llCoOtherText(x){
+  if(!x) return '';
+  return '✓ в лист от ' + (x.list_date ? String(fmtDate(x.list_date)).slice(0, 5) : '—') +
+    ' (' + (x.status === 'draft' ? 'чернова' : 'изпратен') + ')';
+}
+/* Една заявка за всички свързани редове на ДРУГИТЕ неприключени листи на
+   склада — през вграждане на loading_lists (!inner), на страници по 1000
+   (sbGetAll). Текущият лист се изключва: неговото състояние е в паметта. */
+function llLoadCoOther(wh, curId){
+  llCoOther = {}; llCoOtherError = false; llCoOtherReady = false;
+  if(!wh || !llCanEdit()) return Promise.resolve();
+  return sbGetAll('loading_list_items',
+    'select=client_order_id,list_id,loading_lists!inner(list_date,status,warehouse)' +
+    '&client_order_id=not.is.null' +
+    '&loading_lists.warehouse=eq.' + encodeURIComponent(wh) +
+    '&loading_lists.status=in.(draft,sent,partial)' +
+    '&order=id.asc').then(function(rows){
+    if(!Array.isArray(rows) || rows.partial) throw new Error('заявката не мина');
+    var map = {};
+    rows.forEach(function(r){
+      if(!r || !r.client_order_id) return;
+      if(curId && String(r.list_id) === String(curId)) return;
+      var l = r.loading_lists || {};
+      var key = String(r.client_order_id);
+      /* Чернова губи от изпратен: изпратеният лист е по-силното твърдение. */
+      if(map[key] && map[key].status !== 'draft') return;
+      map[key] = { list_id: r.list_id, list_date: l.list_date, status: l.status };
+    });
+    llCoOther = map; llCoOtherReady = true;
+  }).catch(function(e){
+    console.error('llLoadCoOther', e);
+    llCoOther = {}; llCoOtherError = true; llCoOtherReady = true;
+    toast('Проверката дали заявките са в друг лист не мина: ' + (e && e.message ? e.message : e), '#dc2626');
+  });
+}
+/* № на заявка за чипа: от блока, иначе от кеша (сложен при „➕" / при
+   проверките), иначе началото на id-то. */
+var llCoNumCache = {};
+function llCoNumOf(id){
+  var k = String(id || '');
+  var o = (llCoDue || []).filter(function(x){ return String(x.id) === k; })[0];
+  if(o && o.in_num) return String(o.in_num);
+  return llCoNumCache[k] || k.slice(0, 8);
+}
 /* „➕" до заявката: попълва черновата в паметта — нищо не се пише в базата
    до „💾 Запази черновата". Първата недокосната единица (llBlankRow) с празен
    коментар, иначе нова (както llAddFreeRow). Видът остава този на
-   llBlankUnit() — палет; складът го сменя сам. */
+   llBlankUnit() — палет; складът го сменя сам. Единицата получава и
+   client_order_id — записът го пише на ВСИЧКИТЕ ѝ редове. */
 function llCoAdd(id){
   if(!llDraft) return;
   var o = null;
   (llCoDue || []).forEach(function(x){ if(String(x.id) === String(id)) o = x; });
   if(!o) return;
   if(llCoInDraft(o)){ toast('Заявката вече е в листа', '#d97706'); return; }
+  var other = llCoOtherOf(o);
+  if(other){ toast('Заявката вече е в друг лист — ' + llCoOtherText(other).replace('✓ ', ''), '#d97706'); return; }
   var store = String(o.store_name || '').trim();
   if(!store || (llStores || []).indexOf(store) < 0 || store === llActiveWarehouse()){
     toast('Обектът „' + (store || '—') + '" го няма в списъка на листа — редът не е добавен', '#dc2626');
@@ -3262,9 +3344,29 @@ function llCoAdd(id){
   if(!u){ u = llBlankUnit(); llDraft.units.push(u); }
   u.store_name = store;
   u.warehouse_comment = llCoComment(o);
+  u.client_order_id = o.id;
+  if(o.in_num) llCoNumCache[String(o.id)] = String(o.in_num);
   llAssignPalletNo(u);
   renderLoadingLists();
   toast('Добавена: КЗ ' + (o.in_num || '—') + ' → ' + store);
+}
+/* „✕" на чипа: маха САМО връзката от единицата; коментарът остава. Записът
+   праща null (llBuildItemRows). _coLegacy пада — иначе текстът „КЗ …" би
+   върнал отметката. */
+function llCoUnlink(i){
+  if(!llDraft || !llDraft.units[i]) return;
+  var u = llDraft.units[i];
+  u.client_order_id = null;
+  u._coLegacy = false;
+  renderLoadingLists();
+}
+/* Чипът „🧾 КЗ <№>" с „✕" до коментара на единица със заявка (редактор). */
+function llCoChipHtml(it, i){
+  if(!it || !it.client_order_id) return '';
+  return '<div data-ll-co-chip="'+i+'" style="display:inline-flex;align-items:center;gap:4px;margin-top:3px;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;border-radius:12px;padding:1px 4px 1px 8px;font-size:11px;font-weight:700;">'+
+    '🧾 КЗ '+esc(llCoNumOf(it.client_order_id))+
+    '<button type="button" data-ll-co-unlink="'+i+'" data-i="'+i+'" onclick="llCoUnlink(this.dataset.i)" title="Махни връзката със заявката (коментарът остава)" '+
+      'style="border:none;background:transparent;color:#b45309;font-size:12px;font-weight:700;cursor:pointer;padding:0 3px;">✕</button></div>';
 }
 function llCoRefreshBlock(){
   var el = document.querySelector('#mod-loading [data-ll-co]');
@@ -3285,6 +3387,9 @@ function llCoBlockHtml(){
   } else if(!llCoDue.length){
     h += '<div data-ll-co-empty="1" style="font-size:12px;color:#92400e;">Няма дължими клиентски заявки</div>';
   } else {
+    if(llCoOtherError){
+      h += '<div data-ll-co-other-error="1" style="font-size:12px;color:#dc2626;font-weight:600;margin-bottom:6px;">⚠️ Проверката дали заявките са в друг лист НЕ мина — „➕" не знае дали заявката вече не е тръгнала с друг лист.</div>';
+    }
     var groups = [], byStore = {};
     llCoDue.forEach(function(o){
       var s = o.store_name || '—';
@@ -3295,27 +3400,156 @@ function llCoBlockHtml(){
       h += '<div data-ll-co-store="'+llAttr(s)+'" style="font-size:12px;font-weight:700;color:#78350f;margin:6px 0 2px;">'+esc(s)+' ('+byStore[s].length+')</div>';
       byStore[s].forEach(function(o){
         /* „➕" остава в DOM-а и когато заявката вече е в листа — неактивен,
-           с „✓ в листа" до него, не скрит. */
+           с „✓ в листа" до него, не скрит. Същото за друг неприключен лист. */
         var inList = llCoInDraft(o);
-        h += '<div data-ll-co-row="'+llAttr(o.id)+'"'+(inList ? ' data-ll-co-in="1"' : '')+' style="font-size:12px;padding:2px 0 2px 12px;border-top:1px solid #fef3c7;">'+
+        var other = inList ? null : llCoOtherOf(o);
+        var off = inList || !!other;
+        h += '<div data-ll-co-row="'+llAttr(o.id)+'"'+(inList ? ' data-ll-co-in="1"' : '')+(other ? ' data-ll-co-other="'+llAttr(other.list_id)+'"' : '')+' style="font-size:12px;padding:2px 0 2px 12px;border-top:1px solid #fef3c7;">'+
           '<button type="button" data-ll-co-add="'+llAttr(o.id)+'" data-co="'+llAttr(o.id)+'" onclick="llCoAdd(this.dataset.co)" title="Добави в листа"'+
-            (inList ? ' disabled' : '')+
-            ' style="border:1px solid #fcd34d;background:'+(inList ? '#f8fafc' : '#fff')+';color:'+(inList ? '#cbd5e1' : '#b45309')+';border-radius:5px;padding:0 6px;font-size:11px;font-weight:700;cursor:'+(inList ? 'default' : 'pointer')+';margin-right:6px;">➕</button>'+
+            (off ? ' disabled' : '')+
+            ' style="border:1px solid #fcd34d;background:'+(off ? '#f8fafc' : '#fff')+';color:'+(off ? '#cbd5e1' : '#b45309')+';border-radius:5px;padding:0 6px;font-size:11px;font-weight:700;cursor:'+(off ? 'default' : 'pointer')+';margin-right:6px;">➕</button>'+
           esc(llCoLabel(o))+
           ' <span style="color:#a16207;">· заявена '+esc(llCoDay(o.created_at))+
           ' · доставка '+(o.delivery ? esc(fmtDate(o.delivery)) : '—')+'</span>'+
           (inList ? ' <span data-ll-co-check="1" style="color:#15803d;font-weight:700;">✓ в листа</span>' : '')+
+          (other ? ' <span data-ll-co-check="other" style="color:#15803d;font-weight:700;">'+esc(llCoOtherText(other))+'</span>' : '')+
           '</div>';
       });
     });
   }
   return h + '</div>';
 }
+/* ── Изпращане → „Изпратена" (етап 2) ───────────────────────────────────
+   Образец: tfCoAutoSent() в transfers.js (05.11.2026) — копие на правилото,
+   не извикване (transfers.js се зарежда СЛЕД loading.js и може да е скрит).
+   Свеж прочит на свързаните редове и на заявките; „Изпратена" става САМО
+   заявка със статус от LL_CO_AUTO_FROM и изпълнител = склада на листа
+   (trim + lower). Записът е като ръчния бутон: PATCH status 'sent' +
+   syncLinkedTransport (client-orders.js) с прочетения ред. Провал по заявка
+   НЕ връща листа в чернова — червен toast с номерата; червеният ред в
+   изгледа на листа (llCoSync) го казва и след презареждане. */
+var LL_CO_STATUS_BG = { sent: 'Изпратена', arrived: 'Пристигнала', done: 'Изпълнена', refused: 'Отказана', postponed: 'Отложена' };
+function llCoNorm(s){ return String(s || '').trim().toLowerCase(); }
+/* Свързаните заявки на листа, прочетени свежо: {ids, byId}. Хвърля при
+   паднало четене — „не се прочете" не е „няма свързани". */
+function llCoReadLinked(listId){
+  return sbGetOk('loading_list_items', 'list_id=eq.' + encodeURIComponent(listId) +
+    '&client_order_id=not.is.null&select=client_order_id').then(function(res){
+    if(!res.ok) throw new Error(res.error || 'редовете не се прочетоха');
+    var ids = [];
+    res.rows.forEach(function(r){ var k = r && r.client_order_id ? String(r.client_order_id) : ''; if(k && ids.indexOf(k) < 0) ids.push(k); });
+    if(!ids.length) return { ids: [], byId: {} };
+    return sbGetOk('client_orders', 'select=id,in_num,status,fulfiller,paid_transport,transport_id&id=in.(' + ids.join(',') + ')').then(function(r2){
+      if(!r2.ok) throw new Error(r2.error || 'заявките не се прочетоха');
+      var byId = {};
+      r2.rows.forEach(function(o){ if(o && o.id){ byId[String(o.id)] = o; if(o.in_num) llCoNumCache[String(o.id)] = String(o.in_num); } });
+      return { ids: ids, byId: byId };
+    });
+  });
+}
+function llCoAutoSent(list, head){
+  if(!list || !list.id) return Promise.resolve(null);
+  var wh = llCoNorm(list.warehouse);
+  var sum = { sent: [], other: [], foreign: [], failed: [], trFailed: [] };
+  return llCoReadLinked(list.id).then(function(d){
+    if(!d.ids.length) return null;
+    var jobs = [];
+    d.ids.forEach(function(id){
+      var r = d.byId[id];
+      /* Не върнат ред (изтрита заявка / права) = непроверена, не „няма какво". */
+      if(!r){ sum.failed.push(llCoNumOf(id)); return; }
+      var num = r.in_num || llCoNumOf(id);
+      if(LL_CO_AUTO_FROM.indexOf(r.status) < 0){ sum.other.push(num + ' (' + (LL_CO_STATUS_BG[r.status] || r.status || '—') + ')'); return; }
+      if(!wh || llCoNorm(r.fulfiller) !== wh){ sum.foreign.push(num + (r.fulfiller ? ' (' + r.fulfiller + ')' : '')); return; }
+      jobs.push(sbPatch('client_orders', 'id=eq.' + r.id, { status: 'sent' }).then(function(res){
+        if(!res || !res.ok){ sum.failed.push(num); return; }
+        sum.sent.push(num);
+        if(typeof syncLinkedTransport === 'function'){
+          return Promise.resolve(syncLinkedTransport(r.id, 'sent', r)).then(function(okT){
+            if(okT === false) sum.trFailed.push(num);
+          });
+        }
+      }, function(){ sum.failed.push(num); }));
+    });
+    return Promise.all(jobs).then(function(){
+      var lines = [head || '✅ Записано'];
+      if(sum.sent.length) lines.push('✅ ' + sum.sent.length + ' клиентски заявки → Изпратена (' + sum.sent.join(', ') + ')');
+      if(sum.other.length) lines.push('Не са пипнати — вече с друг статус: ' + sum.other.join(', '));
+      if(sum.foreign.length) lines.push('Не са пипнати — изпълнител е друг: ' + sum.foreign.join(', '));
+      if(sum.failed.length) lines.push('⚠️ НЕ са обновени на „Изпратена“: ' + sum.failed.join(', ') + ' — отбележи ги ръчно в Клиентски заявки');
+      if(sum.trFailed.length) lines.push('⚠️ Платеният транспорт НЕ е обновен за: ' + sum.trFailed.join(', ') + ' — провери в таб Транспорт');
+      var el = document.getElementById('toast');
+      if(el) el.style.whiteSpace = 'pre-line';
+      toast(lines.join('\n'), sum.failed.length ? '#dc2626' : (sum.other.length || sum.foreign.length || sum.trFailed.length ? '#d97706' : '#16a34a'));
+      return sum;
+    });
+  }).catch(function(e){
+    /* Листът вече е изпратен — тук нищо не бива да го „провали". */
+    console.error('llCoAutoSent', e);
+    toast('⚠️ Свързаните клиентски заявки НЕ са проверени: ' + (e && e.message ? e.message : e) + ' — отбележи ги ръчно в Клиентски заявки', '#dc2626');
+    return null;
+  });
+}
+/* Изглед на изпратен / частично приключен лист (склад и admin): свързана
+   заявка, която още е pending / processed / approved с изпълнител = склада,
+   не е станала „Изпратена" → червен ред с „🔁 Опитай пак". Смята се от
+   БАЗАТА при отваряне на листа, тоест се вижда и след презареждане. */
+function llCoCheckSync(l){
+  var id = String(l.id);
+  llCoSync[id] = { state: 'loading', pending: [], unverified: [] };
+  var wh = llCoNorm(l.warehouse);
+  return llCoReadLinked(l.id).then(function(d){
+    var st = { state: 'ok', pending: [], unverified: [] };
+    d.ids.forEach(function(k){
+      var r = d.byId[k];
+      if(!r){ st.unverified.push(llCoNumOf(k)); return; }
+      if(LL_CO_AUTO_FROM.indexOf(r.status) >= 0 && wh && llCoNorm(r.fulfiller) === wh) st.pending.push(r.in_num || llCoNumOf(k));
+    });
+    llCoSync[id] = st;
+  }).catch(function(e){
+    console.error('llCoCheckSync', e);
+    llCoSync[id] = { state: 'error', pending: [], unverified: [], error: (e && e.message) || String(e) };
+  }).then(function(){
+    if(llView === 'view' && String(llCurrentId) === id) renderLoadingLists();
+  });
+}
+function llCoSyncHtml(l){
+  if(!l || (l.status !== 'sent' && l.status !== 'partial') || !llCanEdit()) return '';
+  var id = String(l.id);
+  var st = llCoSync[id];
+  if(!st){ llCoCheckSync(l); return ''; }
+  if(st.state === 'error'){
+    return '<div data-ll-co-sync-error="1" style="background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:600;margin-bottom:10px;">'+
+      '⚠️ Свързаните клиентски заявки не се провериха ('+esc(st.error || '—')+') — не е ясно дали са станали „Изпратена“.</div>';
+  }
+  if(st.state !== 'ok' || (!st.pending.length && !st.unverified.length)) return '';
+  var h = '<div data-ll-co-sync="1" style="margin-bottom:10px;">';
+  st.pending.forEach(function(num){
+    h += '<div data-ll-co-pending="'+llAttr(num)+'" style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;margin-bottom:4px;">'+
+      '<span>КЗ '+esc(num)+' не стана „Изпратена“</span>'+
+      '<button type="button" data-ll-co-retry="'+llAttr(l.id)+'" data-id="'+llAttr(l.id)+'" onclick="llCoRetry(this.dataset.id)" style="border:1px solid #fca5a5;background:#fff;color:#dc2626;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;">🔁 Опитай пак</button></div>';
+  });
+  st.unverified.forEach(function(num){
+    h += '<div data-ll-co-unverified="'+llAttr(num)+'" style="background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;margin-bottom:4px;">'+
+      'КЗ '+esc(num)+' — заявката не се намира в базата; не е проверена</div>';
+  });
+  return h + '</div>';
+}
+function llCoRetry(listId){
+  if(!llCanEdit()) return Promise.resolve(null);
+  var l = llLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!l) return Promise.resolve(null);
+  llCoSync[String(l.id)] = { state: 'sending', pending: [], unverified: [] };
+  renderLoadingLists();
+  return llCoAutoSent(l, '🔁 Клиентски заявки').then(function(){ return llCoCheckSync(l); });
+}
 function llLoadEditorData(){
   var wh = llActiveWarehouse();
   llTransitError = false;
   /* Клиентските заявки не зависят от флаговете — тръгват веднага. */
   llLoadClientOrders(wh).then(function(){ if(llView === 'edit') renderLoadingLists(); });
+  /* Етап 2: в кой ДРУГ неприключен лист на склада е всяка заявка. */
+  llLoadCoOther(wh, llCurrentId).then(function(){ if(llView === 'edit') renderLoadingLists(); });
   /* Флаговете се четат ПРЕДИ снимката, не успоредно с нея: при изключен блок
      заявката към goods_transit изобщо не бива да тръгва — тя е най-скъпата
      в модула (хиляди реда) и без блок никой няма да види резултата ѝ. */
@@ -4591,6 +4825,7 @@ function llEditorHtml(){
           '<input id="ll-wc-'+i+'" value="'+llAttr(it.warehouse_comment)+'" data-i="'+i+'"'+
           (llIsOversize(it.kind) ? ' placeholder="напр. стелажи, ламперия…"' : '')+
           ' oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value)" style="width:100%;min-width:120px;border:1px solid '+(llOversizeNeedsComment(it)?'#fca5a5':'#e2e8f0')+';border-radius:5px;padding:2px 6px;font-size:12px;">'+
+          llCoChipHtml(it, i)+
           /* „Стока в стока" — по една група на ред; проверката е при запис. */
           '<div style="font-size:10px;font-weight:700;color:#92400e;margin:4px 0 2px;">📦 Стока в стока</div>'+
           '<textarea id="ll-nc-'+i+'" data-i="'+i+'" rows="2" placeholder="'+llAttr(LL_NESTED_HINT)+'" title="'+llAttr(LL_NESTED_HINT)+'"'+
@@ -4639,7 +4874,10 @@ function llBuildItemRows(listId, items){
       store_name: it.store_name,
       warehouse_comment: it.warehouse_comment || null,
       nested_codes: llNestedParse(it.nested_codes).value,
-      partial: !!it.partial
+      partial: !!it.partial,
+      /* Винаги изрично — и null: махната с „✕" връзка трябва да падне и в
+         базата при PATCH, не да остане старата. */
+      client_order_id: it.client_order_id || null
     };
   });
 }
@@ -4660,6 +4898,7 @@ function llDraftFlat(){
         purchase_doc: (u.docs || [])[k] || null, clears_doc: u.clears_doc || null,
         store_name: u.store_name, warehouse_comment: u.warehouse_comment, nested_codes: u.nested_codes,
         partial: !!u.partial && (u.docs || []).length > 0,
+        client_order_id: u.client_order_id || null,
         _unit: u, _first: k === 0
       });
     }
@@ -4934,6 +5173,14 @@ function llSendList(id){
     if(l) l.status = 'sent';
     /* Fire-and-forget: провалът не връща листа в draft — той ВЕЧЕ е изпратен. */
     if(l) llNotifySent(l, rows);
+    /* Етап 2: свързаните клиентски заявки → „Изпратена". Докато върви,
+       червеният ред в изгледа не се смята (state 'sending'); после — наново
+       от базата. Провалът тук не пипа листа. */
+    llCoSync[String(id)] = { state: 'sending', pending: [], unverified: [] };
+    llCoAutoSent({ id: id, warehouse: (l && l.warehouse) || llActiveWarehouse() }, '📤 Товарният лист е изпратен').then(function(){
+      delete llCoSync[String(id)];
+      if(llView === 'view' && String(llCurrentId) === String(id)) renderLoadingLists();
+    });
     loadLoadingLists();
   });
 }
@@ -5039,6 +5286,9 @@ function llToggleStoreProducts(id){ llStoreProdOpen[id] = !llStoreProdOpen[id]; 
 /* ─── ПРЕГЛЕД НА ЛИСТ ───────────────────────────────────────── */
 function llOpenView(id){
   llCurrentId = id;
+  /* Червеният ред „КЗ … не стана „Изпратена"" се смята наново при всяко
+     отваряне — от базата, не от паметта. */
+  if(id != null && llCoSync[String(id)] && llCoSync[String(id)].state !== 'sending') delete llCoSync[String(id)];
   llView = 'view';
   renderLoadingLists();
 }
@@ -5075,6 +5325,8 @@ function llViewHtml(){
     (l.sent_at?' · Изпратен: '+llFmtStamp(l.sent_at):'')+
     (l.done_at?' · Приключен: '+llFmtStamp(l.done_at):'')+'</div>';
   if(l.comment) h += '<div style="font-size:12px;color:#374151;background:#f8fafc;border-radius:6px;padding:6px 8px;margin-bottom:10px;">💬 '+esc(l.comment)+'</div>';
+  /* Етап 2: свързана заявка, която не стана „Изпратена" (само sent / partial). */
+  h += llCoSyncHtml(l);
 
   /* Обобщението по обект — СМЯТА СЕ от редовете, не от заглавието. */
   var sum = llSummaryByStore(items);

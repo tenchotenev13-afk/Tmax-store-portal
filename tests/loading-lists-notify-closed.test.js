@@ -301,8 +301,13 @@ const btnIn = (root, text) => (root ? btn(root, text) : null);
       JSON.stringify(patchesTo(h, 'loading_lists')[0].body));
     ok('НУЛА push — статусът не се смени', h.pushes.length === 0, JSON.stringify(h.pushes));
     ok('НУЛА писма', h.mails.length === 0, JSON.stringify(h.mails.map(m => m.to)));
+    /* От 17.11.2026 (ll-co-link) изгледът на sent/partial лист чете
+       list_id=eq.L1&client_order_id=not.is.null — проверката „КЗ … не стана
+       „Изпратена"" (llCoCheckSync), не llNotifyClosed. Тя се изключва изрично;
+       всяко друго четене по list_id=eq.L1 пак събаря теста. */
     ok('и нула заявки за редовете на листа от llNotifyClosed',
-      h.calls.get.filter(u => /loading_list_items/.test(u) && /list_id=eq\.L1/.test(u)).length === 0,
+      h.calls.get.filter(u => /loading_list_items/.test(u) && /list_id=eq\.L1/.test(u) &&
+        !/client_order_id=not\.is\.null/.test(u)).length === 0,
       h.calls.get.filter(u => /loading_list_items/.test(u)).join(' | '));
   }
 

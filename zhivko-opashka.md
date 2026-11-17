@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията loading_client_order_link, loading-client-order-link-schema.sql, версия 20261117125425, приложена 17.11.2026)
+- 17.11 · loading_list_items.client_order_id — uuid, NULL, без default
+
 (в базата от миграцията loading_wrong_store, loading-wrong-store-schema.sql, версия 20261117083038, приложена 17.11.2026)
 - 17.11 · loading_list_items.wrong_store — text, NULL, без default
 - 17.11 · loading_list_items.wrong_store_by — text, NULL, без default
