@@ -43,8 +43,11 @@ const LINES = [
     material_name:'БОЙЛЕР 80Л', quantity:2, quantity_received:1, difference_category:'undelivered', type:null, status:'new' },
   { id:'l2', report_id:'r-sup-2', store_name:'Раднево', supplier:'АКСОН АД', material_code:'222',
     material_name:'ЛАМПА LED', quantity:5, quantity_received:4, difference_category:'undelivered', type:null, status:'new' },
+  /* Етап 5а на Разлики (17.11.2026): l3 беше 'damaged' — по новото правило
+     увреденото отива при регионалния, а редът тук е работа на склада.
+     Вход поправен на 'undelivered', по решение на Тенчо; очакванията — непипнати. */
   { id:'l3', report_id:'r-int-1', store_name:'Враца', supplier:'Логистичен склад Добрич', material_code:'333',
-    material_name:'ЩУЦЕР МЕТАЛЕН', quantity:10, quantity_received:8, difference_category:'damaged', type:null, status:'new' },
+    material_name:'ЩУЦЕР МЕТАЛЕН', quantity:10, quantity_received:8, difference_category:'undelivered', type:null, status:'new' },
   /* КЛЮЧОВИЯТ СЛУЧАЙ: Цвети е дала директно "Липса" без коментар */
   { id:'l4', report_id:'r-sup-done', store_name:'Севлиево', supplier:'ПРОФИЛИ БГ', material_code:'444',
     material_name:'ПРОФИЛ ПВЦ', quantity:20, type:'missing', status:'pending',

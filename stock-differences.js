@@ -383,7 +383,7 @@ function loadStockDiff() {
     diffReports = Array.isArray(res[1]) ? res[1] : [];
     /* Размените и връзките към „За връщане" зависят от вече заредените
        редове - затова след Promise.all, не в него. */
-    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks(), sdLoadStornoNotes(sq)]);
+    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks(), sdLoadStornoNotes(sq), sdLoadMe()]);
   }).then(function(){
     renderStockDiff();
   }).catch(function(err) {
@@ -1408,6 +1408,136 @@ function sdInterstoreConfirmButton(l, rep){
 function sdNotifyInterstore(target, title, msg){
   if(typeof pushInterstoreDiff!=='function') return;
   try{ pushInterstoreDiff(target, title, msg).catch(function(){}); }catch(e){}
+}
+/* ══ Насочване по категория (етап 5а, 17.11.2026; среща 12.11 — С2, С3;
+   писма на Миглена Павлова 16.10 и 20.10) ══
+   Междускладов ред от определени категории не е работа на логистичния склад:
+     wrong_barcode               → ЦО, група 'razliki_barcode'
+     pack_mismatch, similar_item → ЦО, група 'razliki_co'
+     damaged                     → регионалният на обекта (is_regional, активен,
+                                   обектът в assigned_stores; всички такива)
+     всичко друго                → складът, както досега.
+   При доставчик и сторна — без промяна ('warehouse' = обичайният път).
+   Без колона: извежда се от категорията при четене. ЕДНО правило за картата,
+   баджа и пулса на склада, подредбата, бутона „Приключи“, известието и
+   подсказката във формата. report.js / send-scheduled-report /
+   diffLineWaitsStore / stock_diff_store_done НЕ го ползват — етап 5б. */
+var SD_ROUTE_GROUP = { co_barcode: 'razliki_barcode', co: 'razliki_co' };
+var SD_ROUTE_GROUP_LABEL = { razliki_barcode: 'Разлики — грешен баркод', razliki_co: 'Разлики — към ЦО' };
+function sdLineRoute(line, rep){
+  if(!line) return 'warehouse';
+  var dir = rep ? rep.direction : sdLineDirection(line);
+  if(dir !== 'interstore') return 'warehouse';
+  var c = String(line.difference_category || '');
+  if(c === 'wrong_barcode') return 'co_barcode';
+  if(c === 'pack_mismatch' || c === 'similar_item') return 'co';
+  if(c === 'damaged') return 'regional';
+  return 'warehouse';
+}
+/* Насочен ред, който върви по НОВИЯ път. Заварен ред от тези категории, по
+   който складът или обектът вече са отговорили по стария път (към 17.11.2026
+   — 23 приключени), си остава в стария изглед: там „✅ Приключено от …“ би
+   казало неистина. Трите отворени (2 damaged, 1 pack_mismatch) са без отговор
+   и минават по новия път сами. */
+function sdLineRoutedHere(line, rep){
+  return sdLineRoute(line, rep) !== 'warehouse' && !line.warehouse_response && !line.store_response;
+}
+function sdRouteToText(route){
+  if(route === 'regional') return 'регионалния на обекта';
+  return 'ЦО (група „' + SD_ROUTE_GROUP_LABEL[SD_ROUTE_GROUP[route]] + '“)';
+}
+function sdRouteLabel(route){
+  return route === 'regional' ? '➡️ При регионалния — увредена стока' : '➡️ Към ЦО — не касае склада';
+}
+/* Групите и регионалността на ТЕКУЩИЯ потребител — auth-login не връща
+   notify_groups, а is_regional идва с отделна заявка (rolesLoadRegional), която
+   може да не е приключила. Чете се при зареждане на модула. */
+var sdMe = { groups: [], is_regional: false, stores: [] };
+function sdParseArr(v){
+  if(Array.isArray(v)) return v;
+  if(typeof v === 'string' && v.length > 2) return v.replace(/^{|}$/g,'').split(',').map(function(s){ return s.trim().replace(/^"|"$/g,''); }).filter(Boolean);
+  return [];
+}
+function sdLoadMe(){
+  if(!currentUser || !currentUser.id) return Promise.resolve();
+  return sbGetOk('users', 'id=eq.' + encodeURIComponent(currentUser.id) + '&select=id,notify_groups,is_regional,assigned_stores').then(function(res){
+    var r = res.ok ? res.rows.filter(function(x){ return x && String(x.id) === String(currentUser.id); })[0] : null;
+    sdMe = r ? { groups: sdParseArr(r.notify_groups), is_regional: r.is_regional === true, stores: sdParseArr(r.assigned_stores) }
+             : { groups: [], is_regional: currentUser.is_regional === true, stores: sdParseArr(currentUser.assigned_stores) };
+  });
+}
+/* „✅ Приключи (от свое име)“: ЦО редовете — групата + admin; damaged —
+   регионалният на обекта + admin. Складът, обектът и друг регионален — не. */
+function sdCanCloseRouted(l, rep){
+  if(!currentUser || !l || !rep || l.status === 'received' || !sdLineRoutedHere(l, rep)) return false;
+  if(isLogisticsWarehouseUser()) return false;
+  if(currentUser.role === 'admin') return true;
+  var route = sdLineRoute(l, rep);
+  if(route === 'regional') return sdMe.is_regional === true && sdMe.stores.indexOf(rep.store_name) >= 0;
+  return sdMe.groups.indexOf(SD_ROUTE_GROUP[route]) >= 0;
+}
+function sdFmtDayMonth(val){
+  var d = new Date(val);
+  if(!val || isNaN(d.getTime())) return '';
+  function p(n){ return (n<10?'0':'')+n; }
+  return p(d.getDate()) + '.' + p(d.getMonth()+1);
+}
+/* Клетката „Отговор на склада“ за насочен ред — за ВСИЧКИ роли: надпис, без
+   бутоните на склада и на обекта; приключеният — кой, кога и коментарът. */
+function sdRoutedCellHtml(l, rep){
+  if(l.status === 'received'){
+    return '<div class="sd-route-done" style="font-size:11px;color:#047857;font-weight:600;white-space:normal;">✅ Приключено от '+esc(l.completed_by||'—')+
+      (l.completed_at ? ' · '+sdFmtDayMonth(l.completed_at) : '')+
+      (l.resolution_comment ? ' — <span style="font-weight:400;color:#1e293b;">'+esc(l.resolution_comment)+'</span>' : '')+'</div>';
+  }
+  var h = '<div class="sd-route-label" style="font-size:11px;color:#1d4ed8;font-weight:600;">'+sdRouteLabel(sdLineRoute(l, rep))+'</div>';
+  if(sdCanCloseRouted(l, rep)){
+    h += '<div style="margin-top:3px;"><button class="sd-route-close" data-lid="'+l.id+'" onclick="openSDRouteCloseModal(this.dataset.lid)" style="border:none;background:#047857;color:#fff;border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">✅ Приключи (от свое име)</button></div>';
+  }
+  return h;
+}
+function openSDRouteCloseModal(lineId){
+  var l = sdData.find(function(x){ return String(x.id) === String(lineId); });
+  var rep = l ? diffReports.find(function(x){ return x.id === l.report_id; }) : null;
+  if(!l || !sdCanCloseRouted(l, rep)) return;
+  var old = document.getElementById('sdroute-ov'); if(old) old.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdroute-ov"><div class="bmod" style="width:400px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">✅ Приключи (от свое име)</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+esc(rep.store_name||'')+' · '+esc(l.material_code||'')+' · '+esc(l.material_name||'')+' · '+diffCategoryLabel(l.difference_category)+'</div>'+
+    '<label class="fl">Коментар *</label>'+
+    '<textarea class="fi" id="sdroute-comment" rows="3" placeholder="Какво е направено"></textarea>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'sdroute-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button id="sdroute-save" data-lid="'+l.id+'" onclick="submitSDRouteClose(this.dataset.lid)" style="border:none;background:#047857;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✅ Приключи</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+/* Същият краен статус като приключен междускладов ред ('received' +
+   completed_by / completed_at), коментарът — в resolution_comment. Последен
+   отворен ред → бланката се затваря, както в sdConfirmInterstore. */
+function submitSDRouteClose(lineId){
+  var line = sdData.find(function(x){ return String(x.id) === String(lineId); });
+  var rep = line ? diffReports.find(function(x){ return x.id === line.report_id; }) : null;
+  if(!line || !sdCanCloseRouted(line, rep)) return Promise.resolve(false);
+  var el = document.getElementById('sdroute-comment');
+  var comment = el ? String(el.value || '').trim() : '';
+  if(!comment){ toast('Впиши коментар — какво е направено','#dc2626'); if(el) el.focus(); return Promise.resolve(false); }
+  sdKeepScroll(line.report_id);
+  var at = new Date().toISOString(), by = sdActor();
+  var data = { status: 'received', completed_by: by, completed_at: at, resolution_comment: comment };
+  return sbPatch('stock_differences', 'id=eq.' + line.id, data).then(function(res){
+    if(!res.ok){ toast('Грешка при запис','#dc2626'); return false; }
+    var ov = document.getElementById('sdroute-ov'); if(ov) ov.remove();
+    Object.assign(line, data);
+    var siblings = sdData.filter(function(x){ return x.report_id === line.report_id; });
+    if(line.report_id && siblings.length && siblings.every(function(x){ return x.status === 'received'; })){
+      return sbPatch('differences_reports', 'id=eq.' + line.report_id, sdReviewedPatch(line.report_id)).then(function(){
+        toast('✅ Приключено — бланката е затворена'); loadStockDiff(); return true;
+      });
+    }
+    toast('✅ Приключено'); loadStockDiff(); return true;
+  });
 }
 /* "Магазинът" по междускладов ред - същата проверка, която стоеше само при
    "Получено". Счетоводителят по обекти има store_name "Централен офис", а
@@ -3699,7 +3829,9 @@ function renderDiffReportsSection(){
      магазина да потвърди получаването. */
   function warehouseFullyResponded(repId){
     var lines = sdData.filter(function(x){return x.report_id===repId;});
-    return lines.length>0 && lines.every(function(l){return !!l.warehouse_response;});
+    var rp = diffReports.find(function(x){return x.id===repId;});
+    /* Насочен ред (етап 5а) не чака склада — броим го за „отговорен“. */
+    return lines.length>0 && lines.every(function(l){return !!l.warehouse_response || sdLineRoutedHere(l, rp);});
   }
   unreviewed = unreviewed.slice().sort(function(a,b){
     /* Решените, които чакат само имейл, са след още непрегледаните. */
@@ -3857,7 +3989,9 @@ function renderDiffReportsSection(){
           (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
           correctBtn+
           '</td>':'')+
-          (repShowWh?'<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+markHtml+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+'</td>':'')+
+          (repShowWh?'<td style="padding:3px 6px;white-space:nowrap;">'+(sdLineRoutedHere(l,rep)
+            ? sdRoutedCellHtml(l,rep)
+            : diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+markHtml+sdLateReceiveButton(l,rep)+sdSwapPanel(l))+'</td>':'')+
         '</tr>';
       });
       h+='</table></div>';
@@ -4193,10 +4327,16 @@ function updateDiffItemHint(selectEl){
   var meta=diffCatMeta(selectEl.value);
   if(!meta){hintEl.innerHTML='';return;}
   var photosReq=meta[3], notifyHint=meta[4];
-  if(!photosReq&&!notifyHint){hintEl.innerHTML='';return;}
+  /* Етап 5а: междускладов ред с насочена категория отива сам — вместо
+     „✉️ Нужен доп. имейл до …“ казваме към кого. Доставчик — без промяна. */
+  var dirEl=document.getElementById('diff-direction');
+  var route=sdLineRoute({difference_category:selectEl.value},{direction:dirEl?dirEl.value:'interstore'});
+  var routeTo=route==='warehouse'?'':sdRouteToText(route);
+  if(!photosReq&&!notifyHint&&!routeTo){hintEl.innerHTML='';return;}
   var parts=[];
   if(photosReq)parts.push('📸 <b>Задължителни снимки</b> за тази категория');
-  if(notifyHint)parts.push('✉️ Нужен доп. имейл до: <b>'+esc(notifyHint)+'</b>');
+  if(routeTo)parts.push('➡️ Отива автоматично към <b>'+esc(routeTo)+'</b>');
+  else if(notifyHint)parts.push('✉️ Нужен доп. имейл до: <b>'+esc(notifyHint)+'</b>');
   hintEl.innerHTML='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:5px 8px;font-size:11px;color:#92400e;margin:-2px 0 6px;">'+parts.join(' &nbsp;·&nbsp; ')+'</div>';
 }
 function renderDiffItemRows(items){
@@ -5300,6 +5440,73 @@ function sdRazlikiNotify(info){
   }).catch(function(e){ return warn('не тръгна (' + ((e && e.message) || e) + ')'); });
 }
 
+/* ── Известие за насочените междускладови редове (етап 5а, 17.11.2026) ──
+   По ЕДНО известие на получател група: wrong_barcode → 'razliki_barcode';
+   pack_mismatch / similar_item → 'razliki_co'; damaged → регионалните на
+   обекта. push + имейл, по модела на sdRazlikiNotify (етап 4). След
+   успешния запис; провал или празна група → ЕДИН жълт toast, който казва кое
+   не е тръгнало. sendEmail стои тук заради „Кой какво получава"
+   (admin.js, WHO_BROWSER_MAILS). */
+var SD_ROUTE_USERS_Q = 'active=eq.true&select=email,display_name,notify_groups,is_regional,assigned_stores,active';
+function sdRouteRecipients(users, route, store){
+  var out = [], seen = {};
+  (users || []).forEach(function(u){
+    if(!u || u.active === false) return;
+    var ok = route === 'regional'
+      ? (u.is_regional === true && sdParseArr(u.assigned_stores).indexOf(store) >= 0)
+      : (sdParseArr(u.notify_groups).indexOf(SD_ROUTE_GROUP[route]) >= 0);
+    var key = u.email || u.display_name;
+    if(ok && key && !seen[key]){ seen[key] = 1; out.push(u); }
+  });
+  return out;
+}
+function sdRouteWho(route, store){
+  return route === 'regional' ? 'регионалния на ' + store : 'група „' + SD_ROUTE_GROUP_LABEL[SD_ROUTE_GROUP[route]] + '"';
+}
+function sdRouteNotify(info){
+  var byRoute = {}, order = [];
+  (info.lines || []).forEach(function(l){
+    var rt = sdLineRoute(l, { direction: 'interstore' });
+    if(rt === 'warehouse') return;
+    if(rt === 'co_barcode' || rt === 'co' || rt === 'regional'){
+      if(!byRoute[rt]){ byRoute[rt] = []; order.push(rt); }
+      byRoute[rt].push(l);
+    }
+  });
+  var by = currentUser.display_name || currentUser.email;
+  var fails = [];
+  return sbGetOk('users', SD_ROUTE_USERS_Q).then(function(res){
+    if(!res.ok){ order.forEach(function(rt){ fails.push(sdRouteWho(rt, info.store) + ' — получателите не се прочетоха'); }); return; }
+    return Promise.all(order.map(function(rt){
+      var rec = sdRouteRecipients(res.rows, rt, info.store);
+      if(!rec.length){ fails.push(sdRouteWho(rt, info.store) + ' — няма получатели'); return null; }
+      var cats = [];
+      byRoute[rt].forEach(function(l){ var c = diffCategoryLabel(l.difference_category); if(cats.indexOf(c) < 0) cats.push(c); });
+      var text = 'Разлики · ' + info.store + ' · ' + cats.join(', ') + ' (' + byRoute[rt].length + ' арт.)';
+      var items = byRoute[rt].map(function(l){
+        return (l.material_code ? l.material_code + ' ' : '') + (l.material_name || '') + ' — ' + (l.quantity != null ? l.quantity : '—') + (l.unit ? ' ' + l.unit : '');
+      });
+      var html = '<p>' + esc(text) + '</p><p>Склад: ' + esc(info.counterpart || '—') + '<br>Подаде: ' + esc(by) + '</p>' +
+        '<ul>' + items.map(function(s){ return '<li>' + esc(s) + '</li>'; }).join('') + '</ul>' +
+        '<p>Отворете в портала: Разлики.</p>';
+      var names = rec.map(function(u){ return u.display_name; }).filter(Boolean);
+      var emails = rec.map(function(u){ return u.email; }).filter(Boolean);
+      return Promise.all([
+        names.length && typeof pushToPeople === 'function' ? pushToPeople(names, 'Разлики', text + ' · ' + items.join('; ')) : Promise.resolve({ ok: false }),
+        emails.length && typeof sendEmail === 'function' ? sendEmail(emails, text, html) : Promise.resolve({ ok: false })
+      ]).then(function(r){
+        var bad = [];
+        if(!r[0] || !r[0].ok) bad.push('push');
+        if(!r[1] || !r[1].ok) bad.push('имейл');
+        if(bad.length) fails.push(sdRouteWho(rt, info.store) + ' — ' + bad.join(', '));
+      }).catch(function(e){ fails.push(sdRouteWho(rt, info.store) + ' — ' + ((e && e.message) || e)); });
+    }));
+  }).catch(function(e){ fails.push('известието — ' + ((e && e.message) || e)); }).then(function(){
+    if(fails.length){ toast('Подадено, но известието не тръгна: ' + fails.join('; '), '#d97706'); return false; }
+    return true;
+  });
+}
+
 function submitDiffReport(){
   var store=(document.getElementById('diff-store').value||'').trim();
   var direction=document.getElementById('diff-direction').value||'interstore';
@@ -5484,6 +5691,12 @@ function submitDiffReport(){
         if(direction==='supplier' && (noDocument || noInbound)){
           sdRazlikiNotify({ store:store, counterpart:counterpart, no_document:noDocument,
             no_inbound:noInbound, order:orderNum, lines:lines.length });
+        }
+        /* Етап 5а: насочените редове (ЦО / регионалният) — известие след
+           успешния запис, само за ТАЗИ бланка (без задна дата). */
+        if(direction==='interstore'){
+          var routed=lines.filter(function(x){ return sdLineRoute(x,{direction:'interstore'})!=='warehouse'; });
+          if(routed.length) sdRouteNotify({ store:store, counterpart:counterpart, lines:routed });
         }
       });
     });
@@ -6209,7 +6422,8 @@ function sdUnreviewedCountFor(reports, lines, swaps){
       if(!repLines.length) return true;
       if(repLines.some(function(l){ return lateTo[String(l.id)]; })) return true;
       return repLines.some(function(l){
-        if(!l.warehouse_response) return true;
+        /* Насочен ред (етап 5а — към ЦО / регионалния) не чака склада. */
+        if(!l.warehouse_response) return !sdLineRoutedHere(l, r);
         return (l.store_response==='sap_done' || l.store_response==='no_stock') && l.status!=='received';
       });
     }).length;
@@ -6304,8 +6518,10 @@ function sdRefreshTabBadge(){
      закъсняла размяна (lateTo[String(l.id)]) се засичаше при рендер, но не и
      в пулса. Цвети/admin — заявката им е непроменена. */
   var storeBadge = !isLogisticsWarehouseUser() && !canReviewDiff();
-  var lineCols = storeBadge ? 'id,difference_category,' : (isLogisticsWarehouseUser() ? 'id,' : '');
-  var q = 'select=id,store_name,counterpart,reviewed'+(storeBadge ? ',direction' : '')+
+  /* Складът (етап 5а): difference_category + direction — насочените редове
+     (sdLineRoutedHere) не се броят като чакащи склада. */
+  var lineCols = storeBadge ? 'id,difference_category,' : (isLogisticsWarehouseUser() ? 'id,difference_category,' : '');
+  var q = 'select=id,store_name,counterpart,reviewed'+((storeBadge || isLogisticsWarehouseUser()) ? ',direction' : '')+
     (needLines ? ',stock_differences('+lineCols+'report_id,warehouse_response,store_response,status)' : '')+
     '&reviewed=eq.false';
   if(isLogisticsWarehouseUser()){

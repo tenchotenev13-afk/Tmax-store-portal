@@ -252,8 +252,11 @@ async function pulse(h, reps, lines, swaps) {
     const p = await pulse(hw, W_REPS, W_LINES, W_SWAPS);
     ok('пулс = 1', p.n === 1, String(p.n));
     ok('пулс = рендер', p.n === r, p.n + ' / ' + r);
+    /* Етап 5а на Разлики (17.11.2026): пулсът на склада тегли и direction +
+       difference_category (насочените редове не се броят) — очакването е
+       сменено нарочно, по решение на Тенчо. */
     ok('заявката на склада тегли id на реда',
-      p.q === 'differences_reports?select=id,store_name,counterpart,reviewed,stock_differences(id,report_id,warehouse_response,store_response,status)&reviewed=eq.false&counterpart=eq.' + encodeURIComponent(WH), p.q);
+      p.q === 'differences_reports?select=id,store_name,counterpart,reviewed,direction,stock_differences(id,difference_category,report_id,warehouse_response,store_response,status)&reviewed=eq.false&counterpart=eq.' + encodeURIComponent(WH), p.q);
     const p0 = await pulse(hw, W_REPS, W_LINES, []);
     ok('без размяна — пулс 0', p0.n === 0, String(p0.n));
 

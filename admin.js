@@ -2512,10 +2512,15 @@ function deleteAdminNotifSchedule(id){
    Затова е в отделен списък, показван само в редактора на групите.
    'razliki' (17.11.2026, Разлики етап 4) — същият вид група: кой получава
    „Разлики · <обект> · <доставчик>: бланка без документ / няма входяща
-   доставка в системата" (sdRazlikiNotify в stock-differences.js). */
-var NOTIFY_GROUP_LABELS = { co: 'ЦО', controlling: 'Контролинг', regional: 'Регионален', owner: 'Собственик', revaluation: 'Преоценка', razliki: 'Разлики' };
+   доставка в системата" (sdRazlikiNotify в stock-differences.js).
+   'razliki_co' и 'razliki_barcode' (17.11.2026, Разлики етап 5а) — кой
+   получава насочените междускладови редове (pack_mismatch / similar_item и
+   wrong_barcode) и може да ги приключи от свое име (sdRouteNotify,
+   sdCanCloseRouted в stock-differences.js). */
+var NOTIFY_GROUP_LABELS = { co: 'ЦО', controlling: 'Контролинг', regional: 'Регионален', owner: 'Собственик', revaluation: 'Преоценка', razliki: 'Разлики',
+  razliki_co: 'Разлики — към ЦО', razliki_barcode: 'Разлики — грешен баркод' };
 var NOTIFY_GROUP_ORDER  = ['co','controlling','regional','owner'];
-var NOTIFY_GROUP_USER_ONLY = ['revaluation','razliki'];
+var NOTIFY_GROUP_USER_ONLY = ['revaluation','razliki','razliki_co','razliki_barcode'];
 
 function notifyGroupsOf(u){
   var g = u && u.notify_groups;
@@ -2662,6 +2667,7 @@ var WHO_BROWSER_MAILS = [
   { mail: 'Пикинг — „🚚 Тръгна"', on: 'складът пуска транспорта', who: 'акаунтите на обекта, които са в app_settings.picking_users', sites: ['picking.js:pkNotifyShipment'] },
   { mail: 'Разлики — до доставчик', on: '„✉️ Изпрати" (Ц. Тенева, admin)', who: 'ръчно въведени адреси (до / копие / отговор)', sites: ['stock-differences.js:sendDiffEmail'] },
   { mail: 'Разлики — без документ / няма входяща', on: 'обектът подава бланка към доставчик с една от двете отметки', who: 'група „Разлики" (+ push)', sites: ['stock-differences.js:sdRazlikiNotify'] },
+  { mail: 'Разлики — насочен междускладов ред', on: 'обектът подава междускладова бланка с грешен баркод / опаковка / сходен артикул / увредена стока', who: 'грешен баркод → група „Разлики — грешен баркод"; опаковка, сходен → група „Разлики — към ЦО"; увредена → регионалните на обекта (+ push)', sites: ['stock-differences.js:sdRouteNotify'] },
   { mail: 'Разлики — сторно бележка / отговор', on: 'бележка или отговор по разлика', who: 'бележка → управител и склад на обекта; отговор → авторът', sites: ['stock-differences.js:sdNoteNotify'] },
   { mail: 'Преоценка — подадено', on: 'обектът подава', who: 'регионалните на обекта + одобряващите от app_settings.revaluation_approvers; без тях — група „преоценка"', sites: ['revaluation.js:rvNotify'] },
   { mail: 'Преоценка — одобрено', on: 'регионалният одобрява бланката', who: 'група „преоценка"', sites: ['revaluation.js:rvNotifyApproved'] },
@@ -2771,7 +2777,7 @@ function whoRoleOf(u){
   if (g.indexOf('co') >= 0) put('ЦО', 'ЦО');
   if (g.indexOf('owner') >= 0) put('owner', 'owner');
   if (g.indexOf('revaluation') >= 0) put('преоценка', 'преоценка');
-  if (g.indexOf('razliki') >= 0) put('разлики', 'разлики');
+  if (g.indexOf('razliki') >= 0 || g.indexOf('razliki_co') >= 0 || g.indexOf('razliki_barcode') >= 0) put('разлики', 'разлики');
   if (!cats.length) put('друг', (u.role || '—') + (u.store_name ? ' · ' + u.store_name : ''));
   return { label: parts.join(' · '), cats: cats };
 }
