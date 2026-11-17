@@ -515,6 +515,7 @@ function renderStockDiff() {
     h += sdActionsCard();
     h += sdNotesSectionHtml();
     h += sdOnlyWaitingBarHtml();
+    h += sdCOTurnChipHtml();
     var repHtml = renderDiffReportsSection();
     h += repHtml || '<div id="sd-reports-empty" style="text-align:center;padding:50px 20px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:14px;"><div style="font-size:36px;">📭</div><div style="margin-top:8px;">Няма бланки за преглед</div></div>';
   } else {
@@ -1338,6 +1339,8 @@ function diffWarehouseResolveButtons(l, rep){
     if(l.warehouse_comment) h2+='<div style="margin-top:3px;font-size:11px;color:#1e293b;border:1px solid #cbd5e1;background:#f8fafc;border-radius:5px;padding:3px 6px;white-space:normal;">💬 '+esc(l.warehouse_comment)+'</div>';
     return h2;
   }
+  /* Приключен от ЦО без отговор на склада — „чака склада" би излъгал. */
+  if(sdClosedByCO(l)) return '';
   return '<span style="color:#94a3b8;">чака склада</span>';
 }
 /* Кой потвърждава получаването по междускладов ред - стои ПОД отговора на
@@ -1354,6 +1357,8 @@ function sdInterstoreConfirmButton(l, rep){
     /* "Получено междувременно" вече е показано от diffWarehouseResolveButtons
        със същите кой/кога - втори ред "📬 Получено" би го дублирал. */
     if(sdIsLateReceive(l)) return '';
+    /* Приключен от ЦО (етап 6а) — кой, кога и коментарът, не „Получено". */
+    if(sdClosedByCO(l)) return sdClosedByHtml(l);
     return '<div style="margin-top:3px;font-size:10.5px;color:#0d9488;font-weight:600;">📬 Получено'+
       (l.completed_by?' · '+esc(l.completed_by):'')+
       (l.completed_at?' · '+sdFmtDateTime(l.completed_at):'')+'</div>';
@@ -1466,16 +1471,113 @@ function sdLoadMe(){
              : { groups: [], is_regional: currentUser.is_regional === true, stores: sdParseArr(currentUser.assigned_stores) };
   });
 }
-/* „✅ Приключи (от свое име)“: ЦО редовете — групата + admin; damaged —
-   регионалният на обекта + admin. Складът, обектът и друг регионален — не. */
+/* „✅ Приключи (от свое име)“ на насочен ред (решение на Тенчо 17.11, етап 6а
+   — ЕДНО правило с обикновените редове): групата 'razliki_co' — винаги;
+   damaged — и регионалният на обекта; грешен баркод — и групата
+   'razliki_barcode'. Ролята admin САМА ПО СЕБЕ СИ не дава бутона (admin са 11
+   души, вкл. Цвети, която не работи с междускладовите). Складът, обектът и
+   друг регионален — не. */
 function sdCanCloseRouted(l, rep){
   if(!currentUser || !l || !rep || l.status === 'received' || !sdLineRoutedHere(l, rep)) return false;
+  if(sdIsCOCloser()) return true;
   if(isLogisticsWarehouseUser()) return false;
-  if(currentUser.role === 'admin') return true;
   var route = sdLineRoute(l, rep);
   if(route === 'regional') return sdMe.is_regional === true && sdMe.stores.indexOf(rep.store_name) >= 0;
-  return sdMe.groups.indexOf(SD_ROUTE_GROUP[route]) >= 0;
+  if(route === 'co_barcode') return sdMe.groups.indexOf('razliki_barcode') >= 0;
+  return false;
 }
+/* ══ Етап 6а (17.11.2026; среща 12.11 — С5; писма на Миглена 27–28.10,
+   10.11, 13.11 и Цвети 13.11 — „всеки чака другия") ══
+   ЦО може да приключи ВСЕКИ отворен междускладов ред, не само насочения:
+   САМО групата 'razliki_co' (решение на Тенчо 17.11 — ролята admin сама по
+   себе си не дава бутона и чипа). Насоченият по 5а — sdCanCloseRouted (там и
+   регионалният за damaged, и 'razliki_barcode' за грешен баркод). Ред с
+   отворена размяна — не: тя се води в sdSwapPanel. Складът, обектът, admin и
+   accounting без групата — не. */
+function sdLineHasOpenSwap(l){
+  return sdSwapsForLine(l).some(function(s){ return s.status!=='closed'; });
+}
+function sdIsCOCloser(){
+  if(!currentUser || isLogisticsWarehouseUser()) return false;
+  return sdMe.groups.indexOf('razliki_co') >= 0;
+}
+function sdCanCloseInterstore(l, rep){
+  if(!currentUser || !l || !rep || rep.direction !== 'interstore' || l.status === 'received') return false;
+  if(sdLineRoutedHere(l, rep)) return sdCanCloseRouted(l, rep);
+  if(sdLineHasOpenSwap(l)) return false;
+  return sdIsCOCloser();
+}
+/* Ред, приключен през „✅ Приключи (от свое име)" — единственият междускладов
+   'received' с resolution_comment (към 17.11.2026 в базата: 0 от 1453
+   приключени имат такъв; „Получено междувременно" пише store_response_comment). */
+function sdClosedByCO(l){
+  return !!l && l.status === 'received' && !!String(l.resolution_comment||'').trim() && !sdIsLateReceive(l);
+}
+function sdClosedByHtml(l){
+  return '<div class="sd-route-done" style="font-size:11px;color:#047857;font-weight:600;white-space:normal;">✅ Приключено от '+esc(l.completed_by||'—')+
+    (l.completed_at ? ' · '+sdFmtDayMonth(l.completed_at) : '')+
+    (l.resolution_comment ? ' — <span style="font-weight:400;color:#1e293b;">'+esc(l.resolution_comment)+'</span>' : '')+'</div>';
+}
+function sdCloseBtnHtml(l, rep){
+  if(!sdCanCloseInterstore(l, rep)) return '';
+  return '<div style="margin-top:3px;"><button class="sd-route-close" data-lid="'+l.id+'" onclick="openSDRouteCloseModal(this.dataset.lid)" style="border:none;background:#047857;color:#fff;border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">✅ Приключи (от свое име)</button></div>';
+}
+/* „Ход:" — чий е следващият ход по отворен междускладов ред. ЕДНО правило за
+   реда в картата и за чипа „🏢 Ход: ЦО". who: 'warehouse' | 'store' | 'co' |
+   'regional' | 'swap'. text: null = без ред „Ход:" (насоченият по 5а вече има
+   свой надпис). null изцяло = приключен ред или комбинация извън таблицата
+   (към 17.11.2026 в базата такава няма). Старите етикети (WH_RESPONSE_LABELS,
+   SD_STORE_BTN) не се сменят — този ред стои под тях. */
+function sdInterstoreTurn(l, rep){
+  if(!l || !rep || rep.direction !== 'interstore' || l.status === 'received' || sdIsLateReceive(l)) return null;
+  if(sdLineRoutedHere(l, rep)) return { who: sdLineRoute(l, rep) === 'regional' ? 'regional' : 'co', text: null };
+  if(sdLineHasOpenSwap(l)) return { who: 'swap', text: 'по размяната' };
+  var w = String(l.warehouse_response || ''), s = String(l.store_response || '');
+  if(!w) return { who: 'warehouse', text: 'склада — да отговори' };
+  if(w === 'will_send' && !s) return { who: 'warehouse', text: 'склада — да изпрати стоката' };
+  if(w === 'sent' && !s) return { who: 'store', text: 'обекта — да потвърди ПРИЕТО, когато стоката пристигне' };
+  if(w === 'sent_sap' && !s) return { who: 'store', text: 'обекта — да потвърди в SAP' };
+  if(w === 'return'){
+    if(!s) return { who: 'store', text: 'обекта — да пусне движението в SAP или да отбележи, че няма наличност' };
+    if(s === 'sap_done') return { who: 'warehouse', text: 'склада — „📬 Прието обратно“' };
+    if(s === 'no_stock') return { who: 'co', text: 'ЦО — складът и обектът нямат следващ ход' };
+  }
+  return null;
+}
+function sdInterstoreTurnHtml(l, rep){
+  var t = sdInterstoreTurn(l, rep);
+  if(!t || !t.text) return '';
+  var col = t.who === 'co' ? '#b45309' : '#334155';
+  return '<div class="sd-turn" data-who="'+t.who+'" style="margin-top:4px;font-size:11px;font-weight:600;color:'+col+';white-space:normal;">Ход: '+t.text+'</div>';
+}
+/* Чип „🏢 Ход: ЦО (N)" — за тези, които виждат бутона от 6а (sdIsCOCloser),
+   само в междускладовия подтаб, ВИНАГИ видим (и при 0, правило 11). N =
+   РЕДОВЕТЕ с ход на ЦО (вкл. насочените към ЦО по 5а) във видимите бланки;
+   кликът оставя само бланките с поне един такъв ред. */
+var sdOnlyCOTurn = false;
+function sdCOTurnChipHere(){ return sdIsCOCloser() && sdOnlyWaitingHere(); }
+function sdCOTurnOn(){ return sdOnlyCOTurn && sdCOTurnChipHere(); }
+function sdCOTurnLines(reports){
+  var ids = {};
+  (reports||[]).forEach(function(r){ if(r && r.direction === 'interstore') ids[String(r.id)] = r; });
+  return (sdData||[]).filter(function(l){
+    var rp = l ? ids[String(l.report_id)] : null;
+    var t = rp ? sdInterstoreTurn(l, rp) : null;
+    return !!t && t.who === 'co';
+  });
+}
+function sdCOTurnReportIds(reports){
+  var m = {};
+  sdCOTurnLines(reports).forEach(function(l){ m[String(l.report_id)] = 1; });
+  return m;
+}
+function sdCOTurnChipHtml(){
+  if(!sdCOTurnChipHere()) return '';
+  var n = sdCOTurnLines(sdVisibleUnreviewedReports().concat(sdVisibleEmailPendingReports())).length;
+  var a = sdCOTurnOn();
+  return '<div id="sd-co-turn" style="margin-bottom:12px;"><button id="sd-co-turn-chip" onclick="setSDOnlyCOTurn(!sdOnlyCOTurn)" style="border:1px solid '+(a?'#b45309':'#e2e8f0')+';background:'+(a?'#b45309':'#fff')+';color:'+(a?'#fff':'#64748b')+';border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">🏢 Ход: ЦО ('+n+')</button></div>';
+}
+function setSDOnlyCOTurn(on){ sdOnlyCOTurn = !!on; renderStockDiff(); }
 function sdFmtDayMonth(val){
   var d = new Date(val);
   if(!val || isNaN(d.getTime())) return '';
@@ -1485,21 +1587,14 @@ function sdFmtDayMonth(val){
 /* Клетката „Отговор на склада“ за насочен ред — за ВСИЧКИ роли: надпис, без
    бутоните на склада и на обекта; приключеният — кой, кога и коментарът. */
 function sdRoutedCellHtml(l, rep){
-  if(l.status === 'received'){
-    return '<div class="sd-route-done" style="font-size:11px;color:#047857;font-weight:600;white-space:normal;">✅ Приключено от '+esc(l.completed_by||'—')+
-      (l.completed_at ? ' · '+sdFmtDayMonth(l.completed_at) : '')+
-      (l.resolution_comment ? ' — <span style="font-weight:400;color:#1e293b;">'+esc(l.resolution_comment)+'</span>' : '')+'</div>';
-  }
-  var h = '<div class="sd-route-label" style="font-size:11px;color:#1d4ed8;font-weight:600;">'+sdRouteLabel(sdLineRoute(l, rep))+'</div>';
-  if(sdCanCloseRouted(l, rep)){
-    h += '<div style="margin-top:3px;"><button class="sd-route-close" data-lid="'+l.id+'" onclick="openSDRouteCloseModal(this.dataset.lid)" style="border:none;background:#047857;color:#fff;border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">✅ Приключи (от свое име)</button></div>';
-  }
-  return h;
+  if(l.status === 'received') return sdClosedByHtml(l);
+  return '<div class="sd-route-label" style="font-size:11px;color:#1d4ed8;font-weight:600;">'+sdRouteLabel(sdLineRoute(l, rep))+'</div>'+
+    sdCloseBtnHtml(l, rep);
 }
 function openSDRouteCloseModal(lineId){
   var l = sdData.find(function(x){ return String(x.id) === String(lineId); });
   var rep = l ? diffReports.find(function(x){ return x.id === l.report_id; }) : null;
-  if(!l || !sdCanCloseRouted(l, rep)) return;
+  if(!l || !sdCanCloseInterstore(l, rep)) return;
   var old = document.getElementById('sdroute-ov'); if(old) old.remove();
   var div = document.createElement('div');
   div.innerHTML = '<div class="bov open" id="sdroute-ov"><div class="bmod" style="width:400px;">'+
@@ -1519,17 +1614,22 @@ function openSDRouteCloseModal(lineId){
 function submitSDRouteClose(lineId){
   var line = sdData.find(function(x){ return String(x.id) === String(lineId); });
   var rep = line ? diffReports.find(function(x){ return x.id === line.report_id; }) : null;
-  if(!line || !sdCanCloseRouted(line, rep)) return Promise.resolve(false);
+  if(!line || !sdCanCloseInterstore(line, rep)) return Promise.resolve(false);
   var el = document.getElementById('sdroute-comment');
   var comment = el ? String(el.value || '').trim() : '';
   if(!comment){ toast('Впиши коментар — какво е направено','#dc2626'); if(el) el.focus(); return Promise.resolve(false); }
   sdKeepScroll(line.report_id);
   var at = new Date().toISOString(), by = sdActor();
   var data = { status: 'received', completed_by: by, completed_at: at, resolution_comment: comment };
+  var who = sdLineRoutedHere(line, rep) && sdLineRoute(line, rep) === 'regional' ? 'Регионалният' : 'ЦО';
   return sbPatch('stock_differences', 'id=eq.' + line.id, data).then(function(res){
     if(!res.ok){ toast('Грешка при запис','#dc2626'); return false; }
     var ov = document.getElementById('sdroute-ov'); if(ov) ov.remove();
     Object.assign(line, data);
+    /* Етап 6а: обектът и складът на бланката научават — fire-and-forget. */
+    var pmsg = who+' приключи ред '+(line.material_code||'')+' · '+(rep.store_name||'')+': '+comment;
+    sdNotifyInterstore(rep.store_name, '✅ Разлика: приключен ред', pmsg);
+    sdNotifyInterstore(rep.counterpart, '✅ Разлика: приключен ред', pmsg);
     var siblings = sdData.filter(function(x){ return x.report_id === line.report_id; });
     if(line.report_id && siblings.length && siblings.every(function(x){ return x.status === 'received'; })){
       return sbPatch('differences_reports', 'id=eq.' + line.report_id, sdReviewedPatch(line.report_id)).then(function(){
@@ -2032,7 +2132,7 @@ function setSDFilter(f) { sdFilter=f; renderStockDiff(); }
 function setSDTypeFilter(f) { sdTypeFilter=f; if(!sdTypeHasCompleted(f) && sdFilter==='completed') sdFilter='all'; renderStockDiff(); }
 /* Смяната на посока нулира филтъра по магазин - магазините в двата таба са
    различни набори и запазен чип от другия таб би дал празен екран. */
-function setSDDirTab(t) { sdDirTab=t; sdStoreFilter=''; sdOnlyWaiting=false; renderStockDiff(); }
+function setSDDirTab(t) { sdDirTab=t; sdStoreFilter=''; sdOnlyWaiting=false; sdOnlyCOTurn=false; renderStockDiff(); }
 function setSDStoreFilter(s) { sdStoreFilter=s||''; renderStockDiff(); }
 function sdClearFilters(){ sdStoreFilter=''; sdSearch=''; renderStockDiff(); }
 /* Пре-рендира при търсене, но запазва фокуса/позицията на курсора в полето -
@@ -3784,6 +3884,11 @@ function sdFilteredReports(){
     var waitIds = sdBulWaitingReportIds();
     unreviewed = unreviewed.filter(function(r){ return waitIds[String(r.id)] === 1; });
   }
+  /* „🏢 Ход: ЦО" (етап 6а) — бланките с ред, по който ходът е на ЦО. */
+  if(sdCOTurnOn()){
+    var coIds = sdCOTurnReportIds(unreviewed);
+    unreviewed = unreviewed.filter(function(r){ return coIds[String(r.id)] === 1; });
+  }
   /* Чип по магазин + свободно търсене - същите контроли като за таблицата
      по-долу, за да не се търси на две различни места. */
   if(sdStoreFilter){
@@ -3991,7 +4096,8 @@ function renderDiffReportsSection(){
           '</td>':'')+
           (repShowWh?'<td style="padding:3px 6px;white-space:nowrap;">'+(sdLineRoutedHere(l,rep)
             ? sdRoutedCellHtml(l,rep)
-            : diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+markHtml+sdLateReceiveButton(l,rep)+sdSwapPanel(l))+'</td>':'')+
+            : diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+markHtml+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+
+              sdInterstoreTurnHtml(l,rep)+sdCloseBtnHtml(l,rep))+'</td>':'')+
         '</tr>';
       });
       h+='</table></div>';
@@ -4218,7 +4324,7 @@ function submitSDMove(rid){
           : Promise.resolve(false);
         return Promise.all([audit, push]).then(function(r3){
           closeSDMoveModal();
-          if(sdDirTabsActive()){ sdDirTab = target; sdOnlyWaiting = false; }
+          if(sdDirTabsActive()){ sdDirTab = target; sdOnlyWaiting = false; sdOnlyCOTurn = false; }
           renderStockDiff();
           /* Жълтото е ПОСЛЕДНО - toast() пише в един и същ елемент. */
           var lost = [];

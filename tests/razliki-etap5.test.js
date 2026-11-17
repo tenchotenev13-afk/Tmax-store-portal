@@ -13,8 +13,11 @@
       не се брои в „чака склада“ (рендер и пулс); обикновеният ред в същата
       бланка — с бутоните.
    3. Обект: надписът, без бутони за отговор.
-   4. „✅ Приключи (от свое име)“: групата / регионалният / admin — да;
-      склад, обект, друг регионален, член на другата група — не. Без коментар
+   4. „✅ Приключи (от свое име)“ (от етап 6а, решение на Тенчо 17.11 — ЕДНО
+      правило): 'razliki_co' — всеки насочен ред; damaged — и регионалният;
+      грешен баркод — и 'razliki_barcode'; ролята admin сама — НЕ (admin без
+      група → 0 бутона); обект без регионален → само 'razliki_co'; склад,
+      обект, друг регионален, член на другата група — не. Без коментар
       — отказ, 0 PATCH; с коментар — точният PATCH; последен ред → бланката се
       затваря. После „✅ Приключено от … · дд.мм — …“.
    5. Известието при подаване: по едно на група / регионален, правилните
@@ -26,7 +29,11 @@
    pushToPeople / sendEmail — фалшиви (push.js / email.js не са заредени,
    функцията ги търси по глобално име).
 
-   Мутационна проверка (17.11.2026, мутант върху stock-differences.js, файлът
+   След 6а (17.11, ново право): чистият код — exit 0, 100/100; „М1 без
+   проверка на ролята“ → 9 ❌, „ролята admin пак дава бутона“ → 2 ❌,
+   „damaged без razliki_co“ → 4 ❌ (подробно — tests/razliki-etap6a.test.js).
+
+   Мутационна проверка на 5а (17.11.2026, мутант върху stock-differences.js, файлът
    — върнат от копие и сверен с cmp; чистият код: exit 0, 94/94):
      М1  damaged → склад (sdLineRoute връща 'warehouse')             → 10 ❌
      М2  „Приключи“ без проверка на ролята (sdCanCloseRouted → true)  → 11 ❌
@@ -44,6 +51,7 @@ const WH = 'Логистичен склад Търговище';
 const STORE = 'Карлово';
 const U = {
   admin:   { id: 'u-adm', email: 'adm@temax.bg', display_name: 'Админ', role: 'admin', store_name: 'Централен офис' },
+  adminCO: { id: 'u-adc', email: 'adc@temax.bg', display_name: 'Админ ЦО', role: 'admin', store_name: 'Централен офис' },
   vasilka: { id: 'u-vs', email: 'v.shikova@temax.bg', display_name: 'Василка Шикова', role: 'accounting', store_name: 'Централен офис', assigned_stores: [] },
   migl:    { id: 'u-mp', email: 'm.pavlova@temax.bg', display_name: 'Миглена Павлова', role: 'accounting', store_name: 'Централен офис', assigned_stores: [] },
   reg:     { id: 'u-pg', email: 'p.georgieva@temax.bg', display_name: 'П. Георгиева', role: 'accounting', store_name: 'Централен офис', assigned_stores: ['Карлово', 'Пловдив'] },
@@ -184,20 +192,36 @@ const toasts = h => h.calls.toast.join(' | ');
 
   section('4. „✅ Приключи“ — кой го вижда');
   {
+    /* Решение на Тенчо 17.11 (етап 6а): ролята admin САМА не дава бутона;
+       'razliki_co' приключва всеки насочен ред, вкл. damaged. */
     const cases = [
-      ['admin', U.admin, { d1: true, p1: true, b1: true, s1: true }],
+      ['admin без група', U.admin, { d1: false, p1: false, b1: false, s1: false }],
+      ['admin с razliki_co', U.adminCO, { d1: true, p1: true, b1: true, s1: true }],
       ['Василка (razliki_barcode)', U.vasilka, { d1: false, p1: false, b1: true, s1: false }],
-      ['Миглена (razliki_co + barcode)', U.migl, { d1: false, p1: true, b1: true, s1: true }],
+      ['Миглена (razliki_co + barcode)', U.migl, { d1: true, p1: true, b1: true, s1: true }],
       ['регионален на Карлово', U.reg, { d1: true, p1: false, b1: false, s1: false }],
       ['друг регионален (Петрич)', U.reg2, { d1: false, p1: false, b1: false, s1: false }],
       ['склад', U.wh, { d1: false, p1: false, b1: false, s1: false }],
       ['обект', U.store, { d1: false, p1: false, b1: false, s1: false }]
     ];
+    /* „Админ ЦО“ (admin + razliki_co) — само в тази секция: в общия DBU би
+       влязъл в получателите на известието (секция 6). */
+    const USERS4 = DBU.concat([{ id: 'u-adc', email: 'adc@temax.bg', display_name: 'Админ ЦО', notify_groups: ['razliki_co'], is_regional: false, assigned_stores: [], active: true }]);
     for (const [name, u, exp] of cases) {
-      const h = env(u);
+      const h = env(u, { users: USERS4 });
       await render(h);
       const got = {}; Object.keys(exp).forEach(id => { got[id] = !!closeBtn(h, id); });
       ok(name + ': ' + JSON.stringify(exp), JSON.stringify(got) === JSON.stringify(exp), JSON.stringify(got));
+      h.close();
+    }
+    /* damaged на обект без регионален (Кърджали) → бутонът е само за 'razliki_co'. */
+    const KRJ = Object.assign({}, REP, { store_name: 'Кърджали' });
+    const krjLines = [line('d1', 'damaged', { store_name: 'Кърджали' })];
+    for (const [name, u, exp] of [['Миглена (razliki_co)', U.migl, true], ['admin с razliki_co', U.adminCO, true], ['admin без група', U.admin, false],
+      ['регионален на Карлово', U.reg, false], ['Василка (razliki_barcode)', U.vasilka, false]]) {
+      const h = env(u, { users: USERS4, lines: krjLines, reps: [KRJ] });
+      await render(h, krjLines, [KRJ]);
+      ok('Кърджали damaged, ' + name + ' → ' + (exp ? 'бутон' : 'без бутон'), !!closeBtn(h, 'd1') === exp);
       h.close();
     }
     /* Пълният път на модула: loadStockDiff зарежда и групите (sdLoadMe). */
