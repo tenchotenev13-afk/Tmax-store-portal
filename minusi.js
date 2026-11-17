@@ -1170,23 +1170,57 @@ function mnRevReasonOk(id){
    нито като минус, нито като заметнат. Преоценен е, ако описанието от
    движенията започва с „ПРЕОЦ“, или в product_catalog category = 'Преоценка',
    или product_name започва с „ПРЕОЦ“. Каталогът се пита при отваряне на
-   прегледа и преди Excel; гърми ли — само по описанието. */
+   прегледа и преди Excel; гърми ли — само по описанието. Обикновен минус,
+   заметнат с преоценен код — целият ред вън (mnRevHits, 17.11). */
 var MN_REV_PREOC_RE = /^\s*ПРЕОЦ/i;
 function mnRevIsPreoc(e){
   if(MN_REV_PREOC_RE.test(e.desc || '')) return true;
   var p = mnRevCat[e.code];
   return !!p && (p.cat === 'Преоценка' || MN_REV_PREOC_RE.test(p.name || ''));
 }
-/* Всички кандидати (преди изключването) — rows: за файла; out: преоценените. */
+/* all — всички кандидати (за каталога и сивия блок); rows — за файла;
+   out — преоценените; hits — минусите, заметнати с преоценен код; unk —
+   заметнати кодове, които без каталог не могат да се проверят. */
 function mnRevRows(calc){ return mnRevSplit(calc).rows; }
 function mnRevSplit(calc){
-  var all = mnRevAll(calc), ex = all.filter(mnRevIsPreoc);
-  var keep = all.filter(function(e){ return !mnRevIsPreoc(e); });
-  return { rows: mnRevGroup(keep), out: ex, all: all };
+  var all = mnRevAll(calc), ex = all.filter(mnRevIsPreoc), hit = mnRevHits(calc);
+  var keep = mnRevAll(calc, hit.skip).filter(function(e){ return !mnRevIsPreoc(e); });
+  return { rows: mnRevGroup(keep), out: ex, all: all, hits: hit.hits, unk: hit.unk };
 }
-function mnRevAll(calc){
-  var map = {}, out = [], descOf = {};
-  mnMovs.forEach(function(m){ var c = mnCoKey(m.material); if(c && m.material_desc && !descOf[c]) descOf[c] = m.material_desc; });
+function mnRevDescOf(){
+  var d = {};
+  mnMovs.forEach(function(m){ var c = mnCoKey(m.material); if(c && m.material_desc && !d[c]) d[c] = m.material_desc; });
+  return d;
+}
+/* Обикновен минус, заметнат с ПОНЕ ЕДИН преоценен код (Миглена 17.11, решение
+   на Тенчо; пример 55312 / 8055312): редът НЕ влиза — нито материалът, нито
+   заметнатите му, нито количеството. Обектът заприхождава плюс на основния
+   код; липсата остава на преоценения. Същият код от друг, незасегнат ред
+   влиза нормално. Преоценен минус (8090757 / 90757) — старото правило.
+   Без каталог заметнат код без описание в движенията не може да се познае →
+   редът влиза, а сивият ред за каталога го казва (unk). */
+function mnRevHits(calc){
+  var descOf = mnRevDescOf(), skip = {}, hits = [], byCode = {}, unk = [];
+  mnRevReady(calc).forEach(function(r){
+    var mat = mnCoKey(r.material);
+    if(!mat || mnRevIsPreoc({ code: mat, desc: descOf[mat] || '' })) return;
+    var reals = mnRevRealCodes(mnCoKey(r.real_code)).filter(function(c){ return c !== mat; });
+    var pre = reals.filter(function(c){ return mnRevIsPreoc({ code: c, desc: descOf[c] || '' }); });
+    if(!pre.length){
+      if(mnRevCatFail) reals.forEach(function(c){ if(!descOf[c] && unk.indexOf(c) < 0) unk.push(c); });
+      return;
+    }
+    skip[String(r.id)] = 1;
+    var e = byCode[mat];
+    if(!e){ e = byCode[mat] = { code: mat, desc: descOf[mat] || '', via: [] }; hits.push(e); }
+    pre.forEach(function(c){ if(e.via.indexOf(c) < 0) e.via.push(c); });
+  });
+  unk.sort(function(a, b){ return a.localeCompare(b, undefined, { numeric: true }); });
+  hits.sort(function(a, b){ return a.code.localeCompare(b.code, undefined, { numeric: true }); });
+  return { skip: skip, hits: hits, unk: unk };
+}
+function mnRevAll(calc, skip){
+  var map = {}, out = [], descOf = mnRevDescOf();
   /* qty / uom — само от собствените минуси на кода (заметнатият не добавя). */
   var add = function(code, id, of, r){
     var e = map[code];
@@ -1201,7 +1235,7 @@ function mnRevAll(calc){
   };
   mnRevReady(calc).forEach(function(r){
     var mat = mnCoKey(r.material), real = mnCoKey(r.real_code);
-    if(!mat) return;
+    if(!mat || (skip && skip[String(r.id)])) return;
     add(mat, String(r.id), null, r);
     mnRevRealCodes(real).forEach(function(c){ if(c !== mat) add(c, String(r.id), mat); });
   });
@@ -1335,10 +1369,13 @@ function mnRevRender(calc){
       td('mn-rev-qty', e.minus ? esc(mnFmtQty(e.qty)) + (e.uom ? ' ' + esc(e.uom) : '') : '', 'text-align:right;white-space:nowrap;') + '</tr>';
   });
   if(!rows.length) h += '<tr id="mn-rev-empty"><td colspan="5" style="color:#94a3b8;text-align:center;">няма минуси за ревизия</td></tr>';
-  if(mnRevCatFail) h += '<tr id="mn-rev-catfail"><td colspan="5" style="color:#94a3b8;font-size:12px;">Каталогът не се зареди — преоценените се разпознават само по описание</td></tr>';
+  if(mnRevCatFail) h += '<tr id="mn-rev-catfail"><td colspan="5" style="color:#94a3b8;font-size:12px;">Каталогът не се зареди — преоценените се разпознават само по описание' +
+    (sp.unk.length ? '<span id="mn-rev-unk">. Заметнати кодове без описание в движенията (' + esc(sp.unk.join(', ')) + ') не могат да се проверят — редовете им влизат</span>' : '') + '</td></tr>';
   h += '</tbody></table>';
   if(sp.out.length) h += '<div id="mn-rev-preoc" style="margin-top:10px;color:#64748b;background:#f1f5f9;padding:8px 10px;border-radius:6px;font-size:13px;">Не влизат (преоценени): ' +
     sp.out.map(function(e){ return '<span class="mn-rev-preoc-item" data-code="' + escAttrVal(e.code) + '">' + esc(e.code) + ' — ' + esc(mnRevDesc(e)) + '</span>'; }).join(', ') + '</div>';
+  if(sp.hits.length) h += '<div id="mn-rev-hit" style="margin-top:6px;color:#64748b;background:#f1f5f9;padding:8px 10px;border-radius:6px;font-size:13px;">Не влизат (минус, заметнат с преоценен код): ' +
+    sp.hits.map(function(e){ return '<span class="mn-rev-hit-item" data-code="' + escAttrVal(e.code) + '">' + esc(e.code) + ' — ' + esc(mnRevDesc(e)) + ' (заметнат с преоценен ' + esc(e.via.join(', ')) + ')</span>'; }).join(', ') + '</div>';
   var bad = mnRevBad(calc);
   if(bad.length) h += '<div id="mn-rev-bad" style="margin-top:10px;color:#b91c1c;font-size:13px;">⚠ Заметнат код без число от 4 до 7 цифри — НЕ е във файла; оправи го в реда или го добави ръчно: ' +
     bad.map(function(x){ return '„' + esc(x.real) + '“ (към ' + esc(x.of) + ')'; }).join(', ') + '</div>';

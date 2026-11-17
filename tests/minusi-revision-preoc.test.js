@@ -38,10 +38,11 @@ function mv(material, desc, real) {
     employee_name: 'Иван', note: null, action: null, filled_by: null, filled_at: null };
 }
 /* 8057488 ПРЕОЦ. минус без заметнат             — вън (а)
-   55312 обикновен → заметнат 8055312 (кат. Преоценка) — 55312 остава, 8055312 вън (б, category)
+   55312 обикновен → заметнат 8055312 (кат. Преоценка) — 8055312 вън (б, category);
+     от 17.11 (minusi-rev-preoc-real) и 55312 вън — целият ред, сив ред „заметнат с преоценен“
    8090757 „Преоц. …“ (малки, интервал) → 90757   — 8090757 вън (а), 90757 глава
    70001 обикновено описание, кат. Преоценка       — вън само по каталога (category)
-   70002 обикновен → 70003 (product_name „ПРЕОЦ.…“) — 70003 вън (б, име)
+   70002 обикновен → 70003 (product_name „ПРЕОЦ.…“) — 70003 вън (б, име); от 17.11 и 70002 вън
    70010 обикновен                                  — остава */
 function mixed() {
   seq = 0;
@@ -96,7 +97,7 @@ const codesOf = h => Array.from(h.w.document.querySelectorAll('#mn-rev-ov tr.mn-
 const row = (h, c) => h.w.document.querySelector('#mn-rev-ov tr.mn-rev-row[data-code="' + c + '"]');
 const preocOf = h => Array.from(h.w.document.querySelectorAll('#mn-rev-preoc .mn-rev-preoc-item')).map(s => s.getAttribute('data-code')).sort();
 const J = x => JSON.stringify(x);
-const KEEP = ['55312', '70002', '70010', '90757'];
+const KEEP = ['70010', '90757'];
 const OUT = ['70001', '70003', '8055312', '8057488', '8090757'];
 
 async function env(movs, cat) {
@@ -124,9 +125,9 @@ function xlsxMock(w) {
   await ticks(6);
   ok('модалът е отворен', $(h, '#mn-rev-ov').classList.contains('open'));
   const codes = codesOf(h);
-  ok('остават точно 55312, 70002, 70010, 90757 (в този ред)', J(codes) === J(KEEP), J(codes));
+  ok('остават точно 70010, 90757 (в този ред)', J(codes) === J(KEEP), J(codes));
   ok('минус-преоценен без заметнат (8057488) → не влиза', codes.indexOf('8057488') < 0);
-  ok('обикновен минус + преоценен заметнат: 55312 да, 8055312 не', codes.indexOf('55312') >= 0 && codes.indexOf('8055312') < 0);
+  ok('обикновен минус + преоценен заметнат: целият ред вън (55312 и 8055312)', codes.indexOf('55312') < 0 && codes.indexOf('8055312') < 0);
   ok('преоценен минус + обикновен заметнат: 8090757 не, 90757 да', codes.indexOf('8090757') < 0 && codes.indexOf('90757') >= 0);
   ok('… 90757 е глава на своя група (не син)', !row(h, '90757').classList.contains('mn-rev-sub') && row(h, '90757').getAttribute('data-group') === '90757');
   ok('… „откъде е“: заметнат към 8090757', row(h, '90757').querySelector('.mn-rev-origin').textContent === 'заметнат към 8090757');
@@ -138,7 +139,7 @@ function xlsxMock(w) {
   ok('сив блок „Не влизат (преоценени)“ — видим', !!blk && /^Не влизат \(преоценени\): /.test(blk.textContent) && !/display:\s*none/.test(blk.getAttribute('style') || ''));
   ok('… в него точно преоценените', J(preocOf(h)) === J(OUT), J(preocOf(h)));
   ok('… „код — описание“', blk.textContent.indexOf('8057488 — ПРЕОЦ.ТЕСТ СТОКА') >= 0 && blk.textContent.indexOf('70003 — ПРЕОЦ.ТЕСТ 70003') >= 0 && blk.textContent.indexOf('8055312 — ТЕСТ 8055312') >= 0);
-  ok('бутонът „📥 Свали Excel (4)“ — без преоценените', $(h, '#mn-rev-xlsx').textContent === '📥 Свали Excel (4)' && !$(h, '#mn-rev-xlsx').disabled, $(h, '#mn-rev-xlsx').textContent);
+  ok('бутонът „📥 Свали Excel (2)“ — без преоценените', $(h, '#mn-rev-xlsx').textContent === '📥 Свали Excel (2)' && !$(h, '#mn-rev-xlsx').disabled, $(h, '#mn-rev-xlsx').textContent);
   ok('няма ред „каталогът не се зареди“', !$(h, '#mn-rev-catfail'));
   const cq = db.log.filter(x => x.tbl === 'product_catalog');
   ok('каталогът — една заявка с category за всички кодове', cq.length === 1 && /select=sap_code,product_name,category/.test(cq[0].q) &&
@@ -168,7 +169,9 @@ function xlsxMock(w) {
     ok('„' + mode + '“: по описание пак вън (8057488, 8090757)', c.indexOf('8057488') < 0 && c.indexOf('8090757') < 0 && J(preocOf(r.h)) === J(['8057488', '8090757']), J(preocOf(r.h)));
     ok('„' + mode + '“: по каталог не се разпознават (8055312, 70001, 70003 влизат)', ['8055312', '70001', '70003'].every(x => c.indexOf(x) >= 0), J(c));
     const cf = $(r.h, '#mn-rev-catfail');
-    ok('„' + mode + '“: сив ред „Каталогът не се зареди — …само по описание“', !!cf && cf.textContent === 'Каталогът не се зареди — преоценените се разпознават само по описание');
+    ok('„' + mode + '“: сив ред „Каталогът не се зареди — …само по описание“', !!cf && cf.textContent.indexOf('Каталогът не се зареди — преоценените се разпознават само по описание') === 0);
+    ok('„' + mode + '“: … и кои заметнати не могат да се проверят (70003, 8055312)', !!cf && cf.textContent.indexOf('без описание в движенията (70003, 8055312) не могат да се проверят — редовете им влизат') > 0, cf && cf.textContent);
+    ok('„' + mode + '“: 55312 и 70002 влизат (не се познава)', c.indexOf('55312') >= 0 && c.indexOf('70002') >= 0 && !$(r.h, '#mn-rev-hit'));
     const cp = xlsxMock(r.h.w);
     realClick(r.h.w, $(r.h, '#mn-rev-xlsx'), 'Свали Excel');
     await ticks(6);
