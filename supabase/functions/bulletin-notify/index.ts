@@ -12,6 +12,16 @@
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //   store_open_items — Незавършено за обекта: по едно писмо на обект (v19)
 //
+// v22 (17.11.2026) — устойчивост след 500 при първото пускане на
+//   store_open_items (17.11, 05:45 UTC): второто писмо на Търговище не стигна
+//   до resend-email (fetch хвърли), изключението спря темата → Шумен не
+//   тръгна, last_run_at не се записа, текстът на грешката не остана никъде.
+//   (1) sendEmail: хвърлящ fetch → false + console.error (важи за всички
+//   теми с имейл); (2) store_open_items: try/catch на обект — грешката влиза
+//   в last_status („ГРЕШКА: … · <обект>: <текст>“), цикълът продължава,
+//   last_run_at се записва; (3) console.error в catch-а на Deno.serve и при
+//   грешките в recipients_only. Текстът на писмото — непроменен.
+//
 // v21 (16.11.2026) — store_open_items, ред на клиентска заявка, само текст:
 //   co_eta = delivery → една дата („срок …"), не „срок към клиента … ·
 //   очаква се от ЦО …" с еднакви дати; „+1 работен ден" в единствено число
@@ -1737,11 +1747,22 @@ function promoHtmlFor(today: any[], ahead: any[], bg: any) {
     + '<div style="font-size:11px;color:#9ca3af;margin-top:18px;">ТеМАХ Портал</div></div>';
 }
 
+/* v22: fetch, който ХВЪРЛЯ (мрежова грешка — заявката не стига до
+   resend-email), е неуспешно писмо (false), не изключение. Дотогава
+   изключението изскачаше от темата и спираше цялото пускане: 17.11 в 05:45
+   второто писмо на Търговище не стигна до resend-email, store_open_items
+   върна 500, Шумен не тръгна, last_run_at не се записа. */
 async function sendEmail(to: string, subject: string, html: string) {
-  const res = await fetch(SEND_FN_URL, {
-    method: 'POST', headers: SEND_HEADERS,
-    body: JSON.stringify({ type: 'email', to: to, subject: subject, html: html }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(SEND_FN_URL, {
+      method: 'POST', headers: SEND_HEADERS,
+      body: JSON.stringify({ type: 'email', to: to, subject: subject, html: html }),
+    });
+  } catch (e) {
+    console.error('resend-email fetch (' + to + '): ' + ((e as Error).message || String(e)));
+    return false;
+  }
   if (!res.ok) { console.error('resend-email HTTP ' + res.status + ': ' + (await res.text())); }
   return res.ok;
 }
@@ -2997,36 +3018,50 @@ async function runStoreOpenItems(supabase: any, topic: any, bg: any, dryRun: boo
   }
 
   let sent = 0, failed = 0, already = 0, stores = 0;
+  /* v22: грешка при един обект НЕ спира цикъла — влиза в errs (и в
+     last_status), минава се на следващия; last_run_at се записва след
+     цикъла винаги. Записан ред в лога без нито едно излязло писмо се маха,
+     за да опита пак следващото събуждане. */
+  const errs: string[] = [];
   for (const p of plan) {
-    const html = soiHtmlFor(p.store, p.parts, bg);
-    if (topic.test_email) {
-      const banner = '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за '
-        + esc(p.store) + ': ' + p.to.map((r: any) => esc(r.name) + ' &lt;' + esc(r.email) + '&gt;').join(', ') + '</div>';
-      if (await sendEmail(topic.test_email, subject(p.store), banner + html)) { sent++; stores++; } else { failed++; }
-      continue;
-    }
     const ref = bg.dateStr + '|' + p.store;
-    const ins = await supabase.from('notification_log')
-      .insert({ topic_key: topic.key, ref_key: ref, detail: p.total + ' реда · ' + p.to.length + ' адреса' });
-    if (ins.error) { already++; continue; }
-    let okAny = false;
-    for (const r of p.to) {
-      if (await sendEmail(r.email, subject(p.store), html)) { sent++; okAny = true; } else { failed++; }
+    let logged = false, okAny = false;
+    try {
+      const html = soiHtmlFor(p.store, p.parts, bg);
+      if (topic.test_email) {
+        const banner = '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за '
+          + esc(p.store) + ': ' + p.to.map((r: any) => esc(r.name) + ' &lt;' + esc(r.email) + '&gt;').join(', ') + '</div>';
+        if (await sendEmail(topic.test_email, subject(p.store), banner + html)) { sent++; stores++; } else { failed++; }
+        continue;
+      }
+      const ins = await supabase.from('notification_log')
+        .insert({ topic_key: topic.key, ref_key: ref, detail: p.total + ' реда · ' + p.to.length + ' адреса' });
+      if (ins.error) { already++; continue; }
+      logged = true;
+      for (const r of p.to) {
+        if (await sendEmail(r.email, subject(p.store), html)) { sent++; okAny = true; } else { failed++; }
+      }
+    } catch (e) {
+      const msg = (e as Error).message || String(e);
+      console.error('store_open_items ' + p.store + ': ' + msg);
+      errs.push(p.store + ': ' + msg);
+      failed++;
     }
-    if (!okAny) {
+    if (logged && !okAny) {
       await supabase.from('notification_log').delete().eq('topic_key', topic.key).eq('ref_key', ref);
-    } else { stores++; }
+    } else if (logged) { stores++; }
   }
 
   await supabase.from('notification_topics').update({
     last_run_at: new Date().toISOString(),
     last_recipients: plan.reduce((a, p) => a + p.to.length, 0),
     last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + stores + ' обекта, ' + sent + ' писма, ' + failed + ' неуспешни, '
-      + already + ' вече пратени' + (topic.test_email ? ' (тест до ' + topic.test_email + ')' : ''),
+      + already + ' вече пратени' + (topic.test_email ? ' (тест до ' + topic.test_email + ')' : '')
+      + (errs.length ? ' · ' + errs.join('; ').slice(0, 300) : ''),
   }).eq('key', topic.key);
 
   return { topic: topic.key, obekti: stores, sent_emails: sent, failed_emails: failed, already_sent: already,
-    bez_redove: empty.length, test_email: topic.test_email || null };
+    bez_redove: empty.length, test_email: topic.test_email || null, errors: errs };
 }
 
 /* ЕДИНСТВЕНИЯТ списък с темите, които имат строител. notification_topics
@@ -3115,7 +3150,10 @@ Deno.serve(async (req) => {
       let q = supabase.from('notification_topics').select('*');
       if (body.topic_key) q = q.eq('key', body.topic_key);
       const { data: roTopics, error: roErr } = await q;
-      if (roErr) return Response.json({ ok: false, error: 'notification_topics: ' + roErr.message }, { headers: CORS, status: 500 });
+      if (roErr) {
+        console.error('bulletin-notify recipients_only: notification_topics: ' + roErr.message);
+        return Response.json({ ok: false, error: 'notification_topics: ' + roErr.message }, { headers: CORS, status: 500 });
+      }
       const list = (roTopics || []).filter((t: any) => RO_TOPIC_KEYS.indexOf(t.key) >= 0);
       if (body.topic_key && !list.length) {
         return Response.json({ ok: false, error: 'Няма такава тема: ' + body.topic_key }, { headers: CORS, status: 404 });
@@ -3123,7 +3161,7 @@ Deno.serve(async (req) => {
       const out: Record<string, any> = {};
       for (const t of list) {
         try { out[t.key] = await topicRecipientsOnly(supabase, t, bg); }
-        catch (e) { out[t.key] = { topic: t.key, error: (e as Error).message }; }
+        catch (e) { console.error('bulletin-notify recipients_only ' + t.key + ': ' + (e as Error).message); out[t.key] = { topic: t.key, error: (e as Error).message }; }
       }
       return Response.json({ ok: true, recipients_only: true, bg_date: bg.dateStr, topics: out }, { headers: CORS });
     }
@@ -3167,6 +3205,9 @@ Deno.serve(async (req) => {
 
   } catch (e) {
     const err = e as Error;
+    /* v22: следа в function_logs — до 17.11 този catch не логваше нищо и
+       текстът на грешката се губеше (pg_net прекъсва чакането на 5 сек). */
+    console.error('bulletin-notify 500: ' + (err && err.message) + (err && err.stack ? '\n' + err.stack : ''));
     return Response.json({ ok: false, error: err.message }, { headers: CORS, status: 500 });
   }
 });

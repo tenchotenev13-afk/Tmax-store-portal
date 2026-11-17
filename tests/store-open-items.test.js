@@ -56,6 +56,19 @@
      М8 винаги двете дати (без проверката за съвпадение): пада 4 (A19, A20);
      М9 винаги „работни дни": пада 4 (A1, A16 „+1 работен ден").
 
+   v22 (17.11.2026) — 5б: fetch хвърля за един адрес (като Търговище 17.11) →
+   200, останалите обекти пратени, редът в лога за обекта без писмо махнат,
+   „ГРЕШКА:", last_run_at записан, console.error с текста; хвърляне при
+   вписването в лога за един обект → цикълът продължава, текстът в
+   last_status; общият catch на Deno.serve вика console.error.
+   Мутации (17.11.2026):
+     М10 sendEmail без try/catch (хвърлящ fetch изскача): пада 5б „console.error
+         с текста" — try/catch на обекта поема хвърлянето (втората защита),
+         затова пускането пак е 200;
+     М11 без try/catch на обект: пада 5б (второто — 500, Троян без писмо,
+         6 проверки);
+     М12 общият catch без console.error: пада 5б („bulletin-notify 500").
+
    Пускане:  node tests/store-open-items.test.js .
 */
 'use strict';
@@ -97,6 +110,8 @@ function fakeSb(db, log) {
           if (k === 'then') {
             return (res, rej) => {
               log.push(q);
+              /* v22: db.__throw(table, q) → true = клиентът хвърля (не връща error). */
+              if (db.__throw && db.__throw(table, q)) return Promise.reject(new Error('boom ' + table)).then(res, rej);
               const arr = db[table] || (db[table] = []);
               let out;
               if (q.op === 'insert') {
@@ -134,9 +149,10 @@ function fakeSb(db, log) {
   };
 }
 
-/* ── vm с часовник; sendFail(to) → true = resend-email връща 500 ──────── */
-function load(db, clock, sendFail) {
-  const posts = [], log = [];
+/* ── vm с часовник; sendFail(to) → true = resend-email връща 500;
+   sendThrow(to) → true = fetch ХВЪРЛЯ (мрежова грешка, 17.11) ──────────── */
+function load(db, clock, sendFail, sendThrow) {
+  const posts = [], log = [], errors = [];
   let handler = null;
   const Real = Date, fixed = new Real(clock).getTime();
   class FakeDate extends Real {
@@ -145,11 +161,12 @@ function load(db, clock, sendFail) {
   }
   const ctx = {
     Date: FakeDate, Response, Intl, JSON, Math, Object, Array, String, Number, Promise, Error, RegExp, Set, Map, setTimeout, encodeURIComponent,
-    console: { log() {}, warn() {}, error() {} },
+    console: { log() {}, warn() {}, error: (...a) => { errors.push(a.join(' ')); } },
     Deno: { env: { get: k => (k === 'SUPABASE_URL' ? 'https://x.supabase.co' : 'KEY') }, serve: fn => { handler = fn; } },
     createClient: () => fakeSb(db, log),
     fetch: (url, init) => {
       const body = JSON.parse((init && init.body) || '{}');
+      if (sendThrow && body.type === 'email' && sendThrow(body.to)) return Promise.reject(new TypeError('error sending request: connection closed before message completed'));
       posts.push({ url, body });
       const bad = sendFail && body.type === 'email' && sendFail(body.to);
       return Promise.resolve({ ok: !bad, status: bad ? 500 : 200, json: () => Promise.resolve({}), text: () => Promise.resolve('x') });
@@ -158,7 +175,8 @@ function load(db, clock, sendFail) {
   vm.createContext(ctx);
   vm.runInContext(JS, ctx, { filename: 'bulletin-notify.js' });
   const call = async body => (await handler({ method: 'POST', json: () => Promise.resolve(body) })).json();
-  return { ctx, call, posts, log, db, mails: () => posts.filter(p => p.body.type === 'email') };
+  const callRaw = async body => handler({ method: 'POST', json: () => Promise.resolve(body) });
+  return { ctx, call, callRaw, posts, log, db, errors, mails: () => posts.filter(p => p.body.type === 'email') };
 }
 
 /* ── Данни ──────────────────────────────────────────────────────────── */
@@ -411,6 +429,44 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     ok('паднало пращане за Ловеч → редът в лога е махнат', d.notification_log.map(x => x.ref_key).sort().join(',') === '2026-11-16|Кърджали,2026-11-16|Троян', JSON.stringify(d.notification_log));
     ok('last_status започва с „ГРЕШКА:"', /^ГРЕШКА: /.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
     ok('резултатът брои неуспешното', r.failed_emails === 1 && r.obekti === 2, JSON.stringify(r));
+  }
+
+  section('5б. v22 — грешка при един обект не спира пускането (17.11)');
+  {
+    /* fetch ХВЪРЛЯ за единствения адрес на Ловеч (като второто писмо на Търговище 17.11). */
+    const d = db();
+    const L = load(d, MON, null, to => to === 'lovech@temax.bg');
+    const raw = await L.callRaw({ topic_key: 'store_open_items' });
+    const r = (await raw.json()).result || {};
+    ok('отговорът е 200, не 500', raw.status === 200, raw.status + ' ' + JSON.stringify(r));
+    ok('останалите обекти получават писмо (Кърджали ×2, Троян ×2)', L.mails().map(m => m.body.to).sort().join(',') === 'kardzhali@temax.bg,sklad.troyan@temax.bg,test.kardzhali@gmail.com,troyan@temax.bg', L.mails().map(m => m.body.to).join(','));
+    ok('Ловеч: редът в лога е махнат (нищо не излезе) — следващото събуждане опитва пак', d.notification_log.map(x => x.ref_key).sort().join(',') === '2026-11-16|Кърджали,2026-11-16|Троян', JSON.stringify(d.notification_log));
+    ok('last_status започва с „ГРЕШКА:"', /^ГРЕШКА: 2 обекта, 4 писма, 1 неуспешни/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
+    ok('last_run_at е записан', !!d.notification_topics[0].last_run_at, String(d.notification_topics[0].last_run_at));
+    ok('console.error е извикан с текста', L.errors.some(e => e.indexOf('resend-email fetch (lovech@temax.bg): error sending request') === 0), JSON.stringify(L.errors));
+  }
+  {
+    /* Хвърля самото вписване в лога за Ловеч — грешка ВЪТРЕ в обекта, извън sendEmail. */
+    const d = db();
+    d.__throw = (table, q) => table === 'notification_log' && q.op === 'insert' && /Ловеч/.test(q.row.ref_key);
+    const L = load(d, MON);
+    const raw = await L.callRaw({ topic_key: 'store_open_items' });
+    const r = (await raw.json()).result || {};
+    ok('хвърляне при Ловеч → 200, цикълът продължава', raw.status === 200 && r.obekti === 2, raw.status + ' ' + JSON.stringify(r));
+    ok('Троян и Кърджали — пратени (Троян е СЛЕД Ловеч по азбука)', L.mails().map(m => m.body.to).sort().join(',') === 'kardzhali@temax.bg,sklad.troyan@temax.bg,test.kardzhali@gmail.com,troyan@temax.bg', L.mails().map(m => m.body.to).join(','));
+    ok('last_status: „ГРЕШКА:" и текстът с обекта', /^ГРЕШКА: /.test(d.notification_topics[0].last_status || '') && /Ловеч: boom notification_log/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
+    ok('last_run_at е записан', !!d.notification_topics[0].last_run_at);
+    ok('console.error: „store_open_items Ловеч: …"', L.errors.some(e => /store_open_items Ловеч: boom notification_log/.test(e)), JSON.stringify(L.errors));
+    ok('резултатът носи грешката', Array.isArray(r.errors) && r.errors.length === 1 && /Ловеч/.test(r.errors[0]), JSON.stringify(r.errors));
+  }
+  {
+    /* catch-ът в Deno.serve оставя следа. */
+    const d = db();
+    d.__throw = (table) => table === 'notification_topics';
+    const L = load(d, MON);
+    const raw = await L.callRaw({ topic_key: 'store_open_items' });
+    ok('500 от общия catch', raw.status === 500, String(raw.status));
+    ok('console.error: „bulletin-notify 500: …"', L.errors.some(e => /^bulletin-notify 500: boom notification_topics/.test(e)), JSON.stringify(L.errors));
   }
 
   section('6. Неработен ден');
