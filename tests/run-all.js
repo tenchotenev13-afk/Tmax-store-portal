@@ -127,6 +127,7 @@ const TESTS = [
   'razliki-etap6a.test.js',
   'razliki-etap6b.test.js',
   'diff-report-no-document.test.js',
+  'docs-office-only.test.js',
   'diff-qty-guard.test.js',
   'stock-returns-manual-order.test.js',
   'interstore-counterpart-select.test.js',

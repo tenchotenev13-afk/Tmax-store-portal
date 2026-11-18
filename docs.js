@@ -4,6 +4,30 @@ var DOCS_SB  = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
 var DOCS_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
 var DOCS_BKT = 'docs';
 
+/* Папка „🔒 Само за офиса“ (18.11.2026): вижда я САМО role 'admin'.
+   Отделно правило от isAdmin в renderDocs (admin+accounting, за бутона 🗑). */
+var DOCS_OFFICE_CAT = 'Само за офиса';
+function docsOfficeVisible(){ return !!(currentUser && currentUser.role === 'admin'); }
+
+/* Бутонът във #doc-filters и опцията в #d-cat следват docsOfficeVisible().
+   Вика се при всеки рендер на таба и при отваряне на модала. */
+function docsApplyOfficeUi(){
+  var vis=docsOfficeVisible();
+  var b=document.getElementById('doc-filter-office');
+  if(b) b.style.display=vis?'':'none';
+  var opt=document.getElementById('d-cat-office');
+  if(opt){
+    opt.hidden=!vis; opt.disabled=!vis; opt.style.display=vis?'':'none';
+    var sel=document.getElementById('d-cat');
+    if(!vis&&sel&&sel.value===DOCS_OFFICE_CAT) sel.selectedIndex=0;
+  }
+  if(!vis&&docFilter===DOCS_OFFICE_CAT){
+    docFilter='all';
+    var bs=document.querySelectorAll('#doc-filters .filter-btn');
+    for(var i=0;i<bs.length;i++) bs[i].classList.toggle('active',i===0);
+  }
+}
+
 function loadDocs(){
   sbGet('documents','order=created_at.desc').then(function(data){
     docs=Array.isArray(data)?data:[];renderDocs();
@@ -11,13 +35,19 @@ function loadDocs(){
 }
 
 function renderDocs(){
-  var list=docs.filter(function(d){return docFilter==='all'||d.category===docFilter;});
+  docsApplyOfficeUi();
+  var officeOk=docsOfficeVisible();
+  var list=docs.filter(function(d){
+    if(d.category===DOCS_OFFICE_CAT&&!officeOk) return false;
+    return docFilter==='all'||d.category===docFilter;
+  });
   var grid=document.getElementById('doc-grid');if(!grid)return;
   if(!list.length){
     grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:30px;color:#94a3b8;"><div style="font-size:32px;">📁</div><div>Няма документи.</div></div>';
     return;
   }
   var icons={SAP:'🖥',Процедури:'📋',Обучения:'🎓',Формуляри:'📝',Друго:'📄'};
+  icons[DOCS_OFFICE_CAT]='🔒';
   var isAdmin=currentUser&&['admin','accounting'].indexOf(currentUser.role)>=0;
   grid.innerHTML=list.map(function(d){
     var delBtn=isAdmin
@@ -73,6 +103,7 @@ function resetDocModal(){
   var t=document.getElementById('d-title'); if(t) t.value='';
   var u=document.getElementById('d-url'); if(u) u.value='';
   var d=document.getElementById('d-desc'); if(d) d.value='';
+  docsApplyOfficeUi();
 }
 
 function submitDoc(){
@@ -82,6 +113,7 @@ function submitDoc(){
   var fileInput=document.getElementById('d-file');
   var url=v('d-url');
   if(!title){toast('Въведи заглавие','#dc2626');return;}
+  if(cat===DOCS_OFFICE_CAT&&!docsOfficeVisible()){toast('Нямаш достъп до тази папка','#dc2626');return;}
   if(fileInput&&fileInput.files&&fileInput.files[0]){
     uploadDocFile(fileInput.files[0], title, cat, desc);
   } else if(url){

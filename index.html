@@ -556,6 +556,7 @@ OneSignalDeferred.push(async function(OneSignal) {
         <button class="filter-btn" onclick="filterDocs('Процедури',this)">Противопожарна безопасност</button>
         <button class="filter-btn" onclick="filterDocs('Обучения',this)" style="display:none;">Обучения</button>
         <button class="filter-btn" onclick="filterDocs('Формуляри',this)" style="display:none;">Формуляри</button>
+        <button class="filter-btn" id="doc-filter-office" onclick="filterDocs('Само за офиса',this)" style="display:none;">🔒 Само за офиса</button>
       </div>
       <button class="btn btn-green adm" id="btn-doc-add" onclick="resetDocModal();document.getElementById('doc-modal').classList.add('open')" style="display:none;">+ Добави документ</button>
     </div>
@@ -772,7 +773,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <h3>+ Добави документ</h3>
   <label class="fl">Заглавие</label><input class="fi" id="d-title" placeholder="напр. Процедура за ревизии">
   <label class="fl">Категория</label>
-  <select class="fi" id="d-cat"><option>SAP</option><option>Процедури</option><option>Обучения</option><option>Формуляри</option><option>Друго</option></select>
+  <select class="fi" id="d-cat"><option>SAP</option><option>Процедури</option><option>Обучения</option><option>Формуляри</option><option>Друго</option><option id="d-cat-office" value="Само за офиса" hidden disabled style="display:none;">Само за офиса</option></select>
   <label class="fl">Файл (PDF / Word / Excel)</label>
   <label style="display:flex;align-items:center;gap:10px;border:1.5px dashed #cbd5e1;border-radius:8px;padding:10px 14px;cursor:pointer;color:#64748b;font-size:13px;margin-bottom:8px;">
     <span style="font-size:20px;">📎</span>
