@@ -160,6 +160,7 @@ const TESTS = [
   'loading-lists-add-bottom.test.js',
   'loading-lists-unit-views.test.js',
   'loading-lists-labels.test.js',
+  'loading-nahodki-1811.test.js',
   'loading-lists-unnumbered-head.test.js',
   'loading-lists-quick-add.test.js',
   'loading-lists-notify.test.js',

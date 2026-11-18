@@ -518,19 +518,16 @@ const modal = doc => doc.getElementById('ll-add-modal');
     ok('с обяснение в toast',
       h.toasts.some(t => /чака одобрение/.test(String(t.msg))), JSON.stringify(h.toasts));
 
-    /* След решението същият бутон минава. */
+    /* След решението листът се приключва САМ (18.11.2026, ll-nahodki т.7).
+       Дотогава тук стоеше „бутонът „Приключи" още е там" — llAutoDoneList
+       търсеше листа само в llStoreLists, от изгледа на склада излизаше тихо и
+       листът оставаше „изпратен" с отговор на всички редове. */
     h.doc.getElementById('ll-apr-a1').value = 'наред';
     realClick(h.w, btn(h.doc.getElementById('mod-loading'), '✅ Одобри'));
-    await ticks(); await ticks(); await ticks(); await ticks();
-    h.w.llOpenView('L1');
-    const again = btn(h.doc.getElementById('mod-loading'), '✅ Приключи');
-    if (ok('бутонът „Приключи" още е там', !!again)) {
-      const before = patchesTo(h, 'loading_lists').length;
-      realClick(h.w, again);
-      await ticks(); await ticks();
-      ok('сега листът се приключва', patchesTo(h, 'loading_lists').length > before,
-        JSON.stringify(h.calls.patch.map(p => p.table)));
-    }
+    for (let k = 0; k < 8; k++) await ticks();
+    const lp = patchesTo(h, 'loading_lists');
+    ok('решението от склада приключва листа (PATCH status done)',
+      lp.length === 1 && lp[0].body.status === 'done', JSON.stringify(lp.map(p => p.body)));
   }
 
   section('ж) Одобрение — PATCH само по pending, после листът се затваря');

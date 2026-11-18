@@ -204,8 +204,9 @@ const pr = h => h.doc.getElementById('mod-print');
     await ticks(); await ticks();
     const grp = h.doc.querySelector('#mod-loading tr[data-pallet-group="1"]');
     if (ok('групов ред за извънгабаритния', !!grp, mod(h).innerHTML.slice(0, 300))) {
-      ok('бутонът казва „целият извънгабаритен"', /Целият извънгабаритен/.test(grp.textContent), grp.textContent);
-      const b = btn(grp, 'Целият извънгабаритен');
+      /* 18.11.2026 (ll-nahodki т.3): „Целият извънгабаритен" → „Целият товар". */
+      ok('бутонът казва „Целият товар"', /Целият товар/.test(grp.textContent), grp.textContent);
+      const b = btn(grp, 'Целият товар');
       ok('и носи вида в data-k', b.getAttribute('data-k') === 'oversize', b.getAttribute('data-k'));
       realClick(h.w, b);
       await ticks(); await ticks(); await ticks();

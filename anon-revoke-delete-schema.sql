@@ -20,6 +20,10 @@
 --   kasa.js:      kasa_storno, kasa_storno_items
 --   loading.js:   loading_list_items, loading_list_photos,
 --                 loading_list_products
+--                 (+ loading_lists от 18.11.2026 — САМО за anon и САМО при
+--                 status = 'draft', виж loading-list-delete-draft-schema.sql,
+--                 миграция 20261118095818; тук revoke-ът по-долу остава като
+--                 история)
 --   picking.js:   picking_batches, picking_pallets, picking_pallet_items,
 --                 picking_shipments
 --   reference.js: warranty_entries, warranty_brands, warranty_subcategories

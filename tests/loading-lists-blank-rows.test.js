@@ -175,10 +175,11 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
       String(h.w.llDraft.units.length));
   }
 
-  section('е) Празен ред с коментар пак е празен');
+  section('е) Ред с коментар без обект СПИРА записа (18.11.2026, ll-nahodki т.2)');
   {
-    /* Коментарът сам по себе си не прави реда „започнат": без обект той и
-       без друго не може да се запише. */
+    /* До 18.11 такъв ред отпадаше тихо и написаният коментар изчезваше.
+       Сега: червен toast с номера на реда, нищо не се записва. Пълното
+       покритие — tests/loading-nahodki-1811.test.js. */
     const h = env();
     h.w.llNewList();
     await ticks(); await ticks();
@@ -186,10 +187,8 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     h.w.llDraft.units[5].store_name = 'Петрич';
     h.w.llSaveDraft();
     for (let k = 0; k < 8; k++) await ticks();
-    const posts = itemPosts(h);
-    ok('записан е само редът с обект', posts.length === 1 && posts[0].body.length === 1,
-      JSON.stringify(posts[0] && posts[0].body));
-    ok('и това е Петрич', posts[0].body[0].store_name === 'Петрич');
+    ok('нищо не се записва', h.calls.post.length === 0, JSON.stringify(h.calls.post.map(p => p.table)));
+    ok('toast казва ред 1 и че липсва обект', h.toasts.some(t => /Ред 1:.*липсва обект/.test(t.msg)), JSON.stringify(h.toasts));
   }
 
   report();

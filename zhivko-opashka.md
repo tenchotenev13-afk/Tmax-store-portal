@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(информативно, не схема — миграцията loading_list_delete_draft, loading-list-delete-draft-schema.sql, версия 20261118095818, приложена 18.11.2026)
+- 18.11 · loading_lists, loading_list_items — нова колона НЯМА. От тази дата черновите (status 'draft') на товарни листи могат да се трият от портала („🗑 Изтрий черновата"): редове от loading_lists и loading_list_items (+ loading_list_products, loading_list_photos по каскада) изчезват от базата. Огледалото ги пази — ако синхронизацията трие изчезналите редове, черновата изчезва и там; ако не — остава като сирак със status 'draft'.
+
 (в базата от миграцията loading_client_order_link, loading-client-order-link-schema.sql, версия 20261117125425, приложена 17.11.2026)
 - 17.11 · loading_list_items.client_order_id — uuid, NULL, без default
 

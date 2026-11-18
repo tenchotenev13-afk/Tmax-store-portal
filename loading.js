@@ -92,6 +92,25 @@ var llCoOther = {};
 var llCoOtherError = false;
 var llCoOtherReady = false;
 var llCoSync = {};
+/* Нулиране при вход / изход (18.11.2026, ll-nahodki т.9) — вика го shared.js
+   (startApp, doLogout). Смяна на акаунт в същия раздел без презареждане
+   оставяше в паметта избрания склад и клиентските заявки на предишния вход.
+   На екрана на обекта те не излизаха — това е почистване, не пробив.
+   Флаговете от app_settings (llProductsOn …) не се пипат: те не са на
+   потребителя и се презареждат сами. */
+function llResetState(){
+  llWarehouse = ''; llView = 'list'; llCurrentId = null; llDraft = null;
+  llLists = []; llItems = []; llPendingDocs = []; llStores = [];
+  llStoreLists = []; llStoreItems = []; llPhotos = {}; llPhotoBusy = {};
+  llCollapsed = {}; llStatusFilter = 'open';
+  llListQuery = ''; llStoreQuery = ''; llDocQuery = ''; llDocStore = '';
+  llCoDue = []; llCoError = false; llCoWh = '';
+  llCoOther = {}; llCoOtherError = false; llCoOtherReady = false; llCoSync = {};
+  llDeepLink = null; llHighlight = null; llStoreAdd = null; llWrong = null;
+  llCoNumCache = {}; llViewProdOpen = {}; llStoreProdOpen = {};
+  llDocFailures = {}; llIncompleteSaves = {};
+  llQuick = { store: '', pallet: 1, roll: 0, bulk: 0 };
+}
 var LL_CO_LINK_SINCE = '2026-11-17T12:54:25';
 var LL_CO_AUTO_FROM = ['pending', 'processed', 'approved'];
 /* Показва ли се блокът „Документи от Стока на път" в редактора. Ключът е
@@ -131,6 +150,15 @@ function llIsNumbered(kind){ return LL_NUMBERED.indexOf(kind) >= 0; }
 /* Кратката дума за етикета — „палет 2 от 5", „извънгабаритен 1 от 3",
    „руло 2 от 4". */
 var LL_KIND_WORD = { pallet: 'палет', oversize: 'извънгабаритен', roll: 'руло' };
+/* Надписите „целия …" в картата на обекта — по вид, с правилния род
+   (18.11.2026, ll-nahodki т.3). „Целият руло" / „Неполучен целия
+   извънгабаритен" бяха граматически грешни; извънгабаритният е „товар". */
+var LL_UNIT_TEXT = {
+  pallet:   { all: 'Целият палет', miss: 'Неполучен целия палет',   of: 'палета', missDone: 'Палетът е отбелязан като неполучен' },
+  roll:     { all: 'Цялото руло',  miss: 'Неполучено цялото руло',  of: 'рулото', missDone: 'Рулото е отбелязано като неполучено' },
+  oversize: { all: 'Целият товар', miss: 'Неполучен целия товар',   of: 'товара', missDone: 'Товарът е отбелязан като неполучен' }
+};
+function llUnitText(kind){ return LL_UNIT_TEXT[kind] || LL_UNIT_TEXT.pallet; }
 /* За извънгабаритния ред „какъв е товарът" е ЕДИНСТВЕНОТО описание: той няма
    артикули по документ и няма стандартен вид. Затова warehouse_comment му е
    задължителен — изискването живее ТУК, не като CHECK в базата: базата не
@@ -548,7 +576,7 @@ function loadLoadingLists(){
     .then(function(rows){
       llLists = Array.isArray(rows) ? rows : [];
       var ids = llLists.map(function(l){ return l.id; });
-      if(!ids.length){ llItems = []; renderLoadingLists(); return; }
+      if(!ids.length){ llItems = []; renderLoadingLists(); llDeepLinkApply(true); return; }
       /* Редовете на ВСИЧКИ листи наведнъж — броячите в списъка се смятат от
          тях, а втора заявка на всеки клик би била по-бавна от една обща. */
       /* sbGetAll, не sbGet: PostgREST реже на 1000 реда БЕЗ грешка, а при
@@ -564,7 +592,7 @@ function loadLoadingLists(){
              рисуване, а заявка на карта би била N+1. */
           return llLoadPhotos(ids);
         })
-        .then(function(){ renderLoadingLists(); });
+        .then(function(){ renderLoadingLists(); llDeepLinkApply(true); });
     });
 }
 /* Непълен отговор от sbGetAll (паднала страница) не се премълчава: прегледът
@@ -1354,11 +1382,11 @@ function llStoreCardHtml(l){
           /* Коментарът на ЦЕЛИЯ палет. Стои тук, а не в prompt(): обяснението
              какво липсва се пише веднъж и се записва във всеки ред на палета,
              а полето остава на екрана, докато човекът го дописва. */
-          (gCan?'<div style="margin-top:5px;font-weight:400;"><input id="ll-pc-'+l.id+'-'+g.kind+'-'+g.pallet_no+'" placeholder="какво липсва — задължително за „Неполучен целия палет“" style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-size:11.5px;"></div>':'')+
+          (gCan?'<div style="margin-top:5px;font-weight:400;"><input id="ll-pc-'+l.id+'-'+g.kind+'-'+g.pallet_no+'" placeholder="какво липсва — задължително за „'+esc(llUnitText(g.kind).miss)+'“" style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-size:11.5px;"></div>':'')+
         '</td>'+
         '<td class="ll-act" style="padding:6px 9px;white-space:nowrap;">'+(gCan
-          ? '<button data-id="'+l.id+'" data-p="'+g.pallet_no+'" data-k="'+escAttr(g.kind)+'" onclick="llMarkPalletReceived(this.dataset.id,this.dataset.p,this.dataset.k)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Целият '+esc(LL_KIND_WORD[g.kind] || 'палет')+'</button>'+
-            ' <button data-id="'+l.id+'" data-p="'+g.pallet_no+'" data-k="'+escAttr(g.kind)+'" onclick="llMarkPalletMissing(this.dataset.id,this.dataset.p,this.dataset.k)" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⛔ Неполучен целия '+esc(LL_KIND_WORD[g.kind] || 'палет')+'</button>'
+          ? '<button data-id="'+l.id+'" data-p="'+g.pallet_no+'" data-k="'+escAttr(g.kind)+'" onclick="llMarkPalletReceived(this.dataset.id,this.dataset.p,this.dataset.k)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ '+esc(llUnitText(g.kind).all)+'</button>'+
+            ' <button data-id="'+l.id+'" data-p="'+g.pallet_no+'" data-k="'+escAttr(g.kind)+'" onclick="llMarkPalletMissing(this.dataset.id,this.dataset.p,this.dataset.k)" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⛔ '+esc(llUnitText(g.kind).miss)+'</button>'
           : '')+
           /* Разлика по ЦЕЛИЯ палет само докато е недокоснат: започне ли да се
              отмята по редове, въпросът вече е за конкретния ред. */
@@ -1388,7 +1416,7 @@ function llStoreCardHtml(l){
          Кликът по бутона blur-ва полето и onchange се задейства пръв само в
          истински браузър; текстът трябва да се хване и когато не е. */
       '<td style="padding:6px 9px;">'+(llCanReceive(it)
-        ? '<input id="ll-sc-'+it.id+'" value="'+escVal(it.store_comment)+'" data-id="'+it.id+'" onchange="llSaveStoreComment(this.dataset.id,this.value)" placeholder="напр. кашонът е мокър" style="width:100%;min-width:130px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
+        ? '<input id="ll-sc-'+it.id+'" value="'+llAttr(it.store_comment)+'" data-id="'+it.id+'" onchange="llSaveStoreComment(this.dataset.id,this.value)" placeholder="напр. кашонът е мокър" style="width:100%;min-width:130px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
         : esc(it.store_comment||'—'))+'</td>'+
       '<td class="ll-act" style="padding:6px 9px;white-space:nowrap;">'+(it.received
         ? '<span style="color:#16a34a;font-weight:600;">✅ '+esc(it.received_by||'')+(it.received_at?' · '+llFmtStamp(it.received_at):'')+'</span>'
@@ -1496,10 +1524,17 @@ function llPhotosOf(listId, stage, store){
 /* Кой може да трие: качилият, докато листът НЕ е приключен; admin винаги.
    След приключване снимката е доказателство по затворен курс — оттам нататък
    се маха само от човек, който отговаря за целия портал. */
+/* Снимка от НАТОВАРВАНЕТО (stage 'sent', качена от склада) — от качилия я
+   само докато листът е ЧЕРНОВА: изпратен ли е, обектът вече я е видял и тя
+   се маха само от admin (решение на Тенчо 18.11.2026, ll-nahodki т.5).
+   Снимките на обекта при получаване — без промяна. */
 function llCanDeletePhoto(list, p){
   if(!currentUser || !p) return false;
   if(currentUser.role === 'admin') return true;
-  if(!list || list.status === 'done' || list.status === 'partial') return false;
+  if(!list) return false;
+  if(p.stage === 'sent'){
+    if(list.status !== 'draft') return false;
+  } else if(list.status === 'done' || list.status === 'partial') return false;
   return p.uploaded_by === llActor();
 }
 
@@ -1727,8 +1762,8 @@ function llMarkPalletReceived(listId, palletNo, kind){
   var mine = llStoreItemsOf(listId).filter(function(i){
     return llOpenForStore(i) && i.kind === k && Number(i.pallet_no) === n;
   });
-  if(!mine.length){ toast('Няма неполучени редове по този палет','#64748b'); return; }
-  llPatchReceived(mine, 'палета');
+  if(!mine.length){ toast('Няма неполучени редове по тази единица','#64748b'); return; }
+  llPatchReceived(mine, llUnitText(k).of);
 }
 function llMarkAllReceived(listId){
   /* САМО редовете на този обект. Един лист обслужва няколко обекта и бутонът
@@ -1820,7 +1855,7 @@ function llMarkPalletMissing(listId, palletNo, kind){
   var mine = llStoreItemsOf(listId).filter(function(i){
     return llOpenForStore(i) && i.kind === k && Number(i.pallet_no) === n;
   });
-  if(!mine.length){ toast('Няма неотметнати редове по този палет','#64748b'); return; }
+  if(!mine.length){ toast('Няма неотметнати редове по тази единица','#64748b'); return; }
   var inp = document.getElementById('ll-pc-' + listId + '-' + k + '-' + n);
   var txt = inp ? String(inp.value == null ? '' : inp.value).trim() : '';
   if(!txt){
@@ -1828,7 +1863,7 @@ function llMarkPalletMissing(listId, palletNo, kind){
     if(inp && inp.focus) inp.focus();
     return;
   }
-  if(!confirm('Отбележи '+mine.length+' реда от палета като НЕполучени?')) return;
+  if(!confirm('Отбележи '+mine.length+' реда от '+llUnitText(k).of+' като НЕполучени?')) return;
   var at = new Date().toISOString(), by = llActor();
   Promise.all(mine.map(function(it){
     return sbPatch('loading_list_items','id=eq.'+it.id,
@@ -1843,7 +1878,7 @@ function llMarkPalletMissing(listId, palletNo, kind){
       console.error('llMarkPalletMissing: '+bad.length+' реда не бяха отбелязани', bad[0].res.error);
       toast('⚠️ '+bad.length+' реда НЕ бяха отбелязани: '+sbErrMsg(bad[0].res),'#dc2626');
     } else {
-      toast('⛔ Палетът е отбелязан като неполучен','#dc2626');
+      toast('⛔ '+llUnitText(k).missDone,'#dc2626');
     }
     renderLoadingLists();
   });
@@ -2258,8 +2293,13 @@ function llAutoCloseDoc(d){
    оставил статуса partial завинаги — редът се получава по-късно, липси вече
    няма, а листът продължава да твърди обратното. */
 function llAutoDoneList(listId){
-  var l = llStoreLists.find(function(x){ return String(x.id) === String(listId); });
-  if(!l) return Promise.resolve();
+  /* И llLists (18.11.2026, ll-nahodki т.7): решението по извънреден ред идва
+     и от изгледа на склада / регионалния / admin, а там листът е в llLists,
+     не в llStoreLists — функцията излизаше тихо и листът оставаше „изпратен".
+     Проверката по-долу и без това е със заявка за ВСИЧКИ редове на листа. */
+  var l = llStoreLists.find(function(x){ return String(x.id) === String(listId); }) ||
+          llLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!l || l.status === 'draft') return Promise.resolve();
   /* Обектът вижда САМО своите редове, затова проверката е със заявка, не от
      llStoreItems: другите обекти на същия лист са невидими тук и листът би
      се приключвал още на първия готов обект. */
@@ -2979,7 +3019,7 @@ function llListHtml(){
   }
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
   h += '<table class="ll-tbl" style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px;"><thead><tr style="background:#f8fafc;">';
-  ['Дата','Статус','Обекти','Палети','Рула','Насип','Изпълнил',''].forEach(function(c){
+  ['Дата','Статус','Обекти','Палети','Извънгаб.','Рула','Насип','Товарил',''].forEach(function(c){
     h += '<th'+(c===''?' class="ll-act"':'')+' style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
@@ -2992,6 +3032,7 @@ function llListHtml(){
         llWrongCountBadge(llLiveRows(llItemsOf(l.id)).filter(llWrongOpen).length)+'</td>'+
       llStoreNamesCell(llItemsOf(l.id))+
       '<td style="padding:7px 10px;text-align:center;">'+c.pallet+'</td>'+
+      '<td style="padding:7px 10px;text-align:center;">'+c.oversize+'</td>'+
       '<td style="padding:7px 10px;text-align:center;">'+c.roll+'</td>'+
       '<td style="padding:7px 10px;text-align:center;">'+c.bulk+'</td>'+
       '<td style="padding:7px 10px;color:#64748b;">'+esc(l.executed_by||'—')+'</td>'+
@@ -3044,6 +3085,14 @@ function llBlankRow(it){
   return !!it && !String(it.store_name || '').trim() &&
     !(it.docs && it.docs.length) && !String(it._docDraft || '').trim() &&
     !(it.products && it.products.length);
+}
+/* Свободно място за „⚡ Бързо добавяне" и „➕" от клиентска заявка: празна
+   единица БЕЗ „Коментар склад" и без „Стока в стока". От 18.11.2026 (т.2)
+   такъв текст спира записа като започната работа — попълването не бива да
+   я присвоява на друг обект (находка от прегледа, ll-nahodki). */
+function llFreeSlot(it){
+  return llBlankRow(it) && !String(it.warehouse_comment || '').trim() &&
+    !String(it.nested_codes || '').trim();
 }
 /* Номерът на палета е АВТОМАТИЧЕН: нова единица взема следващия свободен за
    обекта и вида (max+1); при размяна на местата номерата на единиците от
@@ -3339,7 +3388,7 @@ function llCoAdd(id){
   var u = null;
   for(var i = 0; i < llDraft.units.length; i++){
     var c = llDraft.units[i];
-    if(llBlankRow(c) && !String(c.warehouse_comment || '').trim()){ u = c; break; }
+    if(llFreeSlot(c)){ u = c; break; }
   }
   if(!u){ u = llBlankUnit(); llDraft.units.push(u); }
   u.store_name = store;
@@ -3707,7 +3756,7 @@ function llQuickAdd(){
   if(!plan.length){ toast('Въведи поне един палет, руло или насип','#d97706'); return 0; }
   /* Свободните места — недокоснатите единици, В РЕДА им на екрана. */
   var blanks = [];
-  llDraft.units.forEach(function(u){ if(llBlankRow(u)) blanks.push(u); });
+  llDraft.units.forEach(function(u){ if(llFreeSlot(u)) blanks.push(u); });
   plan.forEach(function(kind){
     var u = blanks.shift();
     if(!u){ u = llBlankUnit(); llDraft.units.push(u); }
@@ -3927,6 +3976,26 @@ function llStoreOptions(sel){
 function llAttr(v){
   if(v === null || v === undefined || v === "") return "";
   return escAttr(String(v));
+}
+/* „Коментар склад" — многоредово поле, което расте до 4 реда (18.11.2026,
+   ll-nahodki т.11). Началната височина е по дължината на текста (~32 знака
+   на ред при тази ширина), за да се вижда целият още при рисуване; при
+   писане llGrowTa я досмята по scrollHeight. Над 4 реда — скрол в полето. */
+var LL_TA_MAX_ROWS = 4;
+var LL_TA_CSS = 'display:block;width:100%;min-width:120px;box-sizing:border-box;border-radius:5px;padding:2px 6px;font-size:12px;font-family:inherit;line-height:1.35;resize:vertical;overflow-y:auto;';
+function llTaRows(text){
+  var s = String(text == null ? '' : text);
+  if(!s) return 1;
+  var n = s.split('\n').reduce(function(a, line){ return a + Math.max(1, Math.ceil(line.length / 32)); }, 0);
+  return Math.max(1, Math.min(LL_TA_MAX_ROWS, n));
+}
+function llGrowTa(el){
+  if(!el || !el.style) return;
+  var lh = 12 * 1.35, max = Math.round(lh * LL_TA_MAX_ROWS + 6);
+  el.style.height = 'auto';
+  var h = el.scrollHeight || 0;
+  if(h > 0) el.style.height = Math.min(h + 2, max) + 'px';
+  else el.style.height = '';
 }
 /* „12,5" → 12.5. Празно, нула, отрицателно и боклук → null: количеството е
    задължително и строго положително, а „0 бройки" на палет е грешка при
@@ -4710,8 +4779,8 @@ function llEditorHtml(){
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px;">'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">'+
     '<div><label class="fl">Дата *</label><input type="date" class="fi" id="ll-date" value="'+esc(llDraft.list_date||'')+'" onchange="llSetDraftField(\'list_date\',this.value)"></div>'+
-    '<div><label class="fl">Товарил</label><input class="fi" id="ll-by" value="'+escVal(llDraft.executed_by)+'" oninput="llSetDraftField(\'executed_by\',this.value)"></div>'+
-    '<div><label class="fl">Коментар</label><input class="fi" id="ll-comment" value="'+escVal(llDraft.comment)+'" oninput="llSetDraftField(\'comment\',this.value)"></div>'+
+    '<div><label class="fl">Товарил</label><input class="fi" id="ll-by" value="'+llAttr(llDraft.executed_by)+'" oninput="llSetDraftField(\'executed_by\',this.value)"></div>'+
+    '<div><label class="fl">Коментар</label><input class="fi" id="ll-comment" value="'+llAttr(llDraft.comment)+'" oninput="llSetDraftField(\'comment\',this.value)"></div>'+
     '</div></div>';
 
   /* б) Чакащи стокови документи — само при app_settings loading_transit_docs='on'.
@@ -4800,7 +4869,7 @@ function llEditorHtml(){
         '</select>'+
           (pColor ? ' <span data-ll-pbadge="'+i+'" style="display:inline-block;background:'+pColor+';color:#fff;border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:700;">'+
             esc(LL_KIND_WORD[it.kind] || 'палет')+' '+esc(it.pallet_no)+'</span>' : '')+'</td>'+
-        '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'store_name\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+llStoreOptions(it.store_name)+'</select></td>'+
+        '<td style="padding:3px 6px;"><select id="ll-st-'+i+'" data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'store_name\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+llStoreOptions(it.store_name)+'</select></td>'+
         /* Изходящите номера са ЧИПОВЕ: Enter или запетая добавя номер, ✕ го
            маха. Единицата е един палет, а документите му — колкото са. */
         '<td style="padding:3px 6px;">'+(isPallet
@@ -4822,9 +4891,11 @@ function llEditorHtml(){
              червена рамка, докато е празно — иначе складът го подминава като
              всяко друго незадължително поле. */
           (llIsOversize(it.kind) ? '<div style="font-size:10px;font-weight:700;color:#92400e;margin-bottom:2px;">Какъв е товарът *</div>' : '')+
-          '<input id="ll-wc-'+i+'" value="'+llAttr(it.warehouse_comment)+'" data-i="'+i+'"'+
+          /* Многоредово поле, което расте до 4 реда (18.11.2026, т.11) — дълъг
+             коментар се вижда целият. oninput НЕ прерисува редактора. */
+          '<textarea id="ll-wc-'+i+'" data-i="'+i+'" rows="'+llTaRows(it.warehouse_comment)+'"'+
           (llIsOversize(it.kind) ? ' placeholder="напр. стелажи, ламперия…"' : '')+
-          ' oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value)" style="width:100%;min-width:120px;border:1px solid '+(llOversizeNeedsComment(it)?'#fca5a5':'#e2e8f0')+';border-radius:5px;padding:2px 6px;font-size:12px;">'+
+          ' oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value);llGrowTa(this)" style="'+LL_TA_CSS+'border:1px solid '+(llOversizeNeedsComment(it)?'#fca5a5':'#e2e8f0')+';">'+llAttr(it.warehouse_comment)+'</textarea>'+
           llCoChipHtml(it, i)+
           /* „Стока в стока" — по една група на ред; проверката е при запис. */
           '<div style="font-size:10px;font-weight:700;color:#92400e;margin:4px 0 2px;">📦 Стока в стока</div>'+
@@ -4928,6 +4999,20 @@ function llSaveDraft(){
   /* Недовършеният текст в полето за номер влиза в единицата — иначе номер,
      написан без Enter, би се загубил при запис. */
   llDraft.units.forEach(function(u, i){ if(String(u._docDraft || '').trim()) llUnitDocAdd(i, u._docDraft); });
+  /* Ред без обект и без изходящ №, но с „Коментар склад" или „Стока в стока",
+     НЕ отпада тихо (18.11.2026, ll-nahodki т.2): написаното е работа, която
+     иначе изчезва без следа. Спира записа и казва кой ред. Напълно празните
+     редове продължават да отпадат тихо. */
+  var orphan = llDraft.units.findIndex(function(it){
+    return llBlankRow(it) && (String(it.warehouse_comment || '').trim() || String(it.nested_codes || '').trim());
+  });
+  if(orphan >= 0){
+    toast('Ред '+(orphan + 1)+': има коментар или „Стока в стока“, но липсва обект получател','#dc2626');
+    renderLoadingLists();
+    var os = document.getElementById('ll-st-' + orphan);
+    if(os && os.focus) os.focus();
+    return;
+  }
   var kept = llDraft.units.filter(function(it){ return !llBlankRow(it); });
   var dropped = llDraft.units.length - kept.length;
   llDraft.units = kept;
@@ -5283,6 +5368,43 @@ function llProductsToggleHtml(it, open, fn){
 function llToggleViewProducts(id){ llViewProdOpen[id] = !llViewProdOpen[id]; renderLoadingLists(); }
 function llToggleStoreProducts(id){ llStoreProdOpen[id] = !llStoreProdOpen[id]; renderLoadingLists(); }
 
+/* ─── „🗑 ИЗТРИЙ ЧЕРНОВАТА" (решение на Тенчо 18.11.2026, ll-nahodki т.10) ──
+   Само чернова; само складовият акаунт на листа и admin. Базата пуска DELETE
+   на loading_lists САМО при status = 'draft' (миграция 20261118095818,
+   loading-list-delete-draft-schema.sql) — изпратен лист не се трие и при
+   грешка тук. Редовете, артикулите и редовете на снимките падат с каскадата;
+   файловете в Storage остават сираци (както при „✕" на снимка). Свързаните
+   клиентски заявки не се пипат — връзката е колона в реда на листа. */
+function llCanDeleteDraft(l){
+  if(!currentUser || !l || l.status !== 'draft') return false;
+  if(currentUser.role === 'admin') return true;
+  return isLogisticsWarehouseUser() && !!l.warehouse && currentUser.store_name === l.warehouse;
+}
+function llDeleteDraft(listId){
+  var l = llLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!l) return Promise.resolve(false);
+  if(!llCanDeleteDraft(l)){
+    toast(l.status !== 'draft' ? 'Само чернова може да се изтрие' : 'Нямаш права да изтриеш тази чернова','#dc2626');
+    return Promise.resolve(false);
+  }
+  var n = llLiveRows(llItemsOf(l.id)).length;
+  if(!confirm('Изтрий черновата от '+fmtDate(l.list_date)+' с '+n+(n === 1 ? ' ред' : ' реда')+'?\n\nРедовете и снимките ѝ изчезват. Това не може да се върне.')) return Promise.resolve(false);
+  /* status=eq.draft и в заявката: ако междувременно листът е изпратен от
+     друг раздел, нищо не се трие (count 0 → провал, не „изтрито"). */
+  return sbDelete('loading_lists','id=eq.'+encodeURIComponent(l.id)+'&status=eq.draft').then(function(res){
+    if(!res || !res.ok || res.count === 0){
+      toast('Черновата НЕ беше изтрита'+(res && !res.ok ? ': '+sbErrMsg(res) : ' — може би вече е изпратена; презареди'),'#dc2626');
+      return false;
+    }
+    llLists = llLists.filter(function(x){ return String(x.id) !== String(l.id); });
+    llItems = llItems.filter(function(i){ return String(i.list_id) !== String(l.id); });
+    delete llPhotos[l.id];
+    toast('🗑 Черновата от '+fmtDate(l.list_date)+' е изтрита');
+    llBackToList();
+    return true;
+  });
+}
+
 /* ─── ПРЕГЛЕД НА ЛИСТ ───────────────────────────────────────── */
 function llOpenView(id){
   llCurrentId = id;
@@ -5308,6 +5430,7 @@ function llViewHtml(){
       llWrongCountBadge(wrongWait)+'</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llOpenEdit(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✏️ Редакция</button>':'')+
+      (llCanDeleteDraft(l)?'<button data-id="'+l.id+'" data-ll-del-draft="1" onclick="llDeleteDraft(this.dataset.id)" title="Изтрива черновата заедно с редовете и снимките ѝ" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">🗑 Изтрий черновата</button>':'')+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llSendList(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Изпрати към обектите</button>':'')+
       (l.status==='sent'?'<button data-id="'+l.id+'" onclick="llDoneList(this.dataset.id)"'+
         (llUnmarkedRows(l.id).length ? ' title="'+escAttr(llUnmarkedMsg(llUnmarkedRows(l.id)))+'"' : '')+' style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✅ Приключи</button>':'')+
@@ -5404,7 +5527,7 @@ function llViewHtml(){
         esc(llGroupHeading(hg, share))+'</td></tr>';
     } else if(hg){
       var hf = hg[0], hk = llTagKey(hf.kind, hf.pallet_no, hf.store_name);
-      h += '<tr data-ll-unit-head="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;"><td colspan="7" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(hf.store_name)+'">'+
+      h += '<tr data-ll-unit-head="1"'+llHlAttrs(l.id, hf)+' style="'+llHeadBg(l.id, hf)+'border-bottom:1px solid #e2e8f0;"><td colspan="7" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(hf.store_name)+'">'+
         esc(llGroupHeading(hg, share))+opisBtn+
         ' <button data-l="'+l.id+'" data-lk="'+escAttr(hk)+'" onclick="llLabels(this.dataset.l,this.dataset.lk)" title="Етикет с QR за този палет" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:4px;">🏷 Етикет</button>'+
         ' <button data-l="'+l.id+'" data-lk="'+escAttr(hk)+'" onclick="llDownloadLabelsPdf(this.dataset.l,this.dataset.lk)" title="Етикетът като PDF" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:2px;">⬇</button></td></tr>';
@@ -5422,7 +5545,7 @@ function llViewHtml(){
         (it.partial?' '+llPartialBadge():'')+'</td>'+
       /* Единственото, което остава редактируемо след изпращане. */
       '<td style="padding:6px 9px;">'+(locked
-        ? '<input value="'+escVal(it.warehouse_comment)+'" data-id="'+it.id+'" onchange="llSaveWarehouseComment(this.dataset.id,this.value)" style="width:100%;min-width:120px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
+        ? '<textarea id="ll-vwc-'+it.id+'" data-id="'+it.id+'" rows="'+llTaRows(it.warehouse_comment)+'" oninput="llGrowTa(this)" onchange="llSaveWarehouseComment(this.dataset.id,this.value)" style="'+LL_TA_CSS+'border:1px solid #e2e8f0;">'+llAttr(it.warehouse_comment)+'</textarea>'
         : esc(it.warehouse_comment||'—'))+llNestedBadgeHtml(it.nested_codes)+'</td>'+
       '<td style="padding:6px 9px;font-weight:500;">'+esc(it.store_name||'')+'</td>'+
       /* Коментарът на обекта е ОБЯСНЕНИЕТО на липсата — при missing той не е
@@ -5717,7 +5840,7 @@ function llRenderPrint(list, items, storeFilter){
       n++;
       var doc = it.purchase_doc ? esc(it.purchase_doc) : '<span style="color:#777;">без</span>';
       if(it.partial)    doc += '<div class="lp-tag">частично</div>';
-      return '<tr class="lp-row" data-store="'+escVal(it.store_name || '')+'">'+
+      return '<tr class="lp-row" data-store="'+llAttr(it.store_name)+'">'+
         '<td class="lp-num">'+n+'</td>'+
         (k === 0 ? '<td class="lp-kind" rowspan="'+span+'">'+esc(llIsHeaded(g.rows[0]) ? (LL_KIND_WORD[g.rows[0].kind] || g.rows[0].kind) : llKindLabel(g.rows[0]))+
           /* Извънгабаритният няма артикули по документ — „какъв е товарът" е
@@ -6008,16 +6131,28 @@ function llLabelDocText(d){ return d.doc + (d.n > 1 ? ' (' + d.k + '/' + d.n + '
 function llLabelWord(u){
   return u.kind === 'oversize' ? 'извънгабаритен' : (u.kind === 'roll' ? 'руло' : '');
 }
+/* „ПАЛЕТ N от M" само за палет; руло → „РУЛО N от M", извънгабаритен →
+   „ИЗВЪНГАБАРИТЕН N от M" (18.11.2026, ll-nahodki т.4). Дотогава всеки
+   етикет казваше „ПАЛЕТ", а видът стоеше само в по-дребния ред под него. */
 function llLabelTitle(u){
-  return 'ПАЛЕТ ' + u.no + (u.total != null ? ' от ' + u.total : '');
+  var w = (u.kind === 'roll' || u.kind === 'oversize') ? LL_KIND_WORD[u.kind].toUpperCase() : 'ПАЛЕТ';
+  return w + ' ' + u.no + (u.total != null ? ' от ' + u.total : '');
 }
 /* Размер на шрифта, при който текстът се събира в ширината (mm). Оценката
    (~0,56 em на знак за Roboto/Arial с кирилица) е нарочно прибрана: по-добре
    малко по-дребно, отколкото прекъснато име на обект. */
-function llFitPt(text, maxPt, widthMm, minPt){
+function llFitPt(text, maxPt, widthMm, minPt, em){
   var len = Math.max(1, String(text).length);
-  var pt = Math.floor(widthMm / (len * 0.3528 * 0.56));
+  var pt = Math.floor(widthMm / (len * 0.3528 * (em || 0.56)));
   return Math.max(minPt || 28, Math.min(maxPt, pt));
+}
+/* Шрифтът на заглавието на етикета. „ИЗВЪНГАБАРИТЕН" е дума от широки главни
+   букви: мерено в браузър (Arial bold, 18.11.2026) — 0,60 em на знак, а не
+   0,56, и при 40pt „ИЗВЪНГАБАРИТЕН 10 от 12" излизаше 194 mm в кутия от
+   190 mm, тоест „12" падаше на втори ред. За него — 0,66 и долна граница
+   32pt; палетът и рулото (0,52–0,54 em, мерено) остават както бяха. */
+function llLabelTitlePt(u, title){
+  return u.kind === 'oversize' ? llFitPt(title, 80, 186, 32, 0.66) : llFitPt(title, 80, 186, 36);
 }
 function llLabelProdsHtml(u){
   if(!u.products.length){
@@ -6064,18 +6199,19 @@ function llLabelCss(){
 function llLabelHtml(list, u){
   var color = llStoreColor(u.store), txt = llColorText(color);
   var storePt = llFitPt(u.store, 120, 180, 36);
-  var title = llLabelTitle(u), titlePt = llFitPt(title, 80, 186, 36);
+  var title = llLabelTitle(u), titlePt = llLabelTitlePt(u, title);
   var word = llLabelWord(u);
   return '<div class="lt-page" data-ll-label="'+escAttr(u.key)+'">'+
     '<div class="lt-band" style="background:'+color+';color:'+txt+';">'+
       '<div class="lt-store" style="font-size:'+storePt+'pt;">'+esc(u.store)+'</div></div>'+
     '<div class="lt-pal" style="font-size:'+titlePt+'pt;">'+esc(title)+'</div>'+
-    (word ? '<div class="lt-sub">'+esc(word)+(u.comment ? ' · '+esc(u.comment) : '')+'</div>' : '')+
+    /* Видът вече е в заглавието — отдолу остава само описанието на товара. */
+    (word && u.comment ? '<div class="lt-sub">'+esc(u.comment)+'</div>' : '')+
     '<div class="lt-mid">'+
       '<div class="lt-meta">'+
         '<div><b>Товарен лист:</b> '+fmtDate(list.list_date)+'</div>'+
         '<div><b>Склад:</b> '+esc(list.warehouse || '—')+'</div>'+
-        '<div><b>В курса:</b> палет '+u.seq+'/'+u.seqTotal+'</div>'+
+        '<div><b>В курса:</b> единица '+u.seq+'/'+u.seqTotal+'</div>'+
       '</div>'+
       '<div class="lt-qr" data-ll-qr="1">'+llQrSvg(llTagUrl(list.id, u.kind, u.no, u.store), 60)+'</div>'+
     '</div>'+
@@ -6093,7 +6229,7 @@ function llRenderLabelsPrint(list, units){
     '<style>'+llLabelCss()+'</style>'+
     '<div style="max-width:820px;margin:0 auto;padding:16px 16px 40px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">'+
-        '<div style="font-size:18px;font-weight:600;">🏷 Етикети · '+units.length+(units.length === 1 ? ' палет' : ' палета')+
+        '<div style="font-size:18px;font-weight:600;">🏷 Етикети · '+units.length+(units.length === 1 ? ' единица' : ' единици')+
           (llLabelIsDraft(list) ? ' <span style="font-size:12px;color:#dc2626;font-weight:700;">· ЧЕРНОВА — номерата още могат да се променят</span>' : '')+'</div>'+
         '<div style="display:flex;gap:8px;align-items:center;">'+
           '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>'+
@@ -6149,22 +6285,22 @@ function llBuildLabelsPdf(list, units){
       doc.text(String(u.store), 105, 10 + bandH / 2 + storePt * 0.3528 * 0.35, { align: 'center' });
       doc.setTextColor(0, 0, 0);
       var y = 10 + bandH + 6;
-      var title = llLabelTitle(u), titlePt = llFitPt(title, 80, 186, 36);
+      var title = llLabelTitle(u), titlePt = llLabelTitlePt(u, title);
       doc.setFontSize(titlePt);
       y += titlePt * 0.3528 * 0.85;
       doc.text(title, 105, y, { align: 'center' });
       var word = llLabelWord(u);
-      if(word){
+      if(word && u.comment){
         doc.setFontSize(26);
         y += 11;
-        doc.text(word.toUpperCase() + (u.comment ? ' · ' + u.comment : ''), 105, y, { align: 'center' });
+        doc.text(String(u.comment), 105, y, { align: 'center' });
       }
       y += 8;
       /* Лява колона — реквизити; дясно — QR 60×60. */
       doc.setFontSize(12);
       doc.text('Товарен лист: ' + fmtDate(list.list_date), 12, y + 6);
       doc.text('Склад: ' + (list.warehouse || '—'), 12, y + 13);
-      doc.text('В курса: палет ' + u.seq + '/' + u.seqTotal, 12, y + 20);
+      doc.text('В курса: единица ' + u.seq + '/' + u.seqTotal, 12, y + 20);
       var m = llQrMatrix(llTagUrl(list.id, u.kind, u.no, u.store)), quiet = 2, cell = 60 / (m.n + quiet * 2);
       var qx = 140, qy = y, r, c, s;
       doc.setFillColor(255, 255, 255);
@@ -6294,7 +6430,7 @@ function llHandleScannedPallet(listId, text){
   var rows = llLiveRows(llStoreItemsOf(listId)).filter(function(i){
     return i.kind === tag.kind && Number(i.pallet_no) === tag.no && (i.store_name || '') === tag.store;
   });
-  if(!rows.length) return Promise.resolve(llScanResult('unknown', 'Палетът го няма в този лист', llTagKey(tag.kind, tag.no, tag.store), { tag: tag }));
+  if(!rows.length) return Promise.resolve(llScanResult('unknown', 'Единицата я няма в този лист', llTagKey(tag.kind, tag.no, tag.store), { tag: tag }));
   var label = llCap(llKindLabel(rows[0]));
   var open = rows.filter(llOpenForStore);
   if(!open.length){
@@ -6471,14 +6607,20 @@ function llDeepLinkBoot(hash){
   if(!tag) return false;
   llClearUrlHash();
   showModule('loading');
+  /* Склад и admin (18.11.2026, ll-nahodki т.8): етикетът е техен — връзката
+     отваря прегледа на листа с подчертана единица, без червения екран.
+     Дотогава складовият акаунт виждаше „ЗА <ОБЕКТ> — не е за вас". */
+  if(llCanEdit()){
+    llDeepLink = { listId: tag.listId, kind: tag.kind, no: tag.no, store: tag.store, wh: true };
+    llDeepLinkWarehouse();
+    return true;
+  }
   /* Чужд обект — червеният екран веднага, без да чакаме данните: не е нужно да
      знаем нищо за листа, за да кажем „не е за вас". */
   if(!llCanReceive({ store_name: tag.store })){
     llForeignScreen(tag);
     return true;
   }
-  /* Складовият изглед няма карти за приемане — няма какво да се подчертава. */
-  if(llCanEdit()) return true;
   llDeepLink = tag;
   /* Данните може вече да са заредени (showModule ги пуска, но обещанието е
      асинхронно) — llDeepLinkApply се вика и от края на зареждането. */
@@ -6506,9 +6648,54 @@ function llForeignDismiss(){
 }
 /* Вика се и от deep link-а, и от края на зареждането на картите: който дойде
    пръв с налични данни, върши работата. */
-function llDeepLinkApply(){
+/* Складът / admin (т.8). Складовият акаунт вижда само своя склад — листите
+   му идват от обичайното зареждане. admin / logistics първо научават склада
+   на листа (една заявка) и го избират, иначе списъкът е празен. */
+function llDeepLinkWarehouse(){
+  var tag = llDeepLink;
+  if(!tag || !tag.wh) return Promise.resolve(false);
+  if(isLogisticsWarehouseUser()){
+    tag.whName = currentUser.store_name;
+    return Promise.resolve(llDeepLinkApply());
+  }
+  return sbGet('loading_lists','id=eq.'+encodeURIComponent(tag.listId)+'&select=id,warehouse').then(function(rows){
+    if(llDeepLink !== tag) return false;
+    var r = Array.isArray(rows) && rows[0];
+    if(!r || LOGISTICS_WAREHOUSES.indexOf(r.warehouse) < 0){
+      llDeepLink = null;
+      toast('Листът от етикета не е намерен','#d97706');
+      return false;
+    }
+    tag.whName = r.warehouse;
+    if(llActiveWarehouse() === r.warehouse && llDeepLinkApply()) return true;
+    llWarehouse = r.warehouse;
+    loadLoadingLists();
+    return true;
+  });
+}
+/* final = зареждането на листите на склада е приключило: няма ли го листът и
+   тогава, той не е на този склад — казва се, вместо да се чака безкрай. */
+function llDeepLinkApply(final){
   if(!llDeepLink) return false;
   var tag = llDeepLink;
+  if(tag.wh){
+    var wl = llLists.find(function(x){ return String(x.id) === String(tag.listId); });
+    if(!wl){
+      if(final && tag.whName && llActiveWarehouse() === tag.whName){
+        llDeepLink = null;
+        toast('Листът от етикета не е на склад '+tag.whName,'#d97706');
+      }
+      return false;
+    }
+    llDeepLink = null;
+    llHighlight = { listId: wl.id, key: llTagKey(tag.kind, tag.no, tag.store) };
+    llOpenView(wl.id);
+    var wrap = document.getElementById('mod-loading');
+    var hl = wrap ? wrap.querySelector('tr[data-ll-hl="1"]') : null;
+    if(!hl) toast('Единицата я няма в листа','#d97706');
+    else if(hl.scrollIntoView) hl.scrollIntoView({ block: 'center' });
+    return true;
+  }
   var l = llStoreLists.find(function(x){ return String(x.id) === String(tag.listId); });
   if(!l) return false;   /* данните още не са дошли — ще се опита пак след зареждането */
   llDeepLink = null;

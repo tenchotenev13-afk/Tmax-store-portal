@@ -1681,6 +1681,7 @@ function doLogout(){
   currentUser=null;
   currentSession=null;
   transportOrders=[];clientOrders=[];docs=[];
+  if(typeof llResetState==='function') llResetState(); /* Товарни листи: склад и КЗ от предишния вход */
   document.getElementById('s-app').style.display='none';
   document.getElementById('s-login').style.display='flex';
   document.getElementById('l-pass').value='';
@@ -1738,6 +1739,7 @@ function rolesLoadRegional(){
   });
 }
 function startApp(){
+  if(typeof llResetState==='function') llResetState(); /* вход без изход отпреди (същият раздел) */
   if(typeof initPush==='function') initPush(currentUser);
   document.getElementById('s-login').style.display='none';
   document.getElementById('s-app').style.display='flex';

@@ -17,6 +17,10 @@
    (сесия transfer-loading-print-checked) — printAll / printStore / printPallet (+ правилото .lp-check, и в
    labelsPrint, защото CSS-ът е общ) и pdf (редът, „Проверено“ с контур и един setFontSize); машинно сверено,
    че без тези низове еталонът е байт по байт старият.
+   18.11.2026: снет наново САМО заради етикетите (сесия ll-nahodki т.4) — labelHtml / labelsPrint:
+   „В курса: палет i/n“ → „единица i/n“, „Етикети · 3 палета“ → „3 единици“, рулото „ПАЛЕТ 1 от 1“ +
+   ред „руло“ → „РУЛО 1 от 1“ (без реда; 80pt по llFitPt). Машинно сверено, че след обратна замяна на
+   тези низове еталонът е байт по байт старият; останалите 9 ключа не са мръднали.
 
    Пускане:  node tests/loading-ui.test.js .
    Еталон от друга версия:  node tests/loading-ui.test.js <корен> --dump */
@@ -155,7 +159,8 @@ async function snapshot() {
     const t = mod(h).querySelector('table.ll-tbl');
     if (ok('таблицата е ll-tbl', !!t)) {
       const ths = t.querySelectorAll('thead th');
-      ok('8 колони; последният th е празен с ll-act', ths.length === 8 && ths[7].textContent.trim() === '' && ths[7].classList.contains('ll-act') && Array.from(ths).slice(0, 7).every(x => !x.classList.contains('ll-act')));
+      /* 9 от 18.11.2026 (ll-nahodki т.6: + „Извънгаб.“). */
+      ok('9 колони; последният th е празен с ll-act', ths.length === 9 && ths[8].textContent.trim() === '' && ths[8].classList.contains('ll-act') && Array.from(ths).slice(0, 8).every(x => !x.classList.contains('ll-act')));
       const rows = Array.from(t.querySelectorAll('tbody tr'));
       ok('всеки ред: последната клетка е ll-act с бутон „Преглед“', rows.length >= 1 && rows.every(r => r.lastElementChild.classList.contains('ll-act') && !!r.lastElementChild.querySelector('button[onclick^="llOpenView"]')), String(rows.length));
     }

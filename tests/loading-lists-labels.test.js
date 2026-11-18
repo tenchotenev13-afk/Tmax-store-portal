@@ -155,11 +155,14 @@ const flashOf = h => h.doc.getElementById('ll-qr-flash');
     const p2 = pages[1];
     ok('страница 2: обект на цял ред и „ПАЛЕТ 1 от 2"', p2.textContent.indexOf('Петрич') >= 0 && p2.textContent.indexOf('ПАЛЕТ 1 от 2') >= 0);
     ok('и изходящите (с „(1/2)")', p2.textContent.indexOf('4600186336 (1/2), 4600186405') >= 0, p2.textContent.slice(0, 300));
-    ok('и „палет 2/4 в курса"', p2.textContent.indexOf('палет 2/4') >= 0);
+    /* 18.11.2026 (ll-nahodki т.4): „палет i/n" → „единица i/n". */
+    ok('и „единица 2/4 в курса"', p2.textContent.indexOf('единица 2/4') >= 0);
     ok('с артикулите (опис) в долната половина', p2.textContent.indexOf('ШУРУП 4X40') >= 0);
     ok('палет без артикули: „съдържание по изходящите номера"', pages[0].textContent.indexOf('съдържание по изходящите номера') >= 0);
-    ok('извънгабаритният носи вида и описанието под заглавието',
-      pages[3].textContent.indexOf('извънгабаритен') >= 0 && pages[3].textContent.indexOf('стелажи') >= 0);
+    /* 18.11.2026 (т.4): видът е в заглавието, под него — само описанието. */
+    ok('извънгабаритният: „ИЗВЪНГАБАРИТЕН N" в заглавието и описанието под него',
+      /ИЗВЪНГАБАРИТЕН 1/.test(pages[3].querySelector('.lt-pal').textContent) &&
+      pages[3].querySelector('.lt-sub').textContent.indexOf('стелажи') >= 0, pages[3].textContent.slice(0, 200));
     ok('QR на всяка страница', pages.every(p => !!p.querySelector('[data-ll-qr] svg')));
     ok('лентата е с цвета на обекта', pages[1].querySelector('.lt-band').style.background !== '' &&
       pages[1].querySelector('.lt-band').getAttribute('style').toLowerCase().indexOf(h.w.llStoreColor('Петрич')) >= 0);
@@ -339,7 +342,8 @@ const flashOf = h => h.doc.getElementById('ll-qr-flash');
     ok('баркод вместо QR → жълт „Непознат код"', flashOf(h).getAttribute('data-scan-result') === 'unknown' && /Непознат код/.test(flashOf(h).textContent));
     h.w.llQrFlashDismiss(); h.w.llQrScan.last = '';
     read(URL1('L1', 'pallet', 9, 'Петрич')); await ticks(); await ticks();
-    ok('палет, който го няма в листа → жълт', flashOf(h).getAttribute('data-scan-result') === 'unknown' && /го няма/.test(flashOf(h).textContent));
+    /* 18.11.2026 (ll-nahodki): „Палетът го няма" → „Единицата я няма" (и руло / извънгабаритен). */
+    ok('палет, който го няма в листа → жълт', flashOf(h).getAttribute('data-scan-result') === 'unknown' && /Единицата я няма/.test(flashOf(h).textContent));
     ok('през цялото време — само двата PATCH-а от първото сканиране', true);
 
     /* „Готово" затваря скенера. */
@@ -395,11 +399,14 @@ const flashOf = h => h.doc.getElementById('ll-qr-flash');
     realClick(h3.w, btn(red, 'Разбрах'));
     ok('„Разбрах" го маха', !h3.doc.getElementById('ll-foreign-modal'));
 
-    /* Складов потребител (не получател) също не е „от обекта". */
+    /* Складов потребител: до 18.11.2026 тук стоеше „→ същият червен екран"
+       (тоест тестът заковаваше бъга). От ll-nahodki т.8 етикетът е негов —
+       отваря прегледа на листа, без червен екран. Пълното покритие —
+       tests/loading-nahodki-1811.test.js. */
     const h4 = env(ITEMS, WAREHOUSE);
     h4.w.eval('llDeepLinkBoot(' + JSON.stringify('#tl=L1&p=' + encodeURIComponent('pallet|1|Петрич')) + ')');
-    await ticks();
-    ok('складов потребител → същият червен екран', !!h4.doc.getElementById('ll-foreign-modal'));
+    await ticks(); await ticks(); await ticks();
+    ok('складов потребител → БЕЗ червен екран', !h4.doc.getElementById('ll-foreign-modal'));
 
     /* Без валиден хеш — нищо. */
     const h5 = env(ITEMS, PETRICH);

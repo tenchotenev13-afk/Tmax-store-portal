@@ -42,7 +42,9 @@ const DELETE_ALLOWED = [
   'bulletin_tasks', 'bus_routes', 'client_orders', 'contact_topics', 'contacts',
   'differences_reports', 'documents', 'goods_transit', 'kasa_storno',
   'kasa_storno_items', 'loading_list_items', 'loading_list_photos',
-  'loading_list_products', 'notification_matrix', 'notification_overrides',
+  // loading_lists — от 18.11.2026 („🗑 Изтрий черновата“, ll-nahodki т.10);
+  // базата пуска DELETE само при status = 'draft' (миграция 20261118095818).
+  'loading_list_products', 'loading_lists', 'notification_matrix', 'notification_overrides',
   'notification_schedules', 'order_restrictions', 'picking_batches',
   'picking_pallet_items', 'picking_pallets', 'picking_shipments',
   'product_catalog', 'recurring_task_periods', 'recurring_task_skips',
@@ -132,7 +134,18 @@ ok('няма триене извън DELETE_ALLOWED', extra.length === 0,
 ok('няма запис в DELETE_ALLOWED без код', unused.length === 0,
    '\n      ' + unused.map(t => t + ' → махни от DELETE_ALLOWED (и revoke delete в нова миграция)').join('\n      '));
 ok('DELETE_ALLOWED без повторения', new Set(DELETE_ALLOWED).size === DELETE_ALLOWED.length);
-ok('45 таблици (както в anon-revoke-delete-schema.sql)', DELETE_ALLOWED.length === 45, 'реално: ' + DELETE_ALLOWED.length);
+/* 45 от anon-revoke-delete-schema.sql + loading_lists (18.11.2026). */
+ok('46 таблици (45 от anon-revoke-delete-schema.sql + loading_lists)', DELETE_ALLOWED.length === 46, 'реално: ' + DELETE_ALLOWED.length);
+
+/* Таблици, отнети на 02.11 и върнати по-късно с ОТДЕЛНА миграция. Всяка трябва
+   да има grant delete в посочения schema файл — иначе записът тук е лъжа. */
+const REGRANTED = { loading_lists: 'loading-list-delete-draft-schema.sql' };
+section('Върнатите по-късно — grant в своята миграция');
+Object.keys(REGRANTED).forEach(t => {
+  const f = path.join(ROOT, REGRANTED[t]);
+  const s = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+  ok(t + ': grant delete в ' + REGRANTED[t], new RegExp('^grant delete on public\\.' + t + ' to anon;$', 'm').test(s));
+});
 
 section('Миграцията не отнема от разрешените');
 const schema = path.join(ROOT, 'anon-revoke-delete-schema.sql');
@@ -140,9 +153,9 @@ if (fs.existsSync(schema)) {
   const sql = fs.readFileSync(schema, 'utf8');
   const revoked = (sql.match(/^revoke delete on public\.([a-z_0-9]+) from anon, authenticated;$/gm) || [])
     .map(s => s.match(/public\.([a-z_0-9]+)/)[1]);
-  ok('revoke-списъкът не съдържа таблица от DELETE_ALLOWED',
-     revoked.filter(t => DELETE_ALLOWED.indexOf(t) >= 0).length === 0,
-     revoked.filter(t => DELETE_ALLOWED.indexOf(t) >= 0).join(', '));
+  const clash = revoked.filter(t => DELETE_ALLOWED.indexOf(t) >= 0 && !REGRANTED[t]);
+  ok('revoke-списъкът не съдържа таблица от DELETE_ALLOWED (освен върнатите по-късно)',
+     clash.length === 0, clash.join(', '));
   ok('revoke-списъкът има 45 реда', revoked.length === 45, 'реално: ' + revoked.length);
 } else ok('anon-revoke-delete-schema.sql съществува', false);
 

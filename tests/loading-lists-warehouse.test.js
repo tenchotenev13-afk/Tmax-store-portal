@@ -340,7 +340,8 @@ function itemPosts(calls) {
     ok('появява се „Приключи"', hasBtn(h.doc, 'Приключи'));
     ok('няма бутони за местене/триене на ред',
       !hasBtn(h.doc, '↑') && !hasBtn(h.doc, '↓') && !hasBtn(h.doc, '✕'));
-    const inputs = mod(h.doc).querySelectorAll('input');
+    /* От 18.11.2026 (ll-nahodki т.11) полето е <textarea> — расте до 4 реда. */
+    const inputs = mod(h.doc).querySelectorAll('input, textarea');
     ok('единственото поле е коментарът на склада', inputs.length === 1,
       Array.prototype.map.call(inputs, i => i.getAttribute('onchange') || i.type).join(' | '));
     ok('и то вика llSaveWarehouseComment',
