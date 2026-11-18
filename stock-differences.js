@@ -516,6 +516,7 @@ function renderStockDiff() {
     h += sdNotesSectionHtml();
     h += sdOnlyWaitingBarHtml();
     h += sdCOTurnChipHtml();
+    h += sdWhChipsHtml();
     var repHtml = renderDiffReportsSection();
     h += repHtml || '<div id="sd-reports-empty" style="text-align:center;padding:50px 20px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:14px;"><div style="font-size:36px;">📭</div><div style="margin-top:8px;">Няма бланки за преглед</div></div>';
   } else {
@@ -1650,6 +1651,74 @@ function sdCOTurnChipHtml(){
   return '<div id="sd-co-turn" style="margin-bottom:12px;"><button id="sd-co-turn-chip" onclick="setSDOnlyCOTurn(!sdOnlyCOTurn)" style="border:1px solid '+(a?'#b45309':'#e2e8f0')+';background:'+(a?'#b45309':'#fff')+';color:'+(a?'#fff':'#64748b')+';border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">🏢 Ход: ЦО ('+n+')</button></div>';
 }
 function setSDOnlyCOTurn(on){ sdOnlyCOTurn = !!on; renderStockDiff(); }
+/* ══ Чипове за логистичния склад (етап 6в-1, 18.11.2026; решения т.4 —
+   „за склада по обем“) ══
+   ЕДНО правило за броя и за филтъра — sdWhChipKind(l, rep):
+     'noanswer'  — без отговор на склада;
+     'willsend7' — „⏳ Ще се изпрати“ без отговор на обекта, редът е подаден
+                   преди 7 или повече денонощия (created_at на РЕДА; точно 7×24 ч
+                   ВЛИЗА — надписът е „7+ дни“; без created_at — не влиза);
+     'takeback'  — return + обектът „пуснато в SAP“ = „Ход: склада —
+                   „📬 Прието обратно““ от sdInterstoreTurn;
+     null        — всичко друго: не е междускладов, приключен / късно получен,
+                   насочен по 5а, отворена размяна, „Ход: ЦО“.
+   Само за isLogisticsWarehouseUser; бланките — както при чипа на ЦО
+   (непрегледани + чакащи имейл, само на моя склад — sdVisible*Reports).
+   N = брой РЕДОВЕ; кликът оставя бланките с поне един такъв ред; един активен
+   чип наведнъж, втори клик го маха; смяна на подтаб / местене на бланка го
+   нулира. Видими и при 0. */
+var SD_WH_CHIP_DAYS = 7;
+var SD_WH_CHIPS = [
+  ['noanswer', '📝 Без отговор'],
+  ['willsend7', '⏳ Ще се изпрати, подадени преди 7+ дни'],
+  ['takeback', '📬 За „Прието обратно“']
+];
+var sdWhChip = '';
+function sdWhChipKind(l, rep){
+  /* Изключенията (не е междускладов, приключен, късно получен, насочен по 5а,
+     отворена размяна, „Ход: ЦО“) са от ЕДНОТО правило на 6а — ходът трябва
+     да е на склада. Не се дублират тук. */
+  var t = sdInterstoreTurn(l, rep);
+  if(!t || t.who !== 'warehouse') return null;
+  var w = String(l.warehouse_response || ''), s = String(l.store_response || '');
+  if(!w) return 'noanswer';
+  if(w === 'will_send' && !s){
+    var at = l.created_at ? new Date(l.created_at).getTime() : NaN;
+    return (!isNaN(at) && Date.now() - at >= SD_WH_CHIP_DAYS * 86400000) ? 'willsend7' : null;
+  }
+  if(w === 'return' && s === 'sap_done') return 'takeback';
+  return null;
+}
+function sdWhChipsHere(){ return isLogisticsWarehouseUser() && sdOnlyWaitingHere(); }
+function sdWhChipOn(){ return sdWhChipsHere() && sdWhChip ? sdWhChip : ''; }
+/* {noanswer: [редове], willsend7: [...], takeback: [...]} за дадените бланки. */
+function sdWhChipLines(reports){
+  var byId = {}, res = { noanswer: [], willsend7: [], takeback: [] };
+  (reports||[]).forEach(function(r){ if(r) byId[String(r.id)] = r; });
+  (sdData||[]).forEach(function(l){
+    var rp = l ? byId[String(l.report_id)] : null;
+    var k = rp ? sdWhChipKind(l, rp) : null;
+    if(k) res[k].push(l);
+  });
+  return res;
+}
+function sdWhChipReportIds(reports, kind){
+  var m = {};
+  (sdWhChipLines(reports)[kind] || []).forEach(function(l){ m[String(l.report_id)] = 1; });
+  return m;
+}
+function sdWhChipsHtml(){
+  if(!sdWhChipsHere()) return '';
+  var by = sdWhChipLines(sdVisibleUnreviewedReports().concat(sdVisibleEmailPendingReports()));
+  var on = sdWhChipOn();
+  var h = '<div id="sd-wh-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
+  SD_WH_CHIPS.forEach(function(c){
+    var a = on === c[0];
+    h += '<button id="sd-wh-chip-'+c[0]+'" data-kind="'+c[0]+'" onclick="setSDWhChip(this.dataset.kind)" style="border:1px solid '+(a?'#2563eb':'#e2e8f0')+';background:'+(a?'#2563eb':'#fff')+';color:'+(a?'#fff':'#64748b')+';border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">'+c[1]+' ('+by[c[0]].length+')</button>';
+  });
+  return h + '</div>';
+}
+function setSDWhChip(kind){ sdWhChip = (sdWhChip === kind) ? '' : String(kind || ''); renderStockDiff(); }
 function sdFmtDayMonth(val){
   var d = new Date(val);
   if(!val || isNaN(d.getTime())) return '';
@@ -2208,7 +2277,7 @@ function setSDFilter(f) { sdFilter=f; renderStockDiff(); }
 function setSDTypeFilter(f) { sdTypeFilter=f; if(!sdTypeHasCompleted(f) && sdFilter==='completed') sdFilter='all'; renderStockDiff(); }
 /* Смяната на посока нулира филтъра по магазин - магазините в двата таба са
    различни набори и запазен чип от другия таб би дал празен екран. */
-function setSDDirTab(t) { sdDirTab=t; sdStoreFilter=''; sdOnlyWaiting=false; sdOnlyCOTurn=false; renderStockDiff(); }
+function setSDDirTab(t) { sdDirTab=t; sdStoreFilter=''; sdOnlyWaiting=false; sdOnlyCOTurn=false; sdWhChip=''; renderStockDiff(); }
 function setSDStoreFilter(s) { sdStoreFilter=s||''; renderStockDiff(); }
 function sdClearFilters(){ sdStoreFilter=''; sdSearch=''; renderStockDiff(); }
 /* Пре-рендира при търсене, но запазва фокуса/позицията на курсора в полето -
@@ -3965,6 +4034,11 @@ function sdFilteredReports(){
     var coIds = sdCOTurnReportIds(unreviewed);
     unreviewed = unreviewed.filter(function(r){ return coIds[String(r.id)] === 1; });
   }
+  /* Чиповете на склада (етап 6в-1) — бланките с поне един ред от избрания вид. */
+  if(sdWhChipOn()){
+    var whIds = sdWhChipReportIds(unreviewed, sdWhChipOn());
+    unreviewed = unreviewed.filter(function(r){ return whIds[String(r.id)] === 1; });
+  }
   /* Чип по магазин + свободно търсене - същите контроли като за таблицата
      по-долу, за да не се търси на две различни места. */
   if(sdStoreFilter){
@@ -4401,6 +4475,7 @@ function submitSDMove(rid){
         return Promise.all([audit, push]).then(function(r3){
           closeSDMoveModal();
           if(sdDirTabsActive()){ sdDirTab = target; sdOnlyWaiting = false; sdOnlyCOTurn = false; }
+          sdWhChip = '';
           renderStockDiff();
           /* Жълтото е ПОСЛЕДНО - toast() пише в един и същ елемент. */
           var lost = [];
