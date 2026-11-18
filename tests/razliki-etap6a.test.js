@@ -66,7 +66,8 @@ const T = {
   n1: [line('n1', 'undelivered', { warehouse_response: 'will_send' }), 'Ход: склада — да изпрати стоката'],
   n2: [line('n2', 'undelivered', { warehouse_response: 'sent' }), 'Ход: обекта — да потвърди ПРИЕТО, когато стоката пристигне'],
   n3: [line('n3', 'excess', { warehouse_response: 'sent_sap' }), 'Ход: обекта — да потвърди в SAP'],
-  n4: [line('n4', 'excess', { warehouse_response: 'return' }), 'Ход: обекта — да пусне движението в SAP или да отбележи, че няма наличност'],
+  /* Етап 6б (18.11.2026): излишък + return → текстът по категория. */
+  n4: [line('n4', 'excess', { warehouse_response: 'return' }), 'Ход: обекта — да пусне заявка ZSTR тип 4 или да отбележи, че няма наличност в логистика'],
   n5: [line('n5', 'excess', { warehouse_response: 'return', store_response: 'sap_done' }), 'Ход: склада — „📬 Прието обратно“'],
   n6: [line('n6', 'excess', { warehouse_response: 'return', store_response: 'no_stock', store_response_comment: 'няма' }), 'Ход: ЦО — складът и обектът нямат следващ ход'],
   n8: [line('n8', 'undelivered'), 'Ход: по размяната']
@@ -228,7 +229,7 @@ const toasts = h => h.calls.toast.join(' | ');
       const c1 = row(h, 'c1'), c2 = row(h, 'c2');
       ok(name + ': c1 „✅ Приключено от Миглена Павлова · 17.11 — Решено“', !!c1 && c1.textContent.indexOf('✅ Приключено от Миглена Павлова · 17.11 — Решено') >= 0, c1 && c1.textContent);
       ok(name + ': c1 без „чака склада“ и без „📬 Получено“', !!c1 && c1.textContent.indexOf('чака склада') < 0 && c1.textContent.indexOf('📬 Получено') < 0);
-      ok(name + ': c2 — отговорите + „✅ Приключено от Админ“', !!c2 && c2.textContent.indexOf('↩️ Обратно') >= 0 && c2.textContent.indexOf('✅ Приключено от Админ · 17.11 — Оправено') >= 0, c2 && c2.textContent);
+      ok(name + ': c2 — отговорите + „✅ Приключено от Админ“', !!c2 && c2.textContent.indexOf('📝 Пуснете заявка ZSTR тип 4') >= 0 /* излишък, надпис по 6б */ && c2.textContent.indexOf('✅ Приключено от Админ · 17.11 — Оправено') >= 0, c2 && c2.textContent);
       ok(name + ': без ред „Ход:“ на приключените', !turn(h, 'c1') && !turn(h, 'c2'));
       h.close();
     }
@@ -313,7 +314,8 @@ const toasts = h => h.calls.toast.join(' | ');
     await render(h2);
     ok('склад: насоченият n9 — надпис, без бутоните на склада',
       row(h2, 'n9').textContent.indexOf('➡️ Към ЦО — не касае склада') >= 0 && row(h2, 'n9').querySelectorAll('[onclick^="openWarehouseResponseModal"]').length === 0);
-    ok('склад: обикновеният n0 — 4 бутона на склада', row(h2, 'n0').querySelectorAll('[onclick^="openWarehouseResponseModal"]').length === 4);
+    /* Етап 6б (18.11.2026): n0 е „липса“ → 3 бутона на склада, не 4. */
+    ok('склад: обикновеният n0 — 3 бутона на склада (липса, 6б)', row(h2, 'n0').querySelectorAll('[onclick^="openWarehouseResponseModal"]').length === 3);
     h2.close();
   }
 

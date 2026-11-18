@@ -195,7 +195,13 @@ const whClick = async (h, cell, val, label) => {
     ok('store_response=null', b.store_response === null, JSON.stringify(b));
     const h2 = env(WAREHOUSE, [line({ id: 'l-1', warehouse_response: 'return', store_response: 'no_stock' })]);
     h2.w.renderStockDiff();
-    await whClick(h2, respCell(card(h2.doc)), 'sent_sap');
+    /* Етап 6б (18.11.2026): return + no_stock е „Ход: ЦО“ — складът няма
+       бутони на реда. Нулирането в submitWarehouseResponse е непроменено и се
+       проверява през модала, отворен направо. */
+    ok('return + no_stock („Ход: ЦО“) → 0 бутона на склада', !respCell(card(h2.doc)).querySelector('button[data-val]'));
+    h2.w.openWarehouseResponseModal('l-1', 'sent_sap'); await ticks();
+    realClick(h2.w, h2.doc.getElementById('whr-ov').querySelector('button[data-val="sent_sap"][onclick^="submitWarehouseResponse"]'));
+    await ticks(); await ticks();
     ok('no_stock -> sent_sap нулира', sdPatches(h2)[0].body.store_response === null);
     const h3 = env(WAREHOUSE, [line({ id: 'l-1', warehouse_response: 'sent', store_response: null })]);
     h3.w.renderStockDiff();

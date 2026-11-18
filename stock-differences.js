@@ -634,7 +634,7 @@ function renderStockDiff() {
           /* Под отговора на склада - отговорът на магазина. Само при зададен
              store_response: без него sdStoreResponseLabel казва "чака магазина",
              а тук стоят доставчикови и вече приключени редове. */
-          (showWh ? '<td class="sd-c-wh" style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+'</td>' : '')+
+          (showWh ? '<td class="sd-c-wh" style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+sdWhResponseLabel(r)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+'</td>' : '')+
           '<td class="sd-c-act" style="padding:7px 10px;">';
 
         /* status='received' е КРАЯТ на междускладовия поток. Такъв ред няма
@@ -747,7 +747,7 @@ function sdExcelRows(list){
     var rep = diffReports.find(function(x){ return x.id===r.report_id; }) || {};
     var q = parseFloat(r.quantity);
     var wh = [];
-    if(r.warehouse_response) wh.push((WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+(r.warehouse_comment?' — '+r.warehouse_comment:''));
+    if(r.warehouse_response) wh.push(sdWhResponseLabel(r, rep.id!=null?rep:null)+(r.warehouse_comment?' — '+r.warehouse_comment:''));
     if(r.store_response) wh.push(sdHtmlText(sdStoreResponseLabel(r)));
     var sw = sdHtmlText(sdSwapSummary(r)); if(sw) wh.push(sw);
     aoa.push([
@@ -877,6 +877,60 @@ function sdBulWaitingReportIds(){
    „отговорете с …": иначе банерът би посочил бутон, какъвто вече няма. */
 var SD_STORE_BTN = { sap_done:'📄 ПУСНАТО В SAP', no_stock:'⛔ НЯМА НАЛИЧНОСТ В ЛОГИСТИКА',
   sent:'✅ ПРИЕТО', sent_sap:'📄 ПРИЕТО В SAP' };
+/* ══ Надписи по категория (етап 6б, 18.11.2026; среща 12.11 — С5; решение Б
+   на Тенчо 18.11: при излишък „📤 Изпратено“ го няма) ══
+   Само междускладов ред с категория „липса“ (undelivered) или „излишък“
+   (excess). Стойностите в базата са СЪЩИТЕ — сменят се само надписите и кои
+   бутони вижда складът. Без/друга категория → WH_RESPONSE_LABELS и
+   SD_STORE_BTN, както досега. Ключовете на SD_WH_BY_CAT са и списъкът с
+   позволените бутони на склада (в този ред). ЕДНИ функции за бутоните,
+   картата, „Решени редове“, Excel, банера, модала и push-овете —
+   sdWhResponseLabel / sdStoreBtnLabel / sdStoreResponseLabelFor.
+   Извън този файл надписи по отговор няма (report.js, send-scheduled-report,
+   shared.js, bulletin.js само броят по стойност) — 6в. */
+var SD_WH_BY_CAT = {
+  undelivered: { sent: '📤 Изпратено', will_send: '⏳ Ще се изпрати със следващ транспорт', 'return': '📄 Приемете по документи, пускам нова заявка' },
+  excess: { 'return': '📝 Пуснете заявка ZSTR тип 4', sent_sap: '📄 Изписано по система' }
+};
+var SD_STORE_BTN_BY_CAT = {
+  undelivered: { sap_done: '📄 ИЗПИСАНО В SAP', no_stock: '⛔ НЕ МОГА ДА ИЗПИША' },
+  excess: { sap_done: '📝 ЗАЯВКАТА Е ПУСНАТА', no_stock: '⛔ НЯМА НАЛИЧНОСТ В ЛОГИСТИКА' }
+};
+/* Надписът на ОТГОВОРА (не на бутона) — с малки букви, както „📄 Пуснато в SAP“. */
+var SD_STORE_RESP_BY_CAT = {
+  undelivered: { sap_done: '📄 Изписано в SAP', no_stock: '⛔ Не мога да изпиша' },
+  excess: { sap_done: '📝 Заявката е пусната', no_stock: '⛔ Няма наличност в логистика' }
+};
+var SD_STORE_RESP_OLD = { sap_done: '📄 Пуснато в SAP', no_stock: '⛔ Няма наличност в логистика',
+  sap_accepted: '📄 Прието в SAP', accepted: '✅ Прието' };
+/* 'undelivered' | 'excess' | '' (без/друга категория или не е междускладов). */
+function sdRespCat(l, rep){
+  if(!l) return '';
+  if(!rep) rep = (diffReports||[]).find(function(x){ return x.id === l.report_id; }) || null;
+  var dir = rep ? rep.direction : sdLineDirection(l);
+  if(dir !== 'interstore') return '';
+  var c = String(l.difference_category || '');
+  return SD_WH_BY_CAT[c] ? c : '';
+}
+function sdWhResponseLabel(l, rep, val){
+  if(val === undefined) val = l ? l.warehouse_response : null;
+  if(!val) return '';
+  var c = sdRespCat(l, rep);
+  if(c && SD_WH_BY_CAT[c][val]) return SD_WH_BY_CAT[c][val];
+  return WH_RESPONSE_LABELS[val] || val;
+}
+function sdStoreBtnLabel(l, rep, val){
+  var c = sdRespCat(l, rep);
+  if(c && SD_STORE_BTN_BY_CAT[c][val]) return SD_STORE_BTN_BY_CAT[c][val];
+  return SD_STORE_BTN[val] || val;
+}
+function sdStoreResponseLabelFor(l, rep, val){
+  if(val === undefined) val = l ? l.store_response : null;
+  if(!val) return '';
+  var c = sdRespCat(l, rep);
+  if(c && SD_STORE_RESP_BY_CAT[c][val]) return SD_STORE_RESP_BY_CAT[c][val];
+  return SD_STORE_RESP_OLD[val] || val;
+}
 /* Подсказките за ОБЕКТА (банер, числата на подтабовете, маркировките в
    картата) — офисът, складът и прегледът от ЦО не ги виждат (24.10.2026). */
 function sdStoreHintsOn(){
@@ -958,12 +1012,12 @@ function sdStoreBannerHtml(){
   if(n && typeof autoCompleteActive==='function' && autoCompleteActive('stock-diff')){
     h += '<div id="sd-waiting-note" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12.5px;color:#92400e;">'+
       '<span>📝 <b>'+n+'</b> '+(n===1?'ред чака':'реда чакат')+' вашия отговор. Отговорете с '+
-      sdQuoteLabels([SD_STORE_BTN.sap_done, SD_STORE_BTN.no_stock])+
+      sdQuoteLabels(hs.wait.reduce(function(a, l){ return a.concat([sdStoreBtnLabel(l, null, 'sap_done'), sdStoreBtnLabel(l, null, 'no_stock')]); }, []))+
       '. Задачата в Бюлетина се отмята сама, когато няма такива редове.</span>'+
       '<button id="sd-waiting-show" data-linked="stock-diff" onclick="bulOpenPending(this.dataset.linked)" style="border:1px solid #f59e0b;background:#fff;color:#92400e;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer;">Покажи ги →</button></div>';
   }
   if(m){
-    var lbls = hs.onway.map(function(l){ return SD_STORE_BTN[l.warehouse_response]; });
+    var lbls = hs.onway.map(function(l){ return sdStoreBtnLabel(l, null, l.warehouse_response); });
     h += '<div id="sd-onway-note" style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:8px 14px;margin-bottom:8px;font-size:12px;color:#475569;">'+
       '🚚 <b>'+m+'</b> '+(m===1?'ред е':'реда са')+' на път към вас. Когато стоката пристигне, отговорете с '+sdQuoteLabels(lbls)+'.</div>';
   }
@@ -1317,23 +1371,35 @@ function diffWarehouseResolveButtons(l, rep){
   var isMyWarehouse = isLogisticsWarehouseUser() && rep && rep.counterpart===currentUser.store_name;
   /* Приключен ред (received) не се пипа - трите бутона на склада изчезват и
      остава само текстът на отговора (клона "само за оглед" по-долу). */
-  if(isMyWarehouse && l.status!=='received'){
+  /* Етап 6б: ред с „Ход: ЦО“ (return + no_stock) — складът няма ход, бутоните
+     изчезват и остава само надписът (клона „само за оглед“ по-долу). */
+  var coTurn = sdInterstoreTurn(l, rep);
+  if(isMyWarehouse && l.status!=='received' && !(coTurn && coTurn.who === 'co')){
     var mk=function(val,label,color){
       var active=l.warehouse_response===val;
       return '<button data-lid="'+l.id+'" data-val="'+val+'" onclick="openWarehouseResponseModal(this.dataset.lid,this.dataset.val)" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
     };
-    var h='<div style="display:flex;gap:3px;flex-wrap:wrap;">'+
-      mk('sent','📤 Изпратено','#16a34a')+
-      mk('sent_sap','📄 Изпратено по система','#0d9488')+
-      mk('will_send','⏳ Ще изпрати','#d97706')+
-      mk('return','↩️ Обратно','#7c3aed')+
-      '</div>';
+    var WH_COL = { sent: '#16a34a', sent_sap: '#0d9488', will_send: '#d97706', 'return': '#7c3aed' };
+    var cat = sdRespCat(l, rep), btns = '';
+    if(cat){
+      /* Липса / излишък — само позволените бутони; заварен отговор извън
+         списъка остава видим като активен надпис, не като бутон. */
+      var allowed = SD_WH_BY_CAT[cat], w = l.warehouse_response;
+      if(w && !allowed[w]) btns += '<span class="sd-wh-legacy" style="background:'+(WH_COL[w]||'#64748b')+';color:#fff;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;">✓ '+sdWhResponseLabel(l, rep)+'</span>';
+      Object.keys(allowed).forEach(function(v){ btns += mk(v, allowed[v], WH_COL[v]); });
+    } else {
+      btns = mk('sent','📤 Изпратено','#16a34a')+
+        mk('sent_sap','📄 Изпратено по система','#0d9488')+
+        mk('will_send','⏳ Ще изпрати','#d97706')+
+        mk('return','↩️ Обратно','#7c3aed');
+    }
+    var h='<div style="display:flex;gap:3px;flex-wrap:wrap;">'+btns+'</div>';
     if(l.warehouse_comment) h+='<div style="font-size:10px;color:#64748b;margin-top:2px;">💬 '+esc(l.warehouse_comment)+'</div>';
     return h;
   }
   /* Цвети/admin/обикновени потребители - само за оглед, не могат да пипат */
   if(l.warehouse_response){
-    var h2='<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[l.warehouse_response]||l.warehouse_response)+'</span>';
+    var h2='<span style="color:#16a34a;font-weight:600;">'+sdWhResponseLabel(l, rep)+'</span>';
     /* Коментарът на склада е за магазина - на 10px в сиво не го четеше никой.
        white-space:normal, защото клетката е nowrap и дълъг текст излизаше навън. */
     if(l.warehouse_comment) h2+='<div style="margin-top:3px;font-size:11px;color:#1e293b;border:1px solid #cbd5e1;background:#f8fafc;border-radius:5px;padding:3px 6px;white-space:normal;">💬 '+esc(l.warehouse_comment)+'</div>';
@@ -1393,8 +1459,8 @@ function sdInterstoreConfirmButton(l, rep){
         return '<button data-lid="'+l.id+'" onclick="'+onclick+'" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
       };
       var hs = '<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap;">'+
-        sb('sap_done',SD_STORE_BTN.sap_done,'#7c3aed',"sdSetStoreResponse(this.dataset.lid,'sap_done')")+
-        sb('no_stock',SD_STORE_BTN.no_stock,'#dc2626','openStoreNoStockModal(this.dataset.lid)')+
+        sb('sap_done',sdStoreBtnLabel(l,rep,'sap_done'),'#7c3aed',"sdSetStoreResponse(this.dataset.lid,'sap_done')")+
+        sb('no_stock',sdStoreBtnLabel(l,rep,'no_stock'),'#dc2626','openStoreNoStockModal(this.dataset.lid)')+
         '</div>';
       if(l.store_response==='no_stock' && l.store_response_comment){
         hs += '<div style="margin-top:3px;font-size:11px;color:#1e293b;white-space:normal;">💬 '+esc(l.store_response_comment)+'</div>';
@@ -1538,7 +1604,13 @@ function sdInterstoreTurn(l, rep){
   if(w === 'sent' && !s) return { who: 'store', text: 'обекта — да потвърди ПРИЕТО, когато стоката пристигне' };
   if(w === 'sent_sap' && !s) return { who: 'store', text: 'обекта — да потвърди в SAP' };
   if(w === 'return'){
-    if(!s) return { who: 'store', text: 'обекта — да пусне движението в SAP или да отбележи, че няма наличност' };
+    if(!s){
+      /* Етап 6б — по категория, като бутоните на обекта (sdStoreBtnLabel). */
+      var rc = sdRespCat(l, rep);
+      if(rc === 'undelivered') return { who: 'store', text: 'обекта — да изпише в SAP или да отбележи, че не може' };
+      if(rc === 'excess') return { who: 'store', text: 'обекта — да пусне заявка ZSTR тип 4 или да отбележи, че няма наличност в логистика' };
+      return { who: 'store', text: 'обекта — да пусне движението в SAP или да отбележи, че няма наличност' };
+    }
     if(s === 'sap_done') return { who: 'warehouse', text: 'склада — „📬 Прието обратно“' };
     if(s === 'no_stock') return { who: 'co', text: 'ЦО — складът и обектът нямат следващ ход' };
   }
@@ -1649,9 +1721,9 @@ function sdIsInterstoreStoreSide(l, rep){
 }
 /* Отговорът на магазина като текст - за склада и за всички, които не са
    магазинът (Цвети/admin). Без бутони. */
-function sdStoreResponseLabel(l){
+function sdStoreResponseLabel(l, rep){
   if(l.store_response==='no_stock'){
-    return '<div style="margin-top:3px;font-size:10.5px;color:#dc2626;font-weight:700;">⛔ Няма наличност в логистика</div>'+
+    return '<div style="margin-top:3px;font-size:10.5px;color:#dc2626;font-weight:700;">'+sdStoreResponseLabelFor(l, rep)+'</div>'+
       (l.store_response_comment?'<div style="margin-top:2px;font-size:11px;color:#1e293b;white-space:normal;">💬 '+esc(l.store_response_comment)+'</div>':'');
   }
   /* "Получено от магазина", не "Прието": стоката не е дошла по отговора на
@@ -1665,7 +1737,7 @@ function sdStoreResponseLabel(l){
   }
   if(l.store_response==='sap_done' || l.store_response==='accepted' || l.store_response==='sap_accepted'){
     return '<div style="margin-top:3px;font-size:10.5px;color:#7c3aed;font-weight:600;">'+
-      (l.store_response==='sap_done'?'📄 Пуснато в SAP':(l.store_response==='sap_accepted'?'📄 Прието в SAP':'✅ Прието'))+
+      sdStoreResponseLabelFor(l, rep)+
       (l.store_response_by?' · '+esc(l.store_response_by):'')+
       (l.store_response_at?' · '+sdFmtDateTime(l.store_response_at):'')+'</div>';
   }
@@ -1780,7 +1852,7 @@ function openStoreNoStockModal(lineId){
   var existing = document.getElementById('sdnostock-ov'); if(existing) existing.remove();
   var div = document.createElement('div');
   div.innerHTML = '<div class="bov open" id="sdnostock-ov"><div class="bmod" style="width:380px;">'+
-    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">⛔ Няма наличност в логистика</div>'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+sdStoreResponseLabelFor(l, null, 'no_stock')+'</div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(l.material_name||'')+'</div>'+
     '<label class="fl">Коментар към склада (по избор)</label>'+
     '<input class="fi" id="sdnostock-comment" value="'+escVal(l.store_response_comment)+'" placeholder="напр. SAP отказва движението - наличност 0">'+
@@ -1809,8 +1881,12 @@ function sdSetStoreResponse(lineId,val,comment){
     var rep = diffReports.find(function(x){return x.id===line.report_id;}) || {};
     sdMarkDiffTask(line.store_name||rep.store_name);
     var art = line.material_name||'';
-    if(val==='sap_done') sdNotifyInterstore(rep.counterpart, '📄 Разлика: пуснато в SAP', (rep.store_name||'')+': '+art+' — приемете обратно');
-    else if(val==='no_stock') sdNotifyInterstore(rep.counterpart, '⛔ Разлика: няма наличност в логистика', (rep.store_name||'')+': '+art);
+    /* Липса / излишък (етап 6б) — заглавието е надписът на отговора по
+       категория; без/друга категория — старите заглавия. */
+    var srCat = sdRespCat(line, rep.id!=null?rep:null);
+    var srTitle = srCat ? sdStoreResponseLabelFor(line, rep, val).replace(/^(\S+)\s+/, '$1 Разлика: ') : null;
+    if(val==='sap_done') sdNotifyInterstore(rep.counterpart, srTitle || '📄 Разлика: пуснато в SAP', (rep.store_name||'')+': '+art+' — приемете обратно');
+    else if(val==='no_stock') sdNotifyInterstore(rep.counterpart, srTitle || '⛔ Разлика: няма наличност в логистика', (rep.store_name||'')+': '+art);
     loadStockDiff();
   });
 }
@@ -1820,7 +1896,7 @@ function openWarehouseResponseModal(lineId,val){
   var existing = document.getElementById('whr-ov'); if(existing) existing.remove();
   var div = document.createElement('div');
   div.innerHTML = '<div class="bov open" id="whr-ov"><div class="bmod" style="width:380px;">'+
-    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+(WH_RESPONSE_LABELS[val]||val)+'</div>'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+sdWhResponseLabel(l, null, val)+'</div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(l.material_name||'')+'</div>'+
     '<label class="fl">Коментар към магазина (по избор)</label>'+
     '<input class="fi" id="whr-comment" value="'+escVal(l.warehouse_comment)+'" placeholder="напр. Ще стигне до вторник с редовния курс">'+
@@ -1861,7 +1937,7 @@ function submitWarehouseResponse(lineId,val){
     /* И "Ще се изпрати" е отговор - магазинът научава и за него. */
     var whRep = (whLine && diffReports.find(function(x){return x.id===whLine.report_id;})) || {};
     sdNotifyInterstore(whRep.store_name, '📦 Разлика: отговор от склада',
-      (whRep.counterpart||'')+': '+(WH_RESPONSE_LABELS[val]||val)+' · '+((whLine&&whLine.material_name)||''));
+      (whRep.counterpart||'')+': '+sdWhResponseLabel(whLine, whRep.id!=null?whRep:null, val)+' · '+((whLine&&whLine.material_name)||''));
     loadStockDiff();
   });
 }

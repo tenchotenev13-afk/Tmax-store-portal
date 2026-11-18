@@ -134,8 +134,9 @@ const ids = trs => trs.map(tr => (txt(tr).match(/АРТИКУЛ (\w+)/) || [])[1
       if (ok('ред а) го има', !!a)) {
         ok('а) казва 3', /📝 3 реда чакат вашия отговор/.test(txt(a)), txt(a));
         ok('а) НЕ казва 7', txt(a).indexOf('7') < 0, txt(a));
+        /* Етап 6б (18.11.2026): редовете са „липса“ → бутоните на обекта по категория. */
         ok('а) назовава точно бутоните на ред „return"',
-          txt(a).indexOf('„📄 ПУСНАТО В SAP“ или „⛔ НЯМА НАЛИЧНОСТ В ЛОГИСТИКА“') >= 0, txt(a));
+          txt(a).indexOf('„📄 ИЗПИСАНО В SAP“ или „⛔ НЕ МОГА ДА ИЗПИША“') >= 0, txt(a));
         ok('а) казва, че задачата се отмята сама', txt(a).indexOf('Задачата в Бюлетина се отмята сама, когато няма такива редове.') >= 0);
         ok('а) има бутон „Покажи ги →"', !!a.querySelector('#sd-waiting-show') && txt(a.querySelector('#sd-waiting-show')) === 'Покажи ги →');
       }
@@ -180,7 +181,7 @@ const ids = trs => trs.map(tr => (txt(tr).match(/АРТИКУЛ (\w+)/) || [])[1
       ok('жълтият фон е на <tr> на чакащите', waitRows.length === 3 && waitRows.every(tr => /background:#fef3c7/.test(tr.getAttribute('style'))));
       ok('надписът „📝 чака вас" е в самия ред', waitRows.every(tr => !!tr.querySelector('.sd-mark-wait') && txt(tr.querySelector('.sd-mark-wait')) === '📝 чака вас'));
       ok('… до бутоните на обекта', waitRows.every(tr => {
-        const m = tr.querySelector('.sd-mark-wait'); return !!m && txt(m.parentNode).indexOf('📄 ПУСНАТО В SAP') >= 0;
+        const m = tr.querySelector('.sd-mark-wait'); return !!m && txt(m.parentNode).indexOf('📄 ИЗПИСАНО В SAP') >= 0; /* липса, 6б */
       }));
       ok('редовете „на път" са без жълт фон', onRows.every(tr => !/#fef3c7/.test(tr.getAttribute('style'))));
       ok('надписът „🚚 на път — отговорете, когато пристигне"',

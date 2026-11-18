@@ -125,6 +125,7 @@ const TESTS = [
   'razliki-etap4.test.js',
   'razliki-etap5.test.js',
   'razliki-etap6a.test.js',
+  'razliki-etap6b.test.js',
   'diff-report-no-document.test.js',
   'diff-qty-guard.test.js',
   'stock-returns-manual-order.test.js',

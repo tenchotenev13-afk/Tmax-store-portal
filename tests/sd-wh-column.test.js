@@ -155,7 +155,8 @@ async function excel(h) {
     const hw = env(WAREHOUSE, [line()], [REP_I], 'interstore');
     if (ok('картата е на екрана (складът)', !!card(hw, 'rep-i'))) {
       ok('складът: колоната е там', ths(hw, 'rep-i').indexOf(COL) >= 0, ths(hw, 'rep-i').join(' | '));
-      ok('складът: четирите му бутона са там', whBtns(hw, 'rep-i').length === 4,
+      /* Етап 6б (18.11.2026): редът е „липса“ → 3 бутона на склада, не 4. */
+      ok('складът: бутоните му са там (липса — 3, 6б)', whBtns(hw, 'rep-i').length === 3,
         whBtns(hw, 'rep-i').map(b => b.textContent).join(' | '));
     }
     hw.close();
