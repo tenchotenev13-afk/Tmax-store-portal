@@ -69,6 +69,25 @@
          6 проверки);
      М12 общият catch без console.error: пада 5б („bulletin-notify 500").
 
+   v23 (18.11.2026) — ТАВАН (~30 обаждания към resend-email на пускане):
+   5 — ЕДНО писмо на обект, to = масив с адресите; обект без писмо → last_run_at
+   НЕ се записва; 5в — RateLimitError при първия опит → изчакване по „Retry
+   after" и успех; и при втория → обектът без писмо, редът в лога махнат,
+   last_run_at не е записан, а 08:00 праща само на него (останалите — „вече
+   пратени"), трето събуждане — нищо; таван 45 с; бюджет 100 с от началото на
+   пускането; мрежова грешка — без повторен опит; тестов режим — непроменен
+   (низ в to, last_run_at винаги); push хвърля / таван → false, не изключение.
+   Фалшивият setTimeout записва ms и продължава веднага. (М10 вече е за
+   try/catch в postSendFn — sendEmail няма собствен.)
+   Мутации (18.11.2026; М1–М12 не са пускани отново) — всяка СЪБАРЯ теста:
+     М17 по писмо на адрес (цикъл по p.to): пада 5 и 5б (8 проверки);
+     М18 без повторен опит при таван: пада 5в (10);
+     М19 last_run_at винаги: пада 5, 5б, 5в (6);
+     М20 без горната граница 45 с: пада 5в („90000 → 45000");
+     М21 повторният опит без catch: пада 5в (console.error, push таван ×2);
+     М22 тестов режим без last_run_at при неуспех: пада 5в;
+     М23 без бюджета на пускането: пада 5в („80 с + 39,7 с > 100 с").
+
    Пускане:  node tests/store-open-items.test.js .
 */
 'use strict';
@@ -152,7 +171,7 @@ function fakeSb(db, log) {
 /* ── vm с часовник; sendFail(to) → true = resend-email връща 500;
    sendThrow(to) → true = fetch ХВЪРЛЯ (мрежова грешка, 17.11) ──────────── */
 function load(db, clock, sendFail, sendThrow) {
-  const posts = [], log = [], errors = [];
+  const posts = [], log = [], errors = [], waits = [];
   let handler = null;
   const Real = Date, fixed = new Real(clock).getTime();
   class FakeDate extends Real {
@@ -160,15 +179,21 @@ function load(db, clock, sendFail, sendThrow) {
     static now() { return fixed; }
   }
   const ctx = {
-    Date: FakeDate, Response, Intl, JSON, Math, Object, Array, String, Number, Promise, Error, RegExp, Set, Map, setTimeout, encodeURIComponent,
+    Date: FakeDate, Response, Intl, JSON, Math, Object, Array, String, Number, Promise, Error, RegExp, Set, Map, encodeURIComponent,
+    /* v23: изчакването при таван — записва ms и продължава веднага. */
+    setTimeout: (fn, ms) => { waits.push(ms); fn(); return 0; },
     console: { log() {}, warn() {}, error: (...a) => { errors.push(a.join(' ')); } },
     Deno: { env: { get: k => (k === 'SUPABASE_URL' ? 'https://x.supabase.co' : 'KEY') }, serve: fn => { handler = fn; } },
     createClient: () => fakeSb(db, log),
     fetch: (url, init) => {
       const body = JSON.parse((init && init.body) || '{}');
-      if (sendThrow && body.type === 'email' && sendThrow(body.to)) return Promise.reject(new TypeError('error sending request: connection closed before message completed'));
+      /* v23: to е масив (едно писмо на обект) — sendFail / sendThrow получават адресите, слепени със запетая.
+         sendThrow може да върне Error → хвърля се ТОЙ (RateLimitError); true → мрежова грешка. */
+      const toS = [].concat(body.to).join(',');
+      const th = sendThrow && (body.type === 'email' || body.type === 'push') && sendThrow(body.type === 'email' ? toS : 'push', body);
+      if (th) return Promise.reject(th instanceof Error ? th : new TypeError('error sending request: connection closed before message completed'));
       posts.push({ url, body });
-      const bad = sendFail && body.type === 'email' && sendFail(body.to);
+      const bad = sendFail && body.type === 'email' && sendFail(toS);
       return Promise.resolve({ ok: !bad, status: bad ? 500 : 200, json: () => Promise.resolve({}), text: () => Promise.resolve('x') });
     },
   };
@@ -176,8 +201,11 @@ function load(db, clock, sendFail, sendThrow) {
   vm.runInContext(JS, ctx, { filename: 'bulletin-notify.js' });
   const call = async body => (await handler({ method: 'POST', json: () => Promise.resolve(body) })).json();
   const callRaw = async body => handler({ method: 'POST', json: () => Promise.resolve(body) });
-  return { ctx, call, callRaw, posts, log, db, errors, mails: () => posts.filter(p => p.body.type === 'email') };
+  return { ctx, call, callRaw, posts, log, db, errors, waits, mails: () => posts.filter(p => p.body.type === 'email') };
 }
+
+/* v23: адресите на всяко писмо, слепени със запетая; писмата — по азбука, с „ | ". */
+const TOS = L => L.mails().map(m => [].concat(m.body.to).join(',')).sort().join(' | ');
 
 /* ── Данни ──────────────────────────────────────────────────────────── */
 const TR = 'Троян', LV = 'Ловеч', KJ = 'Кърджали', SL = 'Сливен', CO = 'Централен офис';
@@ -414,10 +442,11 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     const d = db();
     const L = load(d, MON);
     const r1 = (await L.call({ topic_key: 'store_open_items' })).result;
-    const to = L.mails().map(m => m.body.to).sort().join(',');
-    ok('по писмо на адрес (5 адреса в 3 обекта)', to === 'kardzhali@temax.bg,lovech@temax.bg,sklad.troyan@temax.bg,test.kardzhali@gmail.com,troyan@temax.bg', to);
+    const to = TOS(L);
+    ok('v23: ЕДНО писмо на обект, to = масив с всички адреси на обекта (3 писма за 3 обекта)', L.mails().length === 3 && L.mails().every(m => Array.isArray(m.body.to)) &&
+      to === 'kardzhali@temax.bg,test.kardzhali@gmail.com | lovech@temax.bg | troyan@temax.bg,sklad.troyan@temax.bg', to);
     ok('лог: „2026-11-16|<обект>" ×3', d.notification_log.map(x => x.ref_key).sort().join(',') === '2026-11-16|Кърджали,2026-11-16|Ловеч,2026-11-16|Троян', JSON.stringify(d.notification_log));
-    ok('резултат: 3 обекта, 5 писма', r1.obekti === 3 && r1.sent_emails === 5 && r1.already_sent === 0, JSON.stringify(r1));
+    ok('резултат: 3 обекта, 3 писма', r1.obekti === 3 && r1.sent_emails === 3 && r1.already_sent === 0, JSON.stringify(r1));
     const before = L.mails().length;
     const r2 = (await L.call({ topic_key: 'store_open_items' })).result;
     ok('второ пускане — нула писма, трите обекта прескочени', L.mails().length === before && r2.already_sent === 3 && r2.sent_emails === 0, JSON.stringify(r2));
@@ -429,6 +458,7 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     ok('паднало пращане за Ловеч → редът в лога е махнат', d.notification_log.map(x => x.ref_key).sort().join(',') === '2026-11-16|Кърджали,2026-11-16|Троян', JSON.stringify(d.notification_log));
     ok('last_status започва с „ГРЕШКА:"', /^ГРЕШКА: /.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
     ok('резултатът брои неуспешното', r.failed_emails === 1 && r.obekti === 2, JSON.stringify(r));
+    ok('v23: обект без писмо → last_run_at НЕ е записан, „без писмо: Ловеч"', !d.notification_topics[0].last_run_at && /без писмо: Ловеч/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
   }
 
   section('5б. v22 — грешка при един обект не спира пускането (17.11)');
@@ -439,10 +469,10 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     const raw = await L.callRaw({ topic_key: 'store_open_items' });
     const r = (await raw.json()).result || {};
     ok('отговорът е 200, не 500', raw.status === 200, raw.status + ' ' + JSON.stringify(r));
-    ok('останалите обекти получават писмо (Кърджали ×2, Троян ×2)', L.mails().map(m => m.body.to).sort().join(',') === 'kardzhali@temax.bg,sklad.troyan@temax.bg,test.kardzhali@gmail.com,troyan@temax.bg', L.mails().map(m => m.body.to).join(','));
+    ok('останалите обекти получават писмо (Кърджали ×2, Троян ×2)', TOS(L) === 'kardzhali@temax.bg,test.kardzhali@gmail.com | troyan@temax.bg,sklad.troyan@temax.bg', TOS(L));
     ok('Ловеч: редът в лога е махнат (нищо не излезе) — следващото събуждане опитва пак', d.notification_log.map(x => x.ref_key).sort().join(',') === '2026-11-16|Кърджали,2026-11-16|Троян', JSON.stringify(d.notification_log));
-    ok('last_status започва с „ГРЕШКА:"', /^ГРЕШКА: 2 обекта, 4 писма, 1 неуспешни/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
-    ok('last_run_at е записан', !!d.notification_topics[0].last_run_at, String(d.notification_topics[0].last_run_at));
+    ok('last_status започва с „ГРЕШКА:"', /^ГРЕШКА: 2 обекта, 2 писма, 1 неуспешни/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
+    ok('v23: last_run_at НЕ е записан (Ловеч без писмо → кронът опитва пак в прозореца)', !d.notification_topics[0].last_run_at, String(d.notification_topics[0].last_run_at));
     ok('console.error е извикан с текста', L.errors.some(e => e.indexOf('resend-email fetch (lovech@temax.bg): error sending request') === 0), JSON.stringify(L.errors));
   }
   {
@@ -453,9 +483,9 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     const raw = await L.callRaw({ topic_key: 'store_open_items' });
     const r = (await raw.json()).result || {};
     ok('хвърляне при Ловеч → 200, цикълът продължава', raw.status === 200 && r.obekti === 2, raw.status + ' ' + JSON.stringify(r));
-    ok('Троян и Кърджали — пратени (Троян е СЛЕД Ловеч по азбука)', L.mails().map(m => m.body.to).sort().join(',') === 'kardzhali@temax.bg,sklad.troyan@temax.bg,test.kardzhali@gmail.com,troyan@temax.bg', L.mails().map(m => m.body.to).join(','));
+    ok('Троян и Кърджали — пратени (Троян е СЛЕД Ловеч по азбука)', TOS(L) === 'kardzhali@temax.bg,test.kardzhali@gmail.com | troyan@temax.bg,sklad.troyan@temax.bg', TOS(L));
     ok('last_status: „ГРЕШКА:" и текстът с обекта', /^ГРЕШКА: /.test(d.notification_topics[0].last_status || '') && /Ловеч: boom notification_log/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
-    ok('last_run_at е записан', !!d.notification_topics[0].last_run_at);
+    ok('v23: last_run_at НЕ е записан (Ловеч без писмо)', !d.notification_topics[0].last_run_at);
     ok('console.error: „store_open_items Ловеч: …"', L.errors.some(e => /store_open_items Ловеч: boom notification_log/.test(e)), JSON.stringify(L.errors));
     ok('резултатът носи грешката', Array.isArray(r.errors) && r.errors.length === 1 && /Ловеч/.test(r.errors[0]), JSON.stringify(r.errors));
   }
@@ -467,6 +497,96 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     const raw = await L.callRaw({ topic_key: 'store_open_items' });
     ok('500 от общия catch', raw.status === 500, String(raw.status));
     ok('console.error: „bulletin-notify 500: …"', L.errors.some(e => /^bulletin-notify 500: boom notification_topics/.test(e)), JSON.stringify(L.errors));
+  }
+
+  section('5в. v23 — таван на обажданията (18.11): повторен опит веднъж');
+  const RLE = ms => { const e = new Error('Rate limit exceeded for trace 01a1ed2f. Retry after ' + ms + 'ms.'); e.name = 'RateLimitError'; return e; };
+  {
+    /* Таван при първия опит за Ловеч → изчакване по „Retry after" и успех при втория. */
+    const d = db();
+    let n = 0;
+    const L = load(d, MON, null, to => (to === 'lovech@temax.bg' && ++n === 1 ? RLE(39698) : false));
+    const r = (await L.call({ topic_key: 'store_open_items' })).result;
+    ok('изчакано точно колкото казва грешката (39698 ms), веднъж', JSON.stringify(L.waits) === '[39698]', JSON.stringify(L.waits));
+    ok('Ловеч получава писмото при втория опит; и трите обекта — пратени', n === 2 && TOS(L) === 'kardzhali@temax.bg,test.kardzhali@gmail.com | lovech@temax.bg | troyan@temax.bg,sklad.troyan@temax.bg', n + ' ' + TOS(L));
+    ok('лог ×3, „ok: 3 обекта, 3 писма", last_run_at записан', d.notification_log.length === 3 && /^ok: 3 обекта, 3 писма, 0 неуспешни/.test(d.notification_topics[0].last_status || '') && !!d.notification_topics[0].last_run_at, d.notification_topics[0].last_status);
+    ok('резултат без неуспешни', r.failed_emails === 0 && r.obekti === 3 && r.bez_pismo.length === 0, JSON.stringify(r));
+  }
+  {
+    /* Таван и при втория опит → Ловеч неуспешен; после ново събуждане (08:00) без таван. */
+    const d = db();
+    let n = 0, blocked = true;
+    const L = load(d, MON, null, to => (blocked && to === 'lovech@temax.bg' ? (n++, RLE(39614)) : false));
+    const raw = await L.callRaw({ topic_key: 'store_open_items' });
+    const r = (await raw.json()).result || {};
+    ok('200; Ловеч опитан точно ДВА пъти (без цикъл), едно изчакване', raw.status === 200 && n === 2 && JSON.stringify(L.waits) === '[39614]', raw.status + ' n=' + n + ' ' + JSON.stringify(L.waits));
+    ok('Ловеч: редът в лога е махнат', d.notification_log.map(x => x.ref_key).sort().join(',') === '2026-11-16|Кърджали,2026-11-16|Троян', JSON.stringify(d.notification_log));
+    ok('last_run_at НЕ е записан; last_status „ГРЕШКА: … без писмо: Ловеч"', !d.notification_topics[0].last_run_at && /^ГРЕШКА: 2 обекта, 2 писма, 1 неуспешни/.test(d.notification_topics[0].last_status || '') && /без писмо: Ловеч/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
+    ok('резултатът: bez_pismo = [Ловеч]', JSON.stringify(r.bez_pismo) === JSON.stringify([LV]), JSON.stringify(r));
+    ok('console.error за повторния опит', L.errors.some(e => /resend-email fetch \(lovech@temax\.bg\) \(повторен опит\): Rate limit exceeded/.test(e)), JSON.stringify(L.errors));
+    /* Кронът в 08:00: темата пак е due (last_run_at не е днешен), таванът е минал. */
+    blocked = false;
+    d.notification_topics[0].active = true;
+    const L2 = load(d, '2026-11-16T06:00:00Z');
+    const r2 = ((await L2.call({})).results || []).filter(x => x.topic === 'store_open_items')[0] || {};
+    ok('08:00: само Ловеч получава писмо, Кърджали и Троян — „вече пратени"', TOS(L2) === 'lovech@temax.bg' && r2.already_sent === 2 && r2.sent_emails === 1, TOS(L2) + ' ' + JSON.stringify(r2));
+    ok('08:00: last_run_at вече е записан, „ok:"', !!d.notification_topics[0].last_run_at && /^ok: 1 обекта, 1 писма, 0 неуспешни, 2 вече пратени/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
+    const L3 = load(d, '2026-11-16T06:00:00Z');
+    const r3 = await L3.call({});
+    ok('третото събуждане същия ден — темата не е due, нищо не тръгва', L3.mails().length === 0 && !(r3.results || []).some(x => x.topic === 'store_open_items'), JSON.stringify(r3.results));
+  }
+  {
+    /* Горна граница на изчакването — 45 с, колкото и да казва грешката. */
+    let k = 0;
+    const L = load(db(), MON, null, t => (t === 'lovech@temax.bg' && ++k === 1 ? RLE(90000) : false));
+    await L.call({ topic_key: 'store_open_items' });
+    ok('„Retry after 90000ms" → изчакване 45000 ms', JSON.stringify(L.waits) === '[45000]', JSON.stringify(L.waits));
+  }
+  {
+    /* Бюджетът на пускането: изчакване, което минава 100 с от началото, не се прави. */
+    const L = load(db(), MON, null, () => RLE(39698));
+    vm.runInContext('RUN_T0 = Date.now() - 80000', L.ctx);
+    const res = await L.ctx.sendEmail(['a@temax.bg'], 'т', 'х');
+    ok('80 с изминали + 39,7 с изчакване > 100 с → без изчакване, false', res === false && L.waits.length === 0 && L.errors.some(e => /таван, без повторен опит/.test(e)), JSON.stringify(L.waits) + ' ' + JSON.stringify(L.errors));
+  }
+  {
+    /* Друга грешка (не таван) → без повторен опит. */
+    let n = 0;
+    const L = load(db(), MON, null, to => (to === 'lovech@temax.bg' ? (n++, true) : false));
+    await L.call({ topic_key: 'store_open_items' });
+    ok('мрежова грешка (не таван) → един опит, без изчакване', n === 1 && L.waits.length === 0, 'n=' + n + ' ' + JSON.stringify(L.waits));
+  }
+  {
+    /* Тестов режим — както досега: по едно писмо на обект до test_email (низ), лента, без лог;
+       last_run_at се записва и при неуспех (иначе 08:00 повтаря всички тестови писма). */
+    const d = db();
+    d.notification_topics[0].test_email = 'tester@temax.bg';
+    const L = load(d, MON);
+    await L.call({ topic_key: 'store_open_items' });
+    ok('тестов режим: 3 писма, to = „tester@temax.bg" (низ, не масив), лента', L.mails().length === 3 && L.mails().every(m => m.body.to === 'tester@temax.bg' && /ТЕСТОВ РЕЖИМ/.test(m.body.html)), JSON.stringify(L.mails().map(m => m.body.to)));
+    ok('тестов режим: без лог, last_run_at записан', (d.notification_log || []).length === 0 && !!d.notification_topics[0].last_run_at);
+    const d2 = db();
+    d2.notification_topics[0].test_email = 'tester@temax.bg';
+    let k = 0;
+    const L2 = load(d2, MON, to => to === 'tester@temax.bg' && ++k === 2);
+    await L2.call({ topic_key: 'store_open_items' });
+    ok('тестов режим с неуспех: last_run_at пак записан, „ГРЕШКА:"', !!d2.notification_topics[0].last_run_at && /^ГРЕШКА: 2 обекта, 2 писма, 1 неуспешни/.test(d2.notification_topics[0].last_status || ''), d2.notification_topics[0].last_status);
+  }
+  {
+    /* Push хвърля — sendPushFilters / sendPushToPeople връщат false, не хвърлят. */
+    const L = load(db(), MON, null, kind => kind === 'push');
+    let threw = null, res;
+    try { res = await L.ctx.sendPushToPeople(['Управител Троян'], 'т', 'с'); } catch (e) { threw = e; }
+    ok('push: мрежова грешка → false, без изключение, console.error', threw === null && res === false && L.errors.some(e => /^push fetch: error sending request/.test(e)), String(threw) + ' ' + JSON.stringify(L.errors));
+    let m = 0;
+    const L2 = load(db(), MON, null, kind => (kind === 'push' ? (++m <= 2 ? RLE(30000) : false) : false));
+    let threw2 = null, res2;
+    try { res2 = await L2.ctx.sendPushFilters([{ field: 'tag' }], 'т', 'с'); } catch (e) { threw2 = e; }
+    ok('push: таван и при втория опит → false, без изключение (като 500 на overdue_tasks 18.11)', threw2 === null && res2 === false && m === 2 && JSON.stringify(L2.waits) === '[30000]', String(threw2) + ' m=' + m);
+    let q = 0;
+    const L3 = load(db(), MON, null, kind => (kind === 'push' && ++q === 1 ? RLE(5000) : false));
+    const res3 = await L3.ctx.sendPushToPeople(['А', 'Б'], 'т', 'с');
+    ok('push: таван при първия → успех при втория', res3 === true && q === 2 && L3.posts.filter(p => p.body.type === 'push').length === 1, 'q=' + q);
   }
 
   section('6. Неработен ден');

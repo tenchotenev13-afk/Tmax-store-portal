@@ -12,6 +12,23 @@
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //   store_open_items — Незавършено за обекта: по едно писмо на обект (v19)
 //
+// v23 (18.11.2026) — ТАВАН на изходящите обаждания: Supabase спира
+//   обажданията към resend-email след ~30 в едно пускане (17.11 и 18.11 —
+//   30 POST-а, после всяко fetch хвърля RateLimitError „Retry after ~39 000
+//   ms"); 18.11 без писмо останаха Троян, Търговище, Шумен и инфо Сливен, а
+//   overdue_tasks в същото пускане падна с 500 (push fetch хвърли).
+//   (1) store_open_items — ЕДНО писмо на обект, to = масив с всички адреси
+//   на обекта (manager / sklad / info); тестовият режим — непроменен.
+//   (2) postSendFn (общо за sendEmail и sendPushFilters): RateLimitError или
+//   429 → изчакване по „Retry after" (най-много 45 с) и ОЩЕ ЕДИН опит, без
+//   цикъл; изчакване, което минава 100 с от началото на пускането, не се
+//   прави (wall clock 150 с на Free / 400 с платен, idle timeout 150 с).
+//   (3) sendPushFilters / sendPushToPeople не хвърлят — грешка → false +
+//   console.error. (4) store_open_items: има ли обект без писмо (извън
+//   тестовия режим), last_run_at НЕ се записва → кронът опитва пак в
+//   прозореца 07:45–08:00; notification_log пази пратените от дублиране.
+//   Секциите, текстът, получателите и часовете — непроменени.
+//
 // v22 (17.11.2026) — устойчивост след 500 при първото пускане на
 //   store_open_items (17.11, 05:45 UTC): второто писмо на Търговище не стигна
 //   до resend-email (fetch хвърли), изключението спря темата → Шумен не
@@ -1747,34 +1764,74 @@ function promoHtmlFor(today: any[], ahead: any[], bg: any) {
     + '<div style="font-size:11px;color:#9ca3af;margin-top:18px;">ТеМАХ Портал</div></div>';
 }
 
-/* v22: fetch, който ХВЪРЛЯ (мрежова грешка — заявката не стига до
-   resend-email), е неуспешно писмо (false), не изключение. Дотогава
-   изключението изскачаше от темата и спираше цялото пускане: 17.11 в 05:45
-   второто писмо на Търговище не стигна до resend-email, store_open_items
-   върна 500, Шумен не тръгна, last_run_at не се записа. */
-async function sendEmail(to: string, subject: string, html: string) {
-  let res: Response;
+/* v23: ТАВАН на изходящите обаждания към resend-email. Supabase брои
+   обажданията функция → функция в една верига (trace); 17.11 и 18.11 след ~30
+   POST-а за минута всяко следващо fetch ХВЪРЛЯ RateLimitError („Rate limit
+   exceeded for trace … Retry after 39698ms"). postSendFn: при RateLimitError
+   (или отговор 429) изчаква колкото казва грешката (retryAfterMs / „Retry
+   after N ms" / Retry-After, най-много SEND_RETRY_MAX_MS) и опитва ОЩЕ ВЕДНЪЖ
+   — без цикъл. Изчакване, което би минало SEND_RETRY_BUDGET_MS от началото на
+   пускането, не се прави: wall clock на функцията е 150 с (Free; 400 с на
+   платен план), а request idle timeout — 150 с; 100 с бюджет + едно изчакване
+   до 45 с остават под тях. Друга грешка или неуспешен втори опит → null
+   (неуспех), никога изключение навън.
+   v22: fetch, който ХВЪРЛЯ (мрежова грешка), е неуспешно писмо (false), не
+   изключение — 17.11 изключението спря цялото пускане. */
+const SEND_RETRY_MAX_MS = 45000;
+const SEND_RETRY_BUDGET_MS = 100000;
+let RUN_T0 = Date.now();
+
+function rateLimitWaitMs(e: any): number | null {
+  if (!e) return null;
+  const msg = String((e && e.message) || e);
+  if (e.name !== 'RateLimitError' && !/rate limit exceeded/i.test(msg)) return null;
+  let ms = Number(e.retryAfterMs);
+  if (!(ms > 0)) { const m = /retry after\s*(\d+)\s*ms/i.exec(msg); ms = m ? Number(m[1]) : SEND_RETRY_MAX_MS; }
+  return Math.min(ms, SEND_RETRY_MAX_MS);
+}
+
+function retryAfterHeaderMs(res: any): number {
+  const h = res && res.headers && typeof res.headers.get === 'function' ? res.headers.get('retry-after') : null;
+  const sec = Number(h);
+  return Math.min(sec > 0 ? sec * 1000 : SEND_RETRY_MAX_MS, SEND_RETRY_MAX_MS);
+}
+
+async function postSendFn(payload: unknown, label: string): Promise<Response | null> {
+  const once = () => fetch(SEND_FN_URL, { method: 'POST', headers: SEND_HEADERS, body: JSON.stringify(payload) });
+  let wait: number;
   try {
-    res = await fetch(SEND_FN_URL, {
-      method: 'POST', headers: SEND_HEADERS,
-      body: JSON.stringify({ type: 'email', to: to, subject: subject, html: html }),
-    });
+    const res = await once();
+    if (res.status !== 429) return res;
+    wait = retryAfterHeaderMs(res);
   } catch (e) {
-    console.error('resend-email fetch (' + to + '): ' + ((e as Error).message || String(e)));
-    return false;
+    const w = rateLimitWaitMs(e);
+    if (w === null) { console.error(label + ': ' + ((e as Error).message || String(e))); return null; }
+    wait = w;
   }
-  if (!res.ok) { console.error('resend-email HTTP ' + res.status + ': ' + (await res.text())); }
+  if (Date.now() - RUN_T0 + wait > SEND_RETRY_BUDGET_MS) {
+    console.error(label + ': таван, без повторен опит (' + wait + ' ms над бюджета на пускането)');
+    return null;
+  }
+  console.error(label + ': таван — повторен опит след ' + wait + ' ms');
+  await new Promise((r) => setTimeout(r, wait));
+  try { return await once(); }
+  catch (e) { console.error(label + ' (повторен опит): ' + ((e as Error).message || String(e))); return null; }
+}
+
+async function sendEmail(to: string | string[], subject: string, html: string) {
+  const res = await postSendFn({ type: 'email', to: to, subject: subject, html: html },
+    'resend-email fetch (' + (Array.isArray(to) ? to.join(', ') : to) + ')');
+  if (!res) return false;
+  if (!res.ok) { console.error('resend-email HTTP ' + res.status + ': ' + (await res.text().catch(() => ''))); }
   return res.ok;
 }
 
 async function sendPushFilters(filters: unknown[], title: string, message: string, url?: string) {
   const payload: Record<string, unknown> = { type: 'push', title: title, message: message, filters: filters };
   if (url) payload.url = url;
-  const res = await fetch(SEND_FN_URL, {
-    method: 'POST', headers: SEND_HEADERS,
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) { console.error('push HTTP ' + res.status + ': ' + (await res.text())); }
+  const res = await postSendFn(payload, 'push fetch');
+  if (!res) return false;
+  if (!res.ok) { console.error('push HTTP ' + res.status + ': ' + (await res.text().catch(() => ''))); }
   return res.ok;
 }
 
@@ -3018,50 +3075,63 @@ async function runStoreOpenItems(supabase: any, topic: any, bg: any, dryRun: boo
   }
 
   let sent = 0, failed = 0, already = 0, stores = 0;
-  /* v22: грешка при един обект НЕ спира цикъла — влиза в errs (и в
-     last_status), минава се на следващия; last_run_at се записва след
-     цикъла винаги. Записан ред в лога без нито едно излязло писмо се маха,
-     за да опита пак следващото събуждане. */
+  /* v23: ЕДНО писмо на обект — to = всичките адреси на обекта (manager /
+     sklad / info) — вместо по писмо на адрес: 18 обекта са ~18 обаждания към
+     resend-email, не ~32 (таванът е ~30 на пускане). Изпратено = resend-email
+     върна ok. Неуспех → редът в лога за обекта се маха и обектът влиза в
+     „без писмо:" в last_status.
+     last_run_at НЕ се записва, ако има обект без писмо (извън тестовия
+     режим): isDue пуска темата пак в същия прозорец (07:45 → и 08:00), а
+     notification_log пази вече пратените обекти от второ писмо. Тестов
+     режим (test_email) — както досега: по едно писмо на обект до тестовия
+     адрес, без лог, last_run_at се записва винаги (иначе 08:00 би
+     повторило всички тестови писма).
+     v22: грешка при един обект НЕ спира цикъла — влиза в errs (и в
+     last_status), минава се на следващия. */
   const errs: string[] = [];
+  const noMail: string[] = [];
   for (const p of plan) {
     const ref = bg.dateStr + '|' + p.store;
-    let logged = false, okAny = false;
+    let logged = false, okStore = false;
     try {
       const html = soiHtmlFor(p.store, p.parts, bg);
       if (topic.test_email) {
         const banner = '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за '
           + esc(p.store) + ': ' + p.to.map((r: any) => esc(r.name) + ' &lt;' + esc(r.email) + '&gt;').join(', ') + '</div>';
-        if (await sendEmail(topic.test_email, subject(p.store), banner + html)) { sent++; stores++; } else { failed++; }
+        if (await sendEmail(topic.test_email, subject(p.store), banner + html)) { sent++; stores++; } else { failed++; noMail.push(p.store); }
         continue;
       }
       const ins = await supabase.from('notification_log')
         .insert({ topic_key: topic.key, ref_key: ref, detail: p.total + ' реда · ' + p.to.length + ' адреса' });
       if (ins.error) { already++; continue; }
       logged = true;
-      for (const r of p.to) {
-        if (await sendEmail(r.email, subject(p.store), html)) { sent++; okAny = true; } else { failed++; }
-      }
+      okStore = await sendEmail(p.to.map((r: any) => r.email), subject(p.store), html);
+      if (okStore) { sent++; } else { failed++; }
     } catch (e) {
       const msg = (e as Error).message || String(e);
       console.error('store_open_items ' + p.store + ': ' + msg);
       errs.push(p.store + ': ' + msg);
       failed++;
     }
-    if (logged && !okAny) {
+    if (okStore) { stores++; continue; }
+    if (noMail.indexOf(p.store) < 0) noMail.push(p.store);
+    if (logged) {
       await supabase.from('notification_log').delete().eq('topic_key', topic.key).eq('ref_key', ref);
-    } else if (logged) { stores++; }
+    }
   }
 
-  await supabase.from('notification_topics').update({
-    last_run_at: new Date().toISOString(),
+  const upd: Record<string, unknown> = {
     last_recipients: plan.reduce((a, p) => a + p.to.length, 0),
     last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + stores + ' обекта, ' + sent + ' писма, ' + failed + ' неуспешни, '
       + already + ' вече пратени' + (topic.test_email ? ' (тест до ' + topic.test_email + ')' : '')
+      + (noMail.length ? ' · без писмо: ' + noMail.join(', ') : '')
       + (errs.length ? ' · ' + errs.join('; ').slice(0, 300) : ''),
-  }).eq('key', topic.key);
+  };
+  if (!noMail.length || topic.test_email) upd.last_run_at = new Date().toISOString();
+  await supabase.from('notification_topics').update(upd).eq('key', topic.key);
 
   return { topic: topic.key, obekti: stores, sent_emails: sent, failed_emails: failed, already_sent: already,
-    bez_redove: empty.length, test_email: topic.test_email || null, errors: errs };
+    bez_redove: empty.length, test_email: topic.test_email || null, errors: errs, bez_pismo: noMail };
 }
 
 /* ЕДИНСТВЕНИЯТ списък с темите, които имат строител. notification_topics
@@ -3132,6 +3202,7 @@ function isDue(topic: any, bg: any): boolean {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { status: 200, headers: CORS });
+  RUN_T0 = Date.now();   /* v23: бюджетът за повторен опит при таван е от началото на пускането */
   try {
     const supabase = createClient(SB_URL, SB_SERVICE_KEY);
     let body: any = {};
