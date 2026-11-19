@@ -16,9 +16,11 @@
 //
 // v27 (19.11.2026, след v26) — САМО minus_unfilled (сесия minusi-open-diff-notify;
 //   Теодор 18–19.11, стъпка 2 от 3; решения на Тенчо 19.11): към текста за
-//   обекта „· N минус(а) с отворена разлика", N > 0. N = незакрити минуси
-//   (същото FIFO — mnuCountByStore пълни openMats, без второ копие), за чийто
-//   код обектът има НЕприключен ред в Разлики (sdIsClosed) с ХОД НА ОБЕКТА =
+//   обекта „· N минус(а) с отворена разлика", N > 0. N = брой УНИКАЛНИ кодове
+//   с поне един ред 955 в minus_movements на обекта — ЗАКРИТ ИЛИ НЕ (както
+//   знакът в таб Минуси, стъпка 1; решение на Тенчо 19.11: случаят Пирдоп е
+//   закрит минус — 956 — с отворена разлика), за който обектът има
+//   НЕприключен ред в Разлики (sdIsClosed) с ХОД НА ОБЕКТА =
 //   sdStoreMustAct (v24, копие) ИЛИ diffLineWaitsStore + размените
 //   (bulDiffStoreWaiting — копие от shared.js / bulletin.js); стоката на път
 //   не се брои. Обект без непопълнени, но с N > 0 → известието пак тръгва,
@@ -2532,15 +2534,13 @@ function mnuPassThreshold(rest: number, uom: unknown, thr: Record<string, number
 /* По обект → { open, unfilled, over }. needsNote — id-та на причините с
    requires_note. Същото като calc.open.filter(mnUnfilled) в minusi.js.
    multi — { count, days } на многократния минус (липсва → 3 и 30). */
-/* openMats (по избор, v27) — пълни се: обект → код (trim) → брой незакрити
-   минуси. Изходът на функцията НЕ се мени (tests/minusi-notify-sync.test.js). */
-function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: number, needsNote: string[], multi?: { count: number; days: number }, openMats?: Record<string, Record<string, number>>) {
+function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: number, needsNote: string[], multi?: { count: number; days: number }) {
   const MC = multi && multi.count != null ? multi.count : MNU_MULTI_COUNT_DEFAULT;
   const MD = multi && multi.days != null ? multi.days : MNU_MULTI_DAYS_DEFAULT;
   const groups: Record<string, any> = {}, order: string[] = [];
   for (const m of movs || []) {
     const k = m.store_name + '\u0001' + m.material;
-    if (!groups[k]) { groups[k] = { store_name: m.store_name, material: m.material, r955: [], r956: [], s955: 0, s956: 0, uom: '' }; order.push(k); }
+    if (!groups[k]) { groups[k] = { store_name: m.store_name, r955: [], r956: [], s955: 0, s956: 0, uom: '' }; order.push(k); }
     const g = groups[k], q = Number(m.qty) || 0;
     if (String(m.mvt_type) === '955') { g.r955.push(m); g.s955 += q; if (m.uom) g.uom = m.uom; }
     else if (String(m.mvt_type) === '956') { g.r956.push(m); g.s956 += q; if (!g.uom && m.uom) g.uom = m.uom; }
@@ -2566,11 +2566,6 @@ function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: n
       const rest = mnuRound(need);
       if (!(rest > MNU_EPS) || !mnuPassThreshold(rest, r.uom, thr)) return; /* закрит или под прага */
       st.open++;
-      if (openMats) {
-        const om = openMats[g.store_name] || (openMats[g.store_name] = {});
-        const code = String(g.material == null ? '' : g.material).trim();
-        om[code] = (om[code] || 0) + 1;
-      }
       const prev = i > 0 ? s955[i - 1] : null;
       const repeat = !!prev && mnuDays(prev.posting_date, r.posting_date) <= repeatDays;
       const noReason = r.reason_id == null;
@@ -2605,6 +2600,18 @@ async function mnuFetchAll(supabase: any, stores: string[]) {
   return { rows: all };
 }
 
+/* Обект → { код: 1 } за всеки код с поне един ред 955 — закрит или не (v27,
+   решение на Тенчо 19.11 — както знакът в таб Минуси). */
+function mnuMinusCodes(movs: any[]): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const m of movs || []) {
+    if (!m || String(m.mvt_type) !== '955') continue;
+    const code = String(m.material == null ? '' : m.material).trim();
+    if (code) (out[m.store_name] || (out[m.store_name] = {}))[code] = 1;
+  }
+  return out;
+}
+
 async function buildMinusUnfilled(supabase: any, bg: ReturnType<typeof bgNow>) {
   const set = await supabase.from('app_settings').select('key,value').in('key', ['minus_stores', 'minus_repeat_days', 'minus_multi_count', 'minus_multi_days']);
   if (set.error) return { error: 'app_settings: ' + set.error.message };
@@ -2625,14 +2632,14 @@ async function buildMinusUnfilled(supabase: any, bg: ReturnType<typeof bgNow>) {
 
   const mv = await mnuFetchAll(supabase, stores);
   if ((mv as any).error) return { error: (mv as any).error };
-  const openMats: Record<string, Record<string, number>> = {};
-  const counts = mnuCountByStore((mv as any).rows, thr, repeatDays, needsNote, multi, openMats);
+  const counts = mnuCountByStore((mv as any).rows, thr, repeatDays, needsNote, multi);
+  const minusCodes = mnuMinusCodes((mv as any).rows);
 
   const entries = stores.map((store) => {
     const c = counts[store] || { open: 0, unfilled: 0, over: 0 };
     return { store: store, n: c.unfilled, open: c.open, over: c.over, ref_key: 'minus:' + store + ':' + bg.dateStr };
   });
-  return { entries: entries, stores: stores, repeat_days: repeatDays, multi: multi, rows_read: (mv as any).rows.length, open_mats: openMats };
+  return { entries: entries, stores: stores, repeat_days: repeatDays, multi: multi, rows_read: (mv as any).rows.length, minus_codes: minusCodes };
 }
 
 function minusPushText(n: number, store: string, od?: number): string {
@@ -2693,11 +2700,11 @@ function mnuOdCodes(lines: any[], swaps: any[], stores: string[]): Record<string
   }
   return out;
 }
-/* N на обект: незакрити минуси (openMats) по кодовете с такава разлика. */
-function mnuOdCount(openMats: Record<string, Record<string, number>>, codes: Record<string, Record<string, number>>, store: string): number {
-  const om = (openMats || {})[store] || {}, cs = (codes || {})[store] || {};
+/* N на обект: брой УНИКАЛНИ кодове с минус и с разлика с ход на обекта. */
+function mnuOdCount(minusCodes: Record<string, Record<string, number>>, codes: Record<string, Record<string, number>>, store: string): number {
+  const mc = (minusCodes || {})[store] || {}, cs = (codes || {})[store] || {};
   let n = 0;
-  for (const c of Object.keys(cs)) n += om[c] || 0;
+  for (const c of Object.keys(cs)) if (mc[c]) n++;
   return n;
 }
 /* Неприключените редове на обектите (страници по 1000) + размените. Грешка →
@@ -2735,7 +2742,7 @@ async function runMinusUnfilled(supabase: any, topic: any, bg: any, dryRun: bool
   const od: any = await mnuLoadOd(supabase, (built as any).stores);
   const odErr: string | null = od.error || null;
   const all: any[] = (built as any).entries.map((e: any) => Object.assign({}, e, {
-    od: odErr ? 0 : mnuOdCount((built as any).open_mats, od.codes, e.store) }));
+    od: odErr ? 0 : mnuOdCount((built as any).minus_codes, od.codes, e.store) }));
   const todo = all.filter((e) => e.n > 0 || e.od > 0);
   const planned = all.map((e) => ({
     obekt: e.store, nepopalneni: e.n, nezakriti: e.open, svrahstorno: e.over, otvoreni_razliki: e.od,

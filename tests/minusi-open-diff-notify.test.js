@@ -2,9 +2,10 @@
    минуса са с отворена разлика, по която ходът е на обекта (19.11.2026, сесия
    minusi-open-diff-notify; Теодор 18–19.11, стъпка 2 от 3).
 
-   Правилото (решение на Тенчо 19.11): незакрит минус (FIFO на mnuCountByStore
-   — без второ копие) + за кода му НЕприключен ред в Разлики (sdIsClosed) с
-   ход на обекта = А ∪ Б:
+   Правилото (решения на Тенчо 19.11): N = брой УНИКАЛНИ кодове с поне един
+   ред 955 на обекта — ЗАКРИТ ИЛИ НЕ (както знакът в таб Минуси; случаят
+   Пирдоп е закрит минус с отворена разлика) — за които обектът има
+   НЕприключен ред в Разлики (sdIsClosed) с ход на обекта = А ∪ Б:
      А — sdStoreMustAct (stock-differences.js; копие в .ts от v24);
      Б — diffLineWaitsStore (shared.js) + размените (bulDiffStoreWaiting,
          bulletin.js) — стоката на път не се брои.
@@ -19,7 +20,9 @@
      M1 ход на склада се брои (mnuDiffStoreTurn → всеки неприключен ред);
      M2 приключена се брои (без sdIsClosed в mnuDiffStoreTurn И без .not в
         заявката) — L11 (received + размяна към обекта) влиза;
-     M3 известието не тръгва при само N (todo = n > 0).
+     M3 известието не тръгва при само N (todo = n > 0);
+     M4 само незакритите (кодът влиза само при нетно 955 + 956 > 0);
+     M5 по ред, не по код (всеки ред 955 се брои).
    Броят паднали — в отчета на сесията. */
 'use strict';
 
@@ -48,7 +51,7 @@ function endOfFn(lines, start) {
   return lines.length - 1;
 }
 const REQUIRED = ['mnuCountByStore', 'buildMinusUnfilled', 'runMinusUnfilled', 'minusPushText', 'minusDetail', 'sdIsClosed',
-  'diffLineWaitsStore', 'bulDiffStoreWaiting', 'mnuDiffStoreTurn', 'mnuOdCodes', 'mnuOdCount', 'mnuLoadOd', 'sdStoreMustAct', 'mnuCountByStore'];
+  'diffLineWaitsStore', 'bulDiffStoreWaiting', 'mnuDiffStoreTurn', 'mnuOdCodes', 'mnuOdCount', 'mnuMinusCodes', 'mnuLoadOd', 'sdStoreMustAct', 'mnuCountByStore'];
 function buildModule() {
   const lines = fs.readFileSync(SRC, 'utf8').split(/\r?\n/);
   const missing = [];
@@ -92,14 +95,16 @@ const LINES = [
   /* L11 */ L(MT, 'RC1', 'interstore', false, { status: 'received' }),                                              /* приключена, но с размяна */
   /* L12 */ L(MT, 'Z1', 'supplier', true, { type: 'return', status: 'pending' }),                                   /* А, но минусът е закрит */
   /* L13 */ L(PE, 'P1', 'supplier', true, { type: 'return', status: 'pending' }),                                   /* само N в Петрич */
-  /* L14 */ L(MT, 'CP1', 'supplier', true, { type: 'writein', status: 'completed' })                                /* приключена */
+  /* L14 */ L(MT, 'CP1', 'supplier', true, { type: 'writein', status: 'completed' }),                               /* приключена */
+  /* L15 */ L(MT, 'Z2', 'interstore', false, { warehouse_response: 'return' }),                                    /* Б, минусът е закрит (Пирдоп) */
+  /* L16 */ L(MT, 'N956', 'supplier', true, { type: 'writein', status: 'pending' })                                /* А, но само 956 — няма минус */
 ];
 const SWAPS = [
   { from_line_id: 'Lx', to_line_id: 'L8', from_store: 'Добрич', to_store: MT, status: 'sent' },
   { from_line_id: 'Ly', to_line_id: 'L11', from_store: 'Добрич', to_store: MT, status: 'sent' }
 ];
 /* Очаквано по ред (за обекта на реда): ходът е на обекта и редът е неприключен. */
-const HAND_TURN = { L1: true, L2: false, L3: false, L4: true, L5: false, L6: false, L7: false, L8: true, L9: true, L10: false, L11: false, L12: true, L13: true, L14: false };
+const HAND_TURN = { L1: true, L2: false, L3: false, L4: true, L5: false, L6: false, L7: false, L8: true, L9: true, L10: false, L11: false, L12: true, L13: true, L14: false, L15: true, L16: true };
 
 let sq = 0;
 const mv = (store, material, type, qty, o) => { sq++; return Object.assign({ id: 'm' + sq, store_name: store, material, mvt_type: type, qty, uom: 'БР',
@@ -110,10 +115,14 @@ const MOVS = [
   mv(MT, 'S1', '955', 1), mv(MT, 'C1', '955', 1), mv(MT, 'R2', '955', 1), mv(MT, 'SW1', '955', 1),
   mv(MT, 'WB1', '955', 1), mv(MT, 'RC1', '955', 1), mv(MT, 'CP1', '955', 1),
   mv(MT, 'Z1', '955', 1), mv(MT, 'Z1', '956', -1),            /* закрит */
+  mv(MT, 'Z2', '955', 2), mv(MT, 'Z2', '956', -2),            /* закрит */
+  mv(MT, 'N956', '956', -1),                                   /* само сторно */
   mv(PE, 'P1', '955', 1, { reason_id: 2 }),                    /* попълнен → n = 0, N = 1 */
   mv(SH, 'Q1', '955', 1, { reason_id: 2 })                     /* Шумен: нищо */
 ];
-/* Монтана: N = 98572 (1) + W1 (2) + SW1 (1) = 4; непопълнени — 12 (всички незакрити без причина). */
+/* Монтана: N = кодовете 98572, W1, SW1, Z1, Z2 = 5 (W1 с два реда — веднъж; Z1 и Z2 —
+   закрити; N956 — само 956); по старото „незакрити редове“ щеше да е 4, по ред — 6.
+   Непопълнени — 12 (всички незакрити без причина). */
 
 function fakeSb(data, log, fail) {
   const pass = (row, f) => {
@@ -196,13 +205,24 @@ const bg = { dateStr: '2026-11-20', hours: 10, minutes: 0, isoWeekday: 4, weekda
   ok('само N = 1 — „1 минус“', mod.minusPushText(0, PE, 1) === '➖ Минуси: 1 минус с отворена разлика · Петрич', mod.minusPushText(0, PE, 1));
   ok('detail без „➖ Минуси:“', mod.minusDetail(0, PE, 1) === '1 минус с отворена разлика · Петрич' && mod.minusDetail(4, MT) === '4 непопълнени · Монтана');
 
+  section('3б. Кодовете с минус — закрити и незакрити, по код');
+  {
+    const mc = mod.mnuMinusCodes(MOVS);
+    ok('закрит минус (Z1, Z2) е в кодовете', mc[MT].Z1 === 1 && mc[MT].Z2 === 1);
+    ok('код само с 956 (N956) не е', !mc[MT].N956);
+    ok('код с два реда 955 (W1) — веднъж', mc[MT].W1 === 1);
+    const codes = mod.mnuOdCodes(LINES, SWAPS, [MT, PE, SH]);
+    ok('закрит минус + отворена разлика с ход на обекта → брои се (Z2, Б)', !!codes[MT].Z2 && mod.mnuOdCount(mc, { [MT]: { Z2: 1 } }, MT) === 1);
+    ok('N за Монтана = 5 (98572, W1, SW1, Z1, Z2)', mod.mnuOdCount(mc, codes, MT) === 5, mod.mnuOdCount(mc, codes, MT));
+  }
+
   section('4. dry_run — броят по обект');
   {
     const log = [];
     const dry = await mod.runMinusUnfilled(fakeSb(mkData(), log), { key: 'minus_unfilled' }, bg, true);
     const p = s => (dry.planned || []).find(x => x.obekt === s) || {};
-    ok('Монтана: 12 непопълнени, N = 4 (98572, W1 ×2, SW1)', p(MT).nepopalneni === 12 && p(MT).otvoreni_razliki === 4, J(p(MT)));
-    ok('Монтана: текстът', p(MT).text === '➖ Минуси: 12 непопълнени · 4 минуса с отворена разлика · Монтана', p(MT).text);
+    ok('Монтана: 12 непопълнени, N = 5 (по код, вкл. закритите)', p(MT).nepopalneni === 12 && p(MT).otvoreni_razliki === 5, J(p(MT)));
+    ok('Монтана: текстът', p(MT).text === '➖ Минуси: 12 непопълнени · 5 минуса с отворена разлика · Монтана', p(MT).text);
     ok('Петрич: 0 непопълнени, N = 1 → известие само с N', p(PE).nepopalneni === 0 && p(PE).otvoreni_razliki === 1 && p(PE).text === '➖ Минуси: 1 минус с отворена разлика · Петрич', J(p(PE)));
     ok('Шумен: 0 / 0 → без известие (разликата W1 е без минус там)', p(SH).nepopalneni === 0 && p(SH).otvoreni_razliki === 0 && p(SH).text === null, J(p(SH)));
     ok('получатели: 2 (Монтана, Петрич)', dry.recipients === 2, dry.recipients);
@@ -223,7 +243,7 @@ const bg = { dateStr: '2026-11-20', hours: 10, minutes: 0, isoWeekday: 4, weekda
     const res = await mod.runMinusUnfilled(fakeSb(data, []), { key: 'minus_unfilled' }, bg, false);
     ok('2 push-а: Монтана и Петрич', pushes.length === 2 && pushes.map(p => p.filters[0].value).join('|') === MT + '|' + PE, J(pushes.map(p => p.filters)));
     ok('Петрич (само N) — текстът в push-а', pushes[1] && pushes[1].message === '➖ Минуси: 1 минус с отворена разлика · Петрич', pushes[1] && pushes[1].message);
-    ok('notification_log.detail — същият текст', J(data.notification_log.map(r => r.detail)) === J(['12 непопълнени · 4 минуса с отворена разлика · Монтана', '1 минус с отворена разлика · Петрич']), J(data.notification_log.map(r => r.detail)));
+    ok('notification_log.detail — същият текст', J(data.notification_log.map(r => r.detail)) === J(['12 непопълнени · 5 минуса с отворена разлика · Монтана', '1 минус с отворена разлика · Петрич']), J(data.notification_log.map(r => r.detail)));
     ok('резултат: obekti 2', res.obekti === 2, J(res).slice(0, 200));
   }
 
