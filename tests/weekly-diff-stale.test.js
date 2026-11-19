@@ -316,14 +316,15 @@ const names = ds => (ds && ds.byStore || []).map(g => g.store);
     const kardzh = trs.find(t => t.indexOf('Кърджали') >= 0) || '';
     ok('Троян (20 дни) е червен', /#FDEEEA/.test(troyan) && /#C0392B/.test(troyan),
       troyan.slice(0, 260));
-    /* Колоните в РЕДА на заглавието: контролинг 1, склада 4, обекта 2, на път 2. */
+    /* Колоните в РЕДА на заглавието: контролинг 1, склада 4, ЦО / регионалния 0
+       (етап 6в-3, 19.11.2026 — нова колона след „чака склада“), обекта 2, на път 2. */
     const cells = (troyan.match(/<td[^>]*>([\s\S]*?)<\/td>/g) || []).map(c => c.replace(/<[^>]+>/g, '').trim());
-    ok('редът на Троян: 6 клетки, „на път" = 2 след „чака обекта" = 2',
-      cells.length === 6 && cells[1] === '1' && cells[2] === '4' && cells[3] === '2' && cells[4] === '2',
+    ok('редът на Троян: 7 клетки, „на път" = 2 след „чака обекта" = 2',
+      cells.length === 7 && cells[1] === '1' && cells[2] === '4' && cells[3] === '0' && cells[4] === '2' && cells[5] === '2',
       JSON.stringify(cells));
     const foot = trs.find(t => t.indexOf('>Общо<') >= 0) || '';
     const fcells = (foot.match(/<td[^>]*>([\s\S]*?)<\/td>/g) || []).map(c => c.replace(/<[^>]+>/g, '').trim());
-    ok('редът „Общо": 6 клетки, „на път" = 2', fcells.length === 6 && fcells[4] === '2', JSON.stringify(fcells));
+    ok('редът „Общо": 7 клетки, „на път" = 2', fcells.length === 7 && fcells[5] === '2', JSON.stringify(fcells));
     ok('Кърджали (10 дни) НЕ е червен', !/#FDEEEA/.test(kardzh) && !/#C0392B/.test(kardzh),
       kardzh.slice(0, 260));
 

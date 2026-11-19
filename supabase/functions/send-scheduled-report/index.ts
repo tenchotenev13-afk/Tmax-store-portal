@@ -1,6 +1,12 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v71 (19.11.2026) — Разлики 6в-3 (копие от report.js): 1) колона „чака ЦО /
+      регионалния“ (coSide, reportDiffCOTurn) в „Необработени разлики“;
+      2) секция „Разлики — чакат склада“ в type 'warehouse' (reportWhDiffKind);
+      3) dry_run за 'warehouse'; weekly dry_run + coSide, transit. Виж
+      claude/log/2026-11-19-razliki-etap6v3.md.
+
    v70 (12.11.2026) — ЕДНО нещо: „Сторна с по-малка нова сума" (седмичният) брои
       по правилото на портала — stornoIndicator, копие от kasa.js заедно със
       stornoIsExempt и STORNO_EXEMPT_CODES (report-edge-sync): капаро/ваучер
@@ -3368,7 +3374,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     var dsMap = {}, dsList = [];
     var dsBucket = function(store, age){
       var g = dsMap[store];
-      if (!g) { g = { store: store, control: 0, warehouse: 0, storeSide: 0, transit: 0, oldest: 0 }; dsMap[store] = g; dsList.push(g); }
+      if (!g) { g = { store: store, control: 0, warehouse: 0, coSide: 0, storeSide: 0, transit: 0, oldest: 0 }; dsMap[store] = g; dsList.push(g); }
       if (age > g.oldest) g.oldest = age;
       return g;
     };
@@ -3389,7 +3395,12 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       if (d.status === 'received') return;
       var wr = d.warehouse_response, sr = d.store_response;
       var noWr = (wr === null || wr === undefined || wr === '');
-      if (noWr || wr === 'will_send' || (wr === 'return' && sr === 'sap_done') || sr === 'no_stock') {
+      /* Етап 6в-3 (19.11.2026): ход на ЦО / регионалния — насочените по 5а и
+         return + „няма наличност“ (до 6в-3 — „чака склада“). Нищо не изчезва:
+         редът минава в друга колона, сборът е същият. */
+      if (reportDiffCOTurn(d)) {
+        dsBucket(m.store, m.age).coSide++;
+      } else if (noWr || wr === 'will_send' || (wr === 'return' && sr === 'sap_done') || sr === 'no_stock') {
         dsBucket(m.store, m.age).warehouse++;
       } else if (diffLineWaitsStore(d)) {
         dsBucket(m.store, m.age).storeSide++;
@@ -3398,17 +3409,19 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       }
       /* Всичко друго (напр. обектът е приел) е разчистено и не се брои.
          Единственото чакащо без колона: „върни" + wrong_barcode / similar_item
-         без отговор — чака ЦО (стъпка 2); на 14.10.2026 такива редове 0. */
+         без отговор на обекта (отговор на склада по стария път) — на
+         19.11.2026 отворени насочени редове с отговор на склада: 0. */
     });
     /* Обект без нито едно чакане изобщо няма кофа — dsBucket се вика само от
        броящите клонове, тоест филтър „махни празните" не е нужен. */
     dsList.sort(function(a,b){
       return b.oldest - a.oldest || String(a.store).localeCompare(String(b.store));
     });
-    var dsTotal = { control: 0, warehouse: 0, storeSide: 0, transit: 0, oldest: 0 };
+    var dsTotal = { control: 0, warehouse: 0, coSide: 0, storeSide: 0, transit: 0, oldest: 0 };
     dsList.forEach(function(g){
       dsTotal.control += g.control;
       dsTotal.warehouse += g.warehouse;
+      dsTotal.coSide += g.coSide;
       dsTotal.storeSide += g.storeSide;
       dsTotal.transit += g.transit;
       if (g.oldest > dsTotal.oldest) dsTotal.oldest = g.oldest;
@@ -3816,6 +3829,7 @@ function reportDiffStaleHtml(cross){
     '<th style="' + TH + 'text-align:left;">Обект</th>' +
     '<th style="' + TH + 'text-align:right;">чака контролинг</th>' +
     '<th style="' + TH + 'text-align:right;">чака склада</th>' +
+    '<th style="' + TH + 'text-align:right;">чака ЦО / регионалния</th>' +
     '<th style="' + TH + 'text-align:right;">чака обекта</th>' +
     '<th style="' + TH + 'text-align:right;">на път</th>' +
     '<th style="' + TH + 'text-align:right;">най-стар (дни)</th></tr>';
@@ -3825,16 +3839,18 @@ function reportDiffStaleHtml(cross){
       '<td style="' + TD + '">' + reportStoreLinkHtml(g.store, warn ? '#7f1d1d' : '#374151') + '</td>' +
       '<td style="' + TD + 'text-align:right;">' + num(g.control) + '</td>' +
       '<td style="' + TD + 'text-align:right;">' + num(g.warehouse) + '</td>' +
+      '<td style="' + TD + 'text-align:right;">' + num(g.coSide || 0) + '</td>' +
       '<td style="' + TD + 'text-align:right;">' + num(g.storeSide) + '</td>' +
       '<td style="' + TD + 'text-align:right;">' + num(g.transit) + '</td>' +
       '<td style="' + TD + 'text-align:right;font-weight:' + (warn ? '800' : '600') + ';color:' + (warn ? '#C0392B' : '#6B7280') + ';">' + g.oldest + '</td>' +
       '</tr>';
   }).join('');
-  var t = ds.total || { control: 0, warehouse: 0, storeSide: 0, transit: 0, oldest: 0 };
+  var t = ds.total || { control: 0, warehouse: 0, coSide: 0, storeSide: 0, transit: 0, oldest: 0 };
   var TDT = 'padding:6px 8px;font-size:12px;font-weight:800;color:#1E2761;border-top:2px solid #e2e8f0;';
   var foot = '<tr><td style="' + TDT + '">Общо</td>' +
     '<td style="' + TDT + 'text-align:right;">' + t.control + '</td>' +
     '<td style="' + TDT + 'text-align:right;">' + t.warehouse + '</td>' +
+    '<td style="' + TDT + 'text-align:right;">' + (t.coSide || 0) + '</td>' +
     '<td style="' + TDT + 'text-align:right;">' + t.storeSide + '</td>' +
     '<td style="' + TDT + 'text-align:right;">' + t.transit + '</td>' +
     '<td style="' + TDT + 'text-align:right;color:' + (t.oldest > RED_DAYS ? '#C0392B' : '#1E2761') + ';">' + t.oldest + '</td></tr>';
@@ -4523,6 +4539,117 @@ function reportPalletsRecipients(recipientRows, userRows){
   return { all: all, personal: personal };
 }
 
+/* ═══════ РАЗЛИКИ — ЧИЙ Е ХОДЪТ (етап 6в-3, 19.11.2026) ═══════════════
+   Огледало на правилото на браузъра (stock-differences.js), само частта, която
+   трябва на отчетите. Сверява се с него в tests/razliki-etap6v3.test.js, а
+   копието в send-scheduled-report — с report-edge-sync.
+   · reportDiffIsRouted — sdLineRoutedHere: междускладов ред от категория
+     wrong_barcode / pack_mismatch / similar_item / damaged, без отговор на
+     склада и на обекта — ходът е на ЦО или на регионалния (етап 5а);
+   · reportDiffCOTurn — колоната „чака ЦО / регионалния“ в „Необработени
+     разлики над N дни“: насочен ред или return + „няма наличност“ („Ход: ЦО“
+     от sdInterstoreTurn, етап 6а);
+   · reportWhDiffKind — sdWhChipKind (етап 6в-1): 'noanswer' | 'willsend7' |
+     'takeback' | null. Точно 7×24 ч влиза. openSwap — отворена размяна по реда. */
+function reportDiffIsRouted(d){
+  if (!d) return false;
+  var c = String(d.difference_category || '');
+  if (c !== 'wrong_barcode' && c !== 'pack_mismatch' && c !== 'similar_item' && c !== 'damaged') return false;
+  return !d.warehouse_response && !d.store_response;
+}
+function reportDiffCOTurn(d){
+  if (!d) return false;
+  return reportDiffIsRouted(d) || (d.warehouse_response === 'return' && d.store_response === 'no_stock');
+}
+function reportWhDiffKind(l, rep, openSwap, nowMs){
+  if (!l || !rep || rep.direction !== 'interstore') return null;
+  if (l.status === 'received') return null;
+  if (l.store_response === 'accepted' && String(l.store_response_comment || '').indexOf('Получено междувременно на ') === 0) return null;
+  if (openSwap || reportDiffIsRouted(l)) return null;
+  var w = String(l.warehouse_response || ''), s = String(l.store_response || '');
+  if (!w) return 'noanswer';
+  if (w === 'will_send' && !s) {
+    var at = l.created_at ? new Date(l.created_at).getTime() : NaN;
+    var now = (typeof nowMs === 'number') ? nowMs : Date.now();
+    return (!isNaN(at) && now - at >= 7 * 86400000) ? 'willsend7' : null;
+  }
+  if (w === 'return' && s === 'sap_done') return 'takeback';
+  return null;
+}
+/* Трите броя и най-старата дата на подаване (created_at на реда, местна
+   дата) за склада. reps — непрегледаните + чакащите имейл междускладови бланки
+   на склада; swaps — редовете от stock_diff_swaps. */
+function reportWhDiffSummary(warehouse, reps, lines, swaps, nowMs){
+  var res = { noanswer: { n: 0, oldest: null }, willsend7: { n: 0, oldest: null }, takeback: { n: 0, oldest: null } };
+  var byId = {}, open = {};
+  (Array.isArray(reps) ? reps : []).forEach(function(r){
+    if (!r || r.direction !== 'interstore' || r.counterpart !== warehouse) return;
+    if (r.reviewed && r.email_pending !== true) return;
+    byId[String(r.id)] = r;
+  });
+  (Array.isArray(swaps) ? swaps : []).forEach(function(s){
+    if (!s || s.status === 'closed') return;
+    if (s.from_line_id != null) open[String(s.from_line_id)] = 1;
+    if (s.to_line_id != null) open[String(s.to_line_id)] = 1;
+  });
+  (Array.isArray(lines) ? lines : []).forEach(function(l){
+    var rp = l ? byId[String(l.report_id)] : null;
+    var k = rp ? reportWhDiffKind(l, rp, !!open[String(l.id)], nowMs) : null;
+    if (!k) return;
+    var g = res[k];
+    g.n++;
+    var day = l.created_at ? toLocalISO(new Date(l.created_at)) : null;
+    if (day && (!g.oldest || day < g.oldest)) g.oldest = day;
+  });
+  return res;
+}
+/* Секцията „Разлики — чакат склада“ в неделното писмо до склада. null =
+   четенето е паднало (червен ред, не „няма“). */
+function reportWarehouseDiffHtml(diffs){
+  var title = '<div style="font-size:13px;font-weight:700;color:#1E2761;margin:18px 0 6px;">Разлики — чакат склада</div>';
+  if (!diffs) {
+    return title + '<div style="font-size:12px;font-weight:700;color:#C0392B;">⚠️ Разликите не можаха да се прочетат</div>';
+  }
+  var part = diffs.partial ? '<div style="margin-top:6px;font-size:12px;font-weight:700;color:#C0392B;">⚠️ Непълни данни — четенето на разликите прекъсна</div>' : '';
+  var rows = [['noanswer', '📝 Без отговор'], ['willsend7', '⏳ „Ще се изпрати“, подадени преди 7+ дни'], ['takeback', '📬 За „Прието обратно“']];
+  var any = rows.some(function(x){ return diffs[x[0]] && diffs[x[0]].n > 0; });
+  /* Непълно четене при нула — „няма“ би излъгал; остава само червеният ред. */
+  if (!any) return title + (diffs.partial ? part : '<div style="font-size:12px;color:#94a3b8;">Няма разлики, които чакат склада.</div>');
+  var body = rows.map(function(x){
+    var g = diffs[x[0]] || { n: 0, oldest: null };
+    return '<div style="padding:6px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:' + (g.n ? '#334155' : '#94a3b8') + ';">' +
+      x[1] + ': <b>' + g.n + '</b>' +
+      (g.n && g.oldest ? ' · най-стар от ' + esc(reportDM(g.oldest)) + '.' + esc(String(g.oldest).slice(0, 4)) : '') +
+      '</div>';
+  }).join('');
+  return title + '<div style="background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">' + body + '</div>' + part;
+}
+/* Чете бланките, редовете и размените за склада и връща reportWhDiffSummary
+   (+ partial) — или null, ако четенето падне. */
+function collectWarehouseDiffs(warehouse){
+  var enc = encodeURIComponent(warehouse);
+  return Promise.all([
+    reportGetAll('differences_reports', 'direction=eq.interstore&counterpart=eq.' + enc +
+      '&select=id,direction,counterpart,reviewed,email_pending&order=id.asc'),
+    reportGetAll('stock_diff_swaps', 'select=id,from_line_id,to_line_id,status&order=id.asc')
+  ]).then(function(a){
+    var reps = (Array.isArray(a[0]) ? a[0] : []).filter(function(r){ return !!r && (!r.reviewed || r.email_pending === true); });
+    var partial = !!(a[0] && a[0].partial) || !!(a[1] && a[1].partial);
+    if (!reps.length) {
+      var empty = reportWhDiffSummary(warehouse, [], [], [], Date.now());
+      empty.partial = partial;
+      return empty;
+    }
+    var ids = reps.map(function(r){ return r.id; });
+    return reportGetAll('stock_differences', 'report_id=in.(' + ids.join(',') + ')' +
+      '&select=id,report_id,status,warehouse_response,store_response,store_response_comment,difference_category,created_at&order=id.asc').then(function(lines){
+      var res = reportWhDiffSummary(warehouse, reps, lines, a[1], Date.now());
+      res.partial = partial || !!(lines && lines.partial);
+      return res;
+    });
+  }).catch(function(){ return null; });
+}
+
 /* ═══════ ЛОГИСТИЧЕН СКЛАД — НЕОБРАБОТЕНИ ЗАЯВКИ ═══════════════
    Неделя 21:00, body {"type":"warehouse"}: всеки склад (users.role =
    'logistics') получава писмо САМО за client_orders със status='pending' и
@@ -4534,6 +4661,9 @@ function reportPalletsRecipients(recipientRows, userRows){
    влизат (както и в седмичния). */
 function collectWarehouseReportData(fulfiller, cb){
   var refD = reportDailyTargetDate(new Date());
+  /* Етап 6в-3: разликите, които чакат склада — успоредно със заявките;
+     паднало четене → diffs null (червен ред в писмото), заявките не спират. */
+  var diffsP = collectWarehouseDiffs(fulfiller);
   sbGet('client_orders','status=eq.pending&fulfiller=eq.' + encodeURIComponent(fulfiller) +
     '&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,created_at,date,awaiting_stock').then(function(rows){
     var items = (Array.isArray(rows) ? rows : []).filter(function(o){
@@ -4558,10 +4688,12 @@ function collectWarehouseReportData(fulfiller, cb){
     groups.sort(function(a,b){
       return b.late - a.late || b.count - a.count || String(a.store).localeCompare(String(b.store));
     });
-    cb({ warehouse: fulfiller, reportDate: toLocalISO(refD), total: items.length, stores: groups.length,
-         late: items.filter(function(x){ return x.lateDays > 0; }).length,
-         oldestWait: items.reduce(function(m, x){ return Math.max(m, x.waitDays); }, 0),
-         groups: groups });
+    return diffsP.then(function(diffs){
+      cb({ warehouse: fulfiller, reportDate: toLocalISO(refD), total: items.length, stores: groups.length,
+           late: items.filter(function(x){ return x.lateDays > 0; }).length,
+           oldestWait: items.reduce(function(m, x){ return Math.max(m, x.waitDays); }, 0),
+           groups: groups, diffs: diffs });
+    });
   }).catch(function(){ cb(null); });
 }
 
@@ -4603,6 +4735,9 @@ function reportWarehouseHtml(data){
         '</div>';
     }).join('');
   }
+  /* Етап 6в-3: „Разлики — чакат склада“ — само ако колекторът ги е чел
+     (ключ diffs); стар повикващ без ключа не вижда секцията. */
+  if (data && data.hasOwnProperty('diffs')) body += reportWarehouseDiffHtml(data.diffs);
   var d = data && data.reportDate ? new Date(data.reportDate+'T00:00:00') : new Date();
   var dateStr = d.toLocaleDateString('bg-BG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   return reportEmailShell('📦 ' + esc((data && data.warehouse) || 'Логистичен склад') + ' — необработени заявки',
@@ -5397,7 +5532,7 @@ Deno.serve(async (req: Request) => {
       var wkOpen = 0;
       (wkCross.transitByStore || []).forEach(function(g: any){ wkOpen += g.open || 0; });
       return new Response(JSON.stringify({ ok:true, dry_run:true, type:type,
-        diffStale:{ days:wkDs.days, stores:(wkDs.byStore || []).length, control:wkDs.total.control, warehouse:wkDs.total.warehouse, storeSide:wkDs.total.storeSide, oldest:wkDs.total.oldest },
+        diffStale:{ days:wkDs.days, stores:(wkDs.byStore || []).length, control:wkDs.total.control, warehouse:wkDs.total.warehouse, coSide:wkDs.total.coSide, storeSide:wkDs.total.storeSide, transit:wkDs.total.transit, oldest:wkDs.total.oldest },
         transit:{ open:wkOpen, stale:wkCross.transitStale },
         rows_read: wkCross.rowsRead, partial: wkCross.partial }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
@@ -5539,6 +5674,18 @@ Deno.serve(async (req: Request) => {
        Ранен клон като „Палети" — daily/weekly не се докосват. */
     if (type === 'warehouse') {
       var wPlan: any[] = (await loadWarehousePlan()).plan;
+      /* v71 — {"type":"warehouse","dry_run":true}: само числата по склад
+         (заявки + „Разлики — чакат склада“), без писма. */
+      if (body && body.dry_run === true) {
+        var wDry: any[] = [], wSeen: any = {};
+        for (const u of wPlan) {
+          if (wSeen[u.warehouse]) continue;
+          wSeen[u.warehouse] = 1;
+          var wdData: any = await new Promise(function(resolve){ collectWarehouseReportData(u.warehouse, resolve); });
+          wDry.push({ warehouse: u.warehouse, orders: wdData ? wdData.total : null, diffs: wdData ? wdData.diffs : null });
+        }
+        return new Response(JSON.stringify({ ok:true, dry_run:true, type:type, warehouses:wDry }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
+      }
       var wOut: any[] = [];
       for (const u of wPlan) {
         var wData: any = await new Promise(function(resolve){ collectWarehouseReportData(u.warehouse, resolve); });
@@ -5548,7 +5695,10 @@ Deno.serve(async (req: Request) => {
           headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
           body: JSON.stringify({ to: [u.email], subject: reportWarehouseSubject(wData), html: reportWarehouseHtml(wData) })
         });
-        wOut.push({ email:u.email, warehouse:u.warehouse, orders:wData.total, sent:wRes.ok, status:wRes.status });
+        var wDf: any = wData.diffs;
+        wOut.push({ email:u.email, warehouse:u.warehouse, orders:wData.total,
+          diffs: wDf ? { noanswer:wDf.noanswer.n, willsend7:wDf.willsend7.n, takeback:wDf.takeback.n } : null,
+          sent:wRes.ok, status:wRes.status });
       }
       if (!wPlan.length) {
         return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });

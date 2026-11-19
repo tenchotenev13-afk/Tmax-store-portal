@@ -127,6 +127,7 @@ const TESTS = [
   'razliki-etap6a.test.js',
   'razliki-etap6b.test.js',
   'razliki-etap6v1.test.js',
+  'razliki-etap6v3.test.js',
   'diff-report-no-document.test.js',
   'docs-office-only.test.js',
   'docs-groups.test.js',

@@ -65,6 +65,11 @@ const SHARED_FNS = [
   /* „Логистичен склад — необработени заявки" (v36) + общото „чака N дни" */
   'collectWarehouseReportData', 'reportWarehouseHtml', 'reportWarehouseSubject',
   'reportWarehouseRecipients', 'reportWaitDays',
+  /* Разлики, етап 6в-3 (v71, 19.11.2026): чий е ходът (огледало на
+     stock-differences.js) — колоната „чака ЦО / регионалния“ и секцията
+     „Разлики — чакат склада“ в неделния складов отчет. */
+  'reportDiffIsRouted', 'reportDiffCOTurn', 'reportWhDiffKind', 'reportWhDiffSummary',
+  'reportWarehouseDiffHtml', 'collectWarehouseDiffs',
   /* прозорци и избор на седмица */
   'reportMondayOfWeek', 'reportTargetWeekMonday', 'reportWeekOfMonday',
   'reportPickWeeklyBulletin',
