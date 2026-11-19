@@ -11,6 +11,8 @@
         → пада „път извън instrukcii/ → отказ";
      M4 картата се пише и при неуспешно обратно четене (без сверката)
         → пада „обратното четене се разминава → без карта".
+     M5 (19.11.2026) validateTitles не проверява подтаба (`if (false)`)
+        → пада „Заглавията — табове и подтабове от портала".
    Оцелели мутанти: няма.
 */
 'use strict';
@@ -43,7 +45,7 @@ function mkList(items) {
   return f;
 }
 
-const ITEM = { file: 'Тест-обекти.pdf', path: 'instrukcii/test-obekti.pdf', title: 'Тест — обекти', category: 'Само за офиса', description: 'Кратка инструкция за обекти' };
+const ITEM = { file: 'Тест-обекти.pdf', path: 'instrukcii/test-obekti.pdf', title: 'Каса — обекти', category: 'Само за офиса', description: 'Кратка инструкция за обекти' };
 const NOW = new Date(2026, 10, 19, 14, 5);
 
 // Фалшив Supabase: storage { path: Buffer }, docs [rows], calls [{method,url}]
@@ -125,6 +127,29 @@ const OLD_OBJ = { 'docs/1700000000000_sap.pdf': Buffer.from('стар SAP'), 'do
   ok(P.validateList([ITEM, Object.assign({}, ITEM, { file: 'x.pdf', title: 'друго' })]).some(function (e) { return /пътят .* се повтаря/.test(e); }), 'дублиран path → грешка');
   ok(P.validateList([ITEM, Object.assign({}, ITEM, { file: 'x.pdf', path: 'instrukcii/x.pdf' })]).some(function (e) { return /заглавието .* се повтаря/.test(e); }), 'дублирано title → грешка');
 
+  section('Заглавията — табове и подтабове от портала (19.11.2026)');
+  {
+    const tabs = P.portalTabs(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'));
+    const split = P.loadSplit(path.join(ROOT, 'docs.js'));
+    const v = function (title) { return P.validateTitles([Object.assign({}, ITEM, { title: title })], tabs, split); };
+    ok(P.validateTitles(REAL_LIST, tabs, split).length === 0, 'tools/instrukcii.json: всяко заглавие е таб (и подтаб) от портала');
+    ok(REAL_LIST.filter(function (i) { return split(i.title).sub === 'Товарни листи'; }).length === 6 &&
+      REAL_LIST.filter(function (i) { return split(i.title).sub === 'Трансфери'; }).length === 2 &&
+      REAL_LIST.filter(function (i) { return split(i.title).mod === 'Стока на път' && split(i.title).sub === null; }).length === 3,
+      'реалният списък: 6 в Транспорт/Товарни листи, 2 в Транспорт/Трансфери, 3 направо в Стока на път');
+    ok(v('Каса — обекти').length === 0, '„Каса — обекти" (таб, едно ниво) → без грешка');
+    ok(v('Транспорт — Трансфери — обекти').length === 0, '„Транспорт — Трансфери — обекти" (таб + подтаб) → без грешка');
+    ok(v('Транспорт — Трансфери — обекти — 2').length === 0, 'трето тире остава в името → без грешка');
+    ok(/„Транспрот" не е таб/.test(v('Транспрот — обекти').join()), 'правописна грешка в таба → „не е таб": ' + v('Транспрот — обекти').join());
+    ok(/„Трансфер" не е подтаб на „Транспорт"/.test(v('Транспорт — Трансфер — обекти').join()), 'правописна грешка в подтаба → „не е подтаб"');
+    ok(/табът няма подтабове/.test(v('Каса — Сторно — обекти').join()), 'подпапка в таб без подтабове → грешка');
+    ok(/трябва да е/.test(v('Без тире').join()), 'заглавие без тире → грешка');
+    ok(v('транспорт — обекти').length === 1, 'същото изписване — малка буква е грешка');
+    const sb = fakeSb({ storage: OLD_OBJ, docs: OLD_DOCS });
+    const r = await go(sb, mkFolder({ 'Тест-обекти.pdf': 'нов' }), mkList([Object.assign({}, ITEM, { title: 'Транспорт — Товарни лист — обекти' })]), ['--go']);
+    ok(r.code !== 0 && sb.calls.length === 0 && /„Товарни лист" не е подтаб/.test(r.out), 'run(): непознат подтаб → exit ' + r.code + ', нула заявки');
+  }
+
   section('Път извън instrukcii/ → отказ');
   for (const bad of ['docs/1700000000000_sap.pdf', 'instrukcii/../docs/x.pdf', 'instrukcii/Кирилица.pdf', 'instrukcii/sub/x.pdf', 'x.pdf']) {
     const sb = fakeSb({ storage: OLD_OBJ, docs: OLD_DOCS });
@@ -136,7 +161,7 @@ const OLD_OBJ = { 'docs/1700000000000_sap.pdf': Buffer.from('стар SAP'), 'do
   {
     const sb = fakeSb({ storage: OLD_OBJ, docs: OLD_DOCS });
     const folder = mkFolder({ 'Тест-обекти.pdf': 'нов', 'Друго.pdf': 'x' });
-    const r = await go(sb, folder, mkList([ITEM, Object.assign({}, ITEM, { file: 'Липсва.pdf', path: 'instrukcii/lipsva.pdf', title: 'Липсва' })]));
+    const r = await go(sb, folder, mkList([ITEM, Object.assign({}, ITEM, { file: 'Липсва.pdf', path: 'instrukcii/lipsva.pdf', title: 'Каса — липсва' })]));
     ok(r.code === 0, 'exit 0');
     ok(sb.writes().length === 0, 'нито една заявка за запис (' + sb.writes().length + ')');
     ok(/СУХО/.test(r.out) && /би направил качване \+ INSERT/.test(r.out), 'казва какво би направил');

@@ -13,6 +13,8 @@
 // DOCS_KEY, DOCS_BKT) — не се дублират тук. Service ключ не се ползва.
 // Скриптът пипа САМО пътища под instrukcii/ и САМО редове в documents,
 // чийто url сочи към instrukcii/ — всичко под docs/ остава непокътнато.
+// Заглавията (19.11.2026): „<Таб> — <име>" или „<Таб> — <Подтаб> — <име>",
+// имената точно както са в портала (index.html) — иначе отказ преди заявки.
 // Без външни пакети (вграденият fetch на Node 18+).
 'use strict';
 var fs = require('fs');
@@ -43,6 +45,66 @@ function readConfig(docsJsPath) {
   try { role = JSON.parse(Buffer.from(cfg.key.split('.')[1], 'base64').toString('utf8')).role; } catch (e) { /* виж долу */ }
   if (role !== 'anon') throw new Error('ключът в docs.js не е публичният (role=' + role + ') — отказ');
   return cfg;
+}
+
+// docsSplitTitle — СЪЩАТА функция като в портала, взета от docs.js (без копие).
+// docs.js при зареждане само дефинира имена, нищо не вика.
+function loadSplit(docsJsPath) {
+  var ctx = {};
+  require('vm').runInNewContext(fs.readFileSync(docsJsPath, 'utf8'), ctx, { filename: docsJsPath });
+  if (typeof ctx.docsSplitTitle !== 'function') throw new Error('в ' + docsJsPath + ' няма docsSplitTitle');
+  return ctx.docsSplitTitle;
+}
+
+// Табовете и подтабовете от index.html — същото правило като docsPortalTabs()
+// в docs.js (там по DOM-а): горната лента #nav-tabs-container, а лента
+// *-subnav е на таба, чийто showModule(...) е сред бутоните ѝ. Тест ги сверява.
+function btnLabel(s) {
+  var t = String(s || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  var m = /^(\S+) (.+)$/.exec(t);
+  return (m && !/[0-9A-Za-zА-Яа-яЁё]/.test(m[1])) ? m[2] : t;
+}
+function btnMod(attrs) { var m = /showModule\('([^']+)'\)/.exec(attrs); return m ? m[1] : null; }
+function portalTabs(html) {
+  html = String(html).replace(/<!--[\s\S]*?-->/g, '');
+  var out = [], m, re;
+  var st = html.indexOf('id="nav-tabs-container"');
+  if (st < 0) throw new Error('index.html: няма #nav-tabs-container');
+  var nav = html.slice(st, html.indexOf('</nav>', st));
+  re = /<button\b([^>]*\bclass="nav-tab\b[^"]*"[^>]*)>([\s\S]*?)<\/button>/g;
+  while ((m = re.exec(nav))) {
+    var tl = /<span class="tl">([\s\S]*?)<\/span>/.exec(m[2]);
+    out.push({ name: btnLabel(tl ? tl[1] : m[2]), mod: btnMod(m[1]), subs: [] });
+  }
+  var sre = /<div\b[^>]*\bid="[^"]*-subnav"[^>]*>/g;
+  while ((m = sre.exec(html))) {
+    var body = html.slice(m.index + m[0].length);
+    body = body.slice(0, body.search(/<\/div>\s*<\/div>/));
+    var mods = [], names = [], b, bre = /<button\b([^>]*)>([\s\S]*?)<\/button>/g;
+    while ((b = bre.exec(body))) { mods.push(btnMod(b[1])); names.push(btnLabel(b[2])); }
+    for (var x = 0; x < out.length; x++) {
+      if (out[x].mod && !out[x].subs.length && mods.indexOf(out[x].mod) >= 0) { out[x].subs = names; break; }
+    }
+  }
+  return out.map(function (t) { return { name: t.name, subs: t.subs }; });
+}
+
+// Заглавията: първата част е таб от портала, втората (ако има) — подтаб на
+// него. Иначе правописна грешка би направила нова папка в таб „Инструкции".
+function validateTitles(list, tabs, split) {
+  var errs = [];
+  var names = tabs.map(function (t) { return t.name; });
+  list.forEach(function (it, i) {
+    var n = '#' + (i + 1) + ' „' + it.title + '"';
+    var s = split(it.title);
+    if (!s) { errs.push(n + ': заглавието трябва да е „<Таб> — <име>" или „<Таб> — <Подтаб> — <име>"'); return; }
+    var t = tabs[names.indexOf(s.mod)];
+    if (!t) { errs.push(n + ': „' + s.mod + '" не е таб от портала (табове: ' + names.join(', ') + ')'); return; }
+    if (s.sub != null && t.subs.indexOf(s.sub) < 0) {
+      errs.push(n + ': „' + s.sub + '" не е подтаб на „' + s.mod + '" (' + (t.subs.length ? 'подтабове: ' + t.subs.join(', ') : 'табът няма подтабове') + ')');
+    }
+  });
+  return errs;
 }
 
 // Проверка на списъка ПРЕДИ каквато и да е заявка. Грешка → целият пуск спира.
@@ -251,6 +313,11 @@ function run(opts) {
     if (!fetchFn) throw new Error('няма вграден fetch — трябва Node 18+');
     var list = JSON.parse(fs.readFileSync(opts.listPath || path.join(root, 'tools', 'instrukcii.json'), 'utf8'));
     var errs = validateList(list);
+    if (!errs.length) {
+      var docsJs = opts.docsJsPath || path.join(root, 'docs.js');
+      var tabs = portalTabs(fs.readFileSync(opts.indexPath || path.join(root, 'index.html'), 'utf8'));
+      errs = validateTitles(list, tabs, loadSplit(docsJs));
+    }
     if (errs.length) { errs.forEach(function (e) { log('❌ ' + e); }); throw new Error('списъкът е невалиден — нищо не е пипнато'); }
     if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) throw new Error('няма папка ' + folder);
     var cfg = readConfig(opts.docsJsPath || path.join(root, 'docs.js'));
@@ -288,7 +355,10 @@ function run(opts) {
   });
 }
 
-module.exports = { run: run, validateList: validateList, readConfig: readConfig, PATH_RE: PATH_RE };
+module.exports = {
+  run: run, validateList: validateList, readConfig: readConfig, PATH_RE: PATH_RE,
+  portalTabs: portalTabs, validateTitles: validateTitles, loadSplit: loadSplit
+};
 
 if (require.main === module) {
   run({ argv: process.argv.slice(2) }).then(function (code) { process.exitCode = code; });

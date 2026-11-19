@@ -11,6 +11,8 @@
    М3. docsApplyOfficeUi() показва бутона винаги (display:'')    → секция 2 пада.
    М4. опцията в #d-cat не се пипа (остава hidden/disabled)      → секция 4 пада.
    М5. без проверката в submitDoc                                 → секция 5 пада.
+   М6 (19.11.2026). без филтъра за офиса при папки в две нива     → секции 1, 3, 7 падат;
+       тестът пада и при папки по азбучен ред (М2 на docs-groups).
 
    Пускане:  node tests/docs-office-only.test.js .
 */
@@ -146,6 +148,34 @@ const shown = el => !!el && el.style.display !== 'none';
     ok('manager: SAP → 2 карти', cards(doc).length === 2);
     ok('бутонът „Противопожарна безопасност" е непокътнат',
       !!Array.from(doc.querySelectorAll('#doc-filters button')).find(x => x.getAttribute('onclick') === "filterDocs('Процедури',this)" && x.textContent.trim() === 'Противопожарна безопасност'));
+  }
+
+  section('7. Две нива (19.11.2026): офисните в папки и подпапки — не-admin не ги вижда и не ги брои');
+  {
+    const TWO = [
+      { id: 't1', title: 'Транспорт — Товарни листи — складове', category: OFFICE, url: 'https://x/t1.pdf', description: '' },
+      { id: 't2', title: 'Транспорт — Товарни листи — пълна справка', category: OFFICE, url: 'https://x/t2.pdf', description: '' },
+      { id: 't3', title: 'Транспорт — Трансфери — обекти', category: 'SAP', url: 'https://x/t3.pdf', description: '' },
+      { id: 't4', title: 'Стока на път — магазини', category: OFFICE, url: 'https://x/t4.pdf', description: '' }
+    ];
+    const hd = (doc, sel) => Array.from(doc.querySelectorAll('#doc-grid ' + sel)).map(x => x.textContent.replace(/^[▸▾]\s*/, '').trim());
+    for (const role of ['manager', 'accounting', 'admin']) {
+      const h = boot({ modules: ['docs.js'], user: USERS[role], data: { documents: TWO } });
+      h.w.docs = JSON.parse(JSON.stringify(TWO)); h.w.docFilter = 'all';
+      const { w, doc } = h;
+      guard(role + ': рендер', () => w.renderDocs());
+      const tr = doc.querySelector('#doc-grid .doc-group-hd[data-mod="Транспорт"]');
+      if (tr) guard(role + ': клик Транспорт', () => realClick(w, tr, '📂 Транспорт'));
+      const folders = hd(doc, '.doc-group-hd'), subsL = hd(doc, '.doc-sub-hd');
+      if (role === 'admin') {
+        ok('admin: папки Транспорт (3), Стока на път (1)', JSON.stringify(folders) === JSON.stringify(['📂 Транспорт (3)', '📂 Стока на път (1)']), JSON.stringify(folders));
+        ok('admin: подпапки Товарни листи (2), Трансфери (1)', JSON.stringify(subsL) === JSON.stringify(['📁 Товарни листи (2)', '📁 Трансфери (1)']), JSON.stringify(subsL));
+      } else {
+        ok(role + ': само папка Транспорт (1) — без „Стока на път"', JSON.stringify(folders) === JSON.stringify(['📂 Транспорт (1)']), JSON.stringify(folders));
+        ok(role + ': само подпапка Трансфери (1) — без „Товарни листи"', JSON.stringify(subsL) === JSON.stringify(['📁 Трансфери (1)']), JSON.stringify(subsL));
+        ok(role + ': нито дума от офисните в грида', ['складове', 'пълна справка', 'магазини', 'Товарни листи', 'Стока на път'].every(t => doc.getElementById('doc-grid').textContent.indexOf(t) < 0));
+      }
+    }
   }
 
   report();
