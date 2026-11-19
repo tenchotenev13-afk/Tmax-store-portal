@@ -12,7 +12,7 @@
         полета disabled, бележката видима); „💾 Запази" (реален клик) → PATCH
         САМО с comment + updated_by + updated_at (кой и кога); нов ред (submitTransit без editId) — отказ; офис —
         пълна форма, PATCH с всички полета;
-     в) формата: „🏭 От склад" / „🏬 От магазин" / „Друго (outgoing)",
+     в) формата: „🏭 От склад" / „🏬 От магазин" / „Друго (изходящо)",
         стойностите incoming / transfer / outgoing; няма „Получавам
         (incoming)" / „Трансфер между магазини" / „Прието"; подсказката на
         коментара е новата;
@@ -180,13 +180,13 @@ const FIELDS = ['tr-direction', 'tr-store', 'tr-supplier', 'tr-purchase-doc', 't
     const h = env(OFFICE);
     const dir = h.doc.getElementById('tr-direction');
     const opts = Array.from(dir.options).map(o => o.value + '=' + txt(o));
-    ok('Посока: incoming=🏭 От склад, transfer=🏬 От магазин, outgoing=Друго (outgoing)',
-      opts.join('|') === 'incoming=🏭 От склад|transfer=🏬 От магазин|outgoing=Друго (outgoing)', opts.join('|'));
+    ok('Посока: incoming=🏭 От склад, transfer=🏬 От магазин, outgoing=Друго (изходящо)',
+      opts.join('|') === 'incoming=🏭 От склад|transfer=🏬 От магазин|outgoing=Друго (изходящо)', opts.join('|'));
     const modal = txt(h.doc.getElementById('transit-modal'));
     ok('няма „Получавам (incoming)"', modal.indexOf('Получавам (incoming)') < 0);
     ok('няма „Трансфер между магазини"', modal.indexOf('Трансфер между магазини') < 0);
     ok('няма „Прието" / „Неприето" в опциите', !Array.from(h.doc.querySelectorAll('#transit-modal option')).some(o => /Прието|Неприето/.test(o.textContent)));
-    ok('подсказката на коментара: „напр. дойде непълно, чакаме второ пале"', h.doc.getElementById('tr-comment').getAttribute('placeholder') === 'напр. дойде непълно, чакаме второ пале', h.doc.getElementById('tr-comment').getAttribute('placeholder'));
+    ok('подсказката на коментара: „напр. дойде непълно, чакаме втори палет"', h.doc.getElementById('tr-comment').getAttribute('placeholder') === 'напр. дойде непълно, чакаме втори палет', h.doc.getElementById('tr-comment').getAttribute('placeholder'));
   }
 
   section('г) Значките в „Статус" се пренасят (не са nowrap)');

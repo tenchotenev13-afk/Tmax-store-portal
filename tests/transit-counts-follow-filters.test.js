@@ -95,7 +95,7 @@ function ref(data, f) {
       : (r.status === 'rejected' || r.reviewed_at) ? 'undelivered'
       : (!r.status || r.status === 'sent' || r.status === 'pending') ? 'pending' : r.status;
     const snt = r.sender_status === 'sent' || r.status === 'sent';
-    if (f.status === 'mine') { if (!(vp && snt && rs === 'pending' && r.store_name === vp)) return false; }
+    if (f.status === 'mine') { if (!(vp && snt && rs === 'pending' && !r.recon_at && r.store_name === vp)) return false; /* засечката е отговор (19.11.2026) */ }
     else if (f.status === 'snone') { if (snt) return false; }
     else if (f.status === 'ssent') { if (!snt) return false; }
     else if (f.status === 'recon') { if (!r.recon_at) return false; }

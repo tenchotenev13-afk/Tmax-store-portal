@@ -95,7 +95,7 @@ const shown = h => h.w._transitVisible.map(r => r.id).sort().join(',');
     const h = env(WAREHOUSE);
     const one = btn(h, 'a1', '📤 Изпратена');
     const all = btn(h, 'a1', '📤 Цялата доставка');
-    ok('„📤 Цялата доставка (2)" — само неотбелязаните от склада', !!all && /\(2\)/.test(all.textContent), all && all.textContent);
+    ok('„📤 Цялата доставка (2 неизпратени)" — само неотбелязаните от склада', !!all && /\(2 неизпратени\)/.test(all.textContent), all && all.textContent);
     ok('на изпратения a3 няма „Цялата доставка"', !btn(h, 'a3', '📤 Цялата доставка'));
     if (ok('„📤 Изпратена" на a1', !!one)) {
       realClick(h.w, one, 'Изпратена');

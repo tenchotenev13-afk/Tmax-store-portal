@@ -513,6 +513,7 @@ const TESTS = [
   'transit-auto-complete.test.js',
   'transit-auto-always.test.js',
   'transit-multi-hint.test.js',
+  'transit-nahodki-1811.test.js',
   'admin-reports.test.js',
   'report-recipients-only.test.js',
   'admin-who-gets.test.js',

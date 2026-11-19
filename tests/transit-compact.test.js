@@ -89,7 +89,7 @@ const S = a => a.slice().sort();
     const tab = Array.from(h.w.document.querySelectorAll('#mod-transit button')).find(b => /^setTDir\('all'\)/.test(b.getAttribute('onclick') || ''));
     const sub = tab.querySelector('div').textContent.trim();
     /* броят = редовете след клик с подразбирания чип на таба (pending → 6 реда, етап 3) */
-    ok('надписът на „Всички" е само броят „(6)", без „all"', sub === '(6)' && !/all/i.test(sub), sub);
+    ok('надписът на „Всички" е „(6 недоставени)", без „all" (19.11.2026: числото с дума)', sub === '(6 недоставени)' && !/all/i.test(sub), sub);
     h.w.transitSearch = 'ЛАМИНАТ'; h.w.renderTransit();
     ok('с търсене value е търсеният текст', h.w.document.getElementById('t-search').value === 'ЛАМИНАТ');
   }

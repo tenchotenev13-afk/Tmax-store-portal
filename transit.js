@@ -158,15 +158,22 @@ function transitCanMarkSent(r){
 function transitCanRecon(r){
   return transitCanMarkReceived(r)||transitCanMarkSent(r);
 }
+/* „🔍 Чака засечка" е ОТГОВОР (решение на Тенчо 18.11.2026): ред със засечка
+   не чака никого — нито получателя (банер, „📥 Чакат мен", скок при влизане),
+   нито изпращача (сивият ред „чакат получателя"). Чипът „🔍 Чака засечка",
+   статусът на реда и числото „N чакат" под таба „📥 Получавам" НЕ се пипат. */
+function transitAwaitsAnswer(r){
+  return !!r&&transitSenderSent(r)&&transitRecvStatus(r)==='pending'&&!r.recon_at;
+}
 /* Чака ли редът МЕН като получател: изпращачът го е изпратил, аз още не съм
    отговорил. Бутоните „✅ Доставена" / „✕ Недоставена" НЕ зависят от това —
    получателят може да отбележи и неизпратен ред. */
 function transitAwaitsMyReceive(r){
-  return !!r&&transitSenderSent(r)&&transitRecvStatus(r)==='pending'&&transitCanMarkReceived(r);
+  return transitAwaitsAnswer(r)&&transitCanMarkReceived(r);
 }
 /* Изпратени от мен, по които ходът е на получателя. */
 function transitAwaitsOther(r){
-  return !!r&&transitSenderSent(r)&&transitRecvStatus(r)==='pending'&&transitIsSenderOf(r)&&!transitIsReceiverOf(r);
+  return transitAwaitsAnswer(r)&&transitIsSenderOf(r)&&!transitIsReceiverOf(r);
 }
 /* Влизане в модула през навигацията (showModule) — НЕ при презареждане след
    клик. Има ли обектът трансфери за приемане, те са първото, което вижда:
@@ -214,7 +221,7 @@ function transitHasOwnViewpoint(){
    (04.11.2026) — по sender_status при всяка посока, не само transfer + 'sent'. */
 function transitAwaitsViewpoint(r){
   var vp=transitViewpoint();
-  return !!r&&!!vp&&transitSenderSent(r)&&transitRecvStatus(r)==='pending'&&r.store_name===vp;
+  return !!vp&&transitAwaitsAnswer(r)&&r.store_name===vp;
 }
 /* Чиповете по таб (етап 3): [ключ, надпис, клас]; '|' е разделител. */
 var TRANSIT_TAB_DEFAULT = { all:'pending', 'in':'pending', out:'snone' };
@@ -229,8 +236,20 @@ function transitChipsFor(dir,vp){
 function transitSenderIsStore(r){
   return !!(r&&r.supplier&&REAL_STORE_NAMES[r.supplier]);
 }
+/* Видът на изпращача (19.11.2026): склад (LOGISTICS_WAREHOUSES) → „От склад",
+   магазин → „От магазин", всичко останало (Сервиз Троян, Администрация…) →
+   „От <име>". Без емотикона — за Excel износа. До 19.11.2026 всеки
+   немагазин излизаше „От склад". */
+function transitSenderKindText(r){
+  if(transitSenderIsStore(r)) return 'От магазин';
+  var s=(r&&r.supplier)||'';
+  if(!s||LOGISTICS_WAREHOUSES.indexOf(s)>=0) return 'От склад';
+  return 'От '+s;
+}
 function transitSenderKindLabel(r){
-  return transitSenderIsStore(r)?'🏬 От магазин':'🏭 От склад';
+  var t=transitSenderKindText(r);
+  if(transitSenderIsStore(r)) return '🏬 '+t;
+  return (t==='От склад'?'🏭 ':'🏢 ')+t;
 }
 /* Баджът на реда: спрямо гледната точка („📥 Получавам" / „📤 Изпращам");
    без нея (офис без избран обект) — по вида на изпращача. */
@@ -240,7 +259,7 @@ function transitRowBadgeHtml(r,vp){
   if(vp&&r.supplier===vp)   return '<span class="t-badge" style="background:#f5f3ff;color:#7c3aed;'+S+'">📤 Изпращам</span>';
   return transitSenderIsStore(r)
     ? '<span class="t-badge" style="background:#fff7ed;color:#c2410c;'+S+'">'+transitSenderKindLabel(r)+'</span>'
-    : '<span class="t-badge" style="background:#f1f5f9;color:#334155;'+S+'">'+transitSenderKindLabel(r)+'</span>';
+    : '<span class="t-badge" style="background:#f1f5f9;color:#334155;'+S+'">'+esc(transitSenderKindLabel(r))+'</span>';
 }
 /* Най-ранната doc_date сред редовете като „дд.мм"; няма ли нито една — ''. */
 function transitOldestDocDdMm(rows){
@@ -562,7 +581,7 @@ function renderTransit(){
      „Всички" — получател „Все още недоставени"; „Получавам (N чакат)" —
      получател pending; „Изпращам (N за изпр.)" — изпращач „Неизпратени". */
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
-  [['all','📦📤 Всички',(transitData.length?'('+transitRows({dir:'all',status:TRANSIT_TAB_DEFAULT.all}).length+')':'')],
+  [['all','📦📤 Всички',(transitData.length?'('+transitRows({dir:'all',status:TRANSIT_TAB_DEFAULT.all}).length+' недоставени)':'')],
    ['in','📥 Получавам',_vp?'('+transitRows({dir:'in',status:TRANSIT_TAB_DEFAULT['in']}).length+' чакат)':''],
    ['out','📤 Изпращам',_vp?'('+transitRows({dir:'out',status:TRANSIT_TAB_DEFAULT.out}).length+' за изпр.)':'']].forEach(function(t){
     var active=transitDir===t[0];
@@ -591,6 +610,9 @@ function renderTransit(){
   /* Складът не е опция в собственото си меню - в базата има и случаен ред
      със store_name=склада, който иначе би го върнал. */
   if(transitOwnWarehouse())delete allStores[transitOwnWarehouse()];
+  /* Същото за обекта (19.11.2026): менюто е ДРУГАТА страна, а самият обект е
+     гледната точка — собственото име не е опция. Офисът вижда всички. */
+  if(!isGlobal()&&currentUser&&currentUser.store_name)delete allStores[currentUser.store_name];
   var allStoreList=Object.keys(allStores).sort(function(a,b){return a.localeCompare(b,'bg');});
   if(allStoreList.length>0){
     h+='<select onchange="setTStore(this.value)" style="border:1px solid #e2e8f0;border-radius:8px;padding:5px 10px;font-size:12px;font-family:inherit;">';
@@ -720,7 +742,7 @@ function renderTransit(){
           h+='<button data-id="'+r.id+'" data-side="send" onclick="tMarkSender(this.dataset.id,\'sent\')" style="border:none;background:#7c3aed;color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15);'+BTN+'">📤 Изпратена</button>';
           var nDel=r.inbound_delivery?(_vdUnsent[transitVdSupKey(r)]||0):0;
           if(nDel>1){
-            h+='<button data-id="'+r.id+'" data-side="send" onclick="tMarkDeliverySent(this.dataset.id)" title="Всички неизпратени редове от ВД '+esc(r.inbound_delivery)+' на '+esc(r.supplier||'')+'" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;'+BTN+'">📤 Цялата доставка ('+nDel+')</button>';
+            h+='<button data-id="'+r.id+'" data-side="send" onclick="tMarkDeliverySent(this.dataset.id)" title="Всички неизпратени редове от ВД '+esc(r.inbound_delivery)+' на '+esc(r.supplier||'')+'" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;'+BTN+'">📤 Цялата доставка ('+nDel+' неизпратени)</button>';
           }
         } else {
           h+='<button data-id="'+r.id+'" data-side="send" onclick="tMarkSender(this.dataset.id,null)" style="'+BACK+'">↩ Върни изпращането</button>';
@@ -1024,7 +1046,7 @@ function exportTransitExcel(){
   transitData.forEach(function(r){
     rows.push([
       /* „Посока" по вида на изпращача (етап 2), не по direction от импорта. */
-      transitSenderIsStore(r)?'От магазин':'От склад',
+      transitSenderKindText(r),
       r.store_name||'',r.supplier||'',r.purchase_doc||'',r.position||'',
       r.inbound_delivery||'',r.outbound_delivery?transitStripZeros(r.outbound_delivery):'',
       r.doc_date||'',r.material_code||'',r.material_name||'',
@@ -1076,7 +1098,7 @@ function transitModalHtml(){
            както баджа на реда („🏭 От склад" / „🏬 От магазин"). */
         '<option value="incoming">🏭 От склад</option>'+
         '<option value="transfer">🏬 От магазин</option>'+
-        '<option value="outgoing">Друго (outgoing)</option>'+
+        '<option value="outgoing">Друго (изходящо)</option>'+
       '</select></div>'+
     '<div><label class="fl">Магазин *</label>'+
       '<select class="fi" id="tr-store">'+
@@ -1102,7 +1124,7 @@ function transitModalHtml(){
         '<option value="undelivered">'+T_STATUS.undelivered.label+'</option>'+
       '</select></div>'+
     /* Статусите се отбелязват с бутоните на реда, не с текст в коментара. */
-    '<div style="grid-column:1/-1;"><label class="fl">Коментар</label><input class="fi" id="tr-comment" placeholder="напр. дойде непълно, чакаме второ пале"></div>'+
+    '<div style="grid-column:1/-1;"><label class="fl">Коментар</label><input class="fi" id="tr-comment" placeholder="напр. дойде непълно, чакаме втори палет"></div>'+
     '<div id="tr-comment-only-note" style="display:none;grid-column:1/-1;font-size:12px;color:#64748b;">Можете да промените само коментара. Статусите се отбелязват с бутоните на реда; останалите данни поправя офисът.</div>'+
     '</div>'+
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;">'+
@@ -1784,12 +1806,12 @@ function renderTransitImportPreview(plan){
 
     /* Outgoing */
     '<div>'+
-    '<div style="font-size:12px;font-weight:700;color:#7c3aed;margin-bottom:8px;">📤 ИЗПРАЩАМ (outgoing) — '+sum(outgoing)+' реда</div>'+
+    '<div style="font-size:12px;font-weight:700;color:#7c3aed;margin-bottom:8px;">📤 ИЗПРАЩАМ (изходящи) — '+sum(outgoing)+' реда</div>'+
     '<div style="max-height:200px;overflow-y:auto;border:1px solid #e9d5ff;border-radius:8px;">'+
     '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
     (outgoing.length?outgoing.map(function(r){
       return '<tr style="border-bottom:1px solid #faf5ff;"><td style="padding:5px 10px;font-weight:500;">'+esc(r.store)+'</td><td style="padding:5px 10px;text-align:right;color:#7c3aed;font-weight:600;">'+r.count+'</td></tr>';
-    }).join(''):'<tr><td style="padding:10px;color:#94a3b8;text-align:center;">Няма outgoing записи</td></tr>')+
+    }).join(''):'<tr><td style="padding:10px;color:#94a3b8;text-align:center;">Няма изходящи записи</td></tr>')+
     '</table></div></div>'+
     '</div>'+
 

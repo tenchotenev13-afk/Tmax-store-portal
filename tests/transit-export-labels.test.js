@@ -10,7 +10,7 @@ const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, ok, guard, section, report } = H;
 
 const row = (id, direction, status) => ({
-  id, direction, status, store_name: 'Троян', supplier: direction === 'transfer' ? 'Добрич' : 'Склад', purchase_doc: 'D' + id,
+  id, direction, status, store_name: 'Троян', supplier: direction === 'transfer' ? 'Добрич' : 'Логистичен склад Добрич', purchase_doc: 'D' + id,
   position: '10', doc_date: '2026-09-01', material_code: 'M' + id, material_name: 'Стока ' + id,
   ordered_qty: 1, unit: 'бр.', remaining_qty: 1, transfer_date: null, comment: '', updated_by: '', updated_at: null
 });
