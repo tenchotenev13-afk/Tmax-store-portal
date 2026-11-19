@@ -69,7 +69,7 @@ const T = {
   /* Етап 6б (18.11.2026): излишък + return → текстът по категория. */
   n4: [line('n4', 'excess', { warehouse_response: 'return' }), 'Ход: обекта — да пусне заявка ZSTR тип 4 или да отбележи, че няма наличност в логистика'],
   n5: [line('n5', 'excess', { warehouse_response: 'return', store_response: 'sap_done' }), 'Ход: склада — „📬 Прието обратно“'],
-  n6: [line('n6', 'excess', { warehouse_response: 'return', store_response: 'no_stock', store_response_comment: 'няма' }), 'Ход: ЦО — складът и обектът нямат следващ ход'],
+  n6: [line('n6', 'excess', { warehouse_response: 'return', store_response: 'no_stock', store_response_comment: 'няма' }), 'Ход: ЦО — или складът, ако оправи наличността'],
   n8: [line('n8', 'undelivered'), 'Ход: по размяната']
 };
 const N7 = line('n7', 'undelivered', { status: 'received', warehouse_response: 'sent', store_response: 'accepted', completed_by: 'Карлово', completed_at: '2026-11-16T10:00:00Z' });

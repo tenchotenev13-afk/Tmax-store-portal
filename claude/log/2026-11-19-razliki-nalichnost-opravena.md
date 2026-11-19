@@ -1,0 +1,10 @@
+# 19.11 — razliki-nalichnost-opravena
+
+Етап 6б на Разлики — бутон за склада „✅ Наличността е оправена — пуснете заявката пак“ на междускладов ред return + no_stock (решения т.4 от срещата 12.11; писмо на Миглена 20.10). Само `stock-differences.js` + нов тест. Без схема и без миграция → без rollback и без ред за Живко.
+
+- `sdCanStockFixed` (бутон + защита в обработчика), `sdStockFixedBtnHtml` (под надписа на обекта в `sdInterstoreConfirmButton`), `openSDStockFixedModal`, `sdStockFixedComment`, `submitSDStockFixed`. Един PATCH: store_response* → null, warehouse_comment дописан; warehouse_response не се праща. Push до обекта, провал → жълт toast; провален PATCH → червен toast, паметта непокътната.
+- Правило 7 (по кода): след записа `sdInterstoreTurn` → обекта (без промяна), `diffLineWaitsStore` → true (банер, бадж, Бюлетин, `stock_diff_store_done` — ходът е на обекта), `sdWhChipKind` → null, баджът на склада не го брои, report.js / send-scheduled-report → „чака обекта“ вместо „чака ЦО / регионалния“, „Днес“ — същото (collectCrossModuleWeeklySummary), Excel — без отговор на обекта, коментарът на склада с новия ред. Нищо не брои грешно.
+- База 19.11: 17 реда, всички Логистичен склад Търговище / excess, най-старият 20.10, 0 с размяна.
+- Функции stock-differences.js 344 → 349. Тест `tests/razliki-nalichnost-opravena.test.js` (59 проверки). Мутанти: бутонът и без no_stock 4 ❌, коментарът се презаписва 1 ❌, store_response не се нулира 8 ❌ — всички exit 1.
+- Текст на хода за return + no_stock (решение на Тенчо 19.11, едно място — sdInterstoreTurn): „Ход: ЦО — или складът, ако оправи наличността“; who остава co, чипът „🏢 Ход: ЦО“ не е пипан. Текстът стига само до картата (sdInterstoreTurnHtml); report.js / send-scheduled-report имат свое правило, което връща само кой е на ход — co → „офис“, не текста; „Днес“ ползва отчетите; push и Excel — свои низове. Очакването — обновено в razliki-etap6a, razliki-etap6b и новия тест.
+- Комит: SHA — след комита.

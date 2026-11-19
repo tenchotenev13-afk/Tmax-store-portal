@@ -1520,9 +1520,78 @@ function sdInterstoreConfirmButton(l, rep){
     }
     var isMyWh = isLogisticsWarehouseUser() && rep.counterpart===currentUser.store_name;
     var lbl = sdStoreResponseLabel(l);
-    return (isMyWh && l.store_response==='sap_done') ? lbl+mk('📬 Прието обратно','#7c3aed','warehouse') : lbl;
+    return ((isMyWh && l.store_response==='sap_done') ? lbl+mk('📬 Прието обратно','#7c3aed','warehouse') : lbl)+sdStockFixedBtnHtml(l, rep);
   }
   return '';
+}
+/* ══ Етап 6б, бутон „✅ Наличността е оправена“ (19.11.2026; решения т.4 от
+   срещата 12.11; писмо на Миглена 20.10 — задънена улица) ══
+   return + обектът „⛔ Няма наличност“ = „Ход: ЦО“ и складът нямаше бутон.
+   Складът на бланката оправя наличността и връща хода на обекта: store_response*
+   се нулират, warehouse_response остава 'return', историята се дописва в
+   warehouse_comment. ЕДНО правило — за бутона и за защитата в обработчика. */
+function sdCanStockFixed(l, rep){
+  if(!currentUser || !l || !rep || rep.direction !== 'interstore' || l.status === 'received' || sdIsLateReceive(l)) return false;
+  if(sdLineRoutedHere(l, rep) || sdLineHasOpenSwap(l)) return false;
+  if(l.warehouse_response !== 'return' || l.store_response !== 'no_stock') return false;
+  return isLogisticsWarehouseUser() && rep.counterpart === currentUser.store_name;
+}
+var SD_STOCK_FIXED_LBL = '✅ Наличността е оправена — пуснете заявката пак';
+function sdStockFixedBtnHtml(l, rep){
+  if(!sdCanStockFixed(l, rep)) return '';
+  return '<div style="margin-top:3px;"><button class="sd-stock-fixed" data-lid="'+l.id+'" onclick="openSDStockFixedModal(this.dataset.lid)" style="border:none;background:#16a34a;color:#fff;border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:normal;text-align:left;">'+SD_STOCK_FIXED_LBL+'</button></div>';
+}
+function openSDStockFixedModal(lineId){
+  var l = sdData.find(function(x){ return String(x.id) === String(lineId); });
+  var rep = l ? diffReports.find(function(x){ return x.id === l.report_id; }) : null;
+  if(!l || !sdCanStockFixed(l, rep)) return;
+  var old = document.getElementById('sdfix-ov'); if(old) old.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdfix-ov"><div class="bmod" style="width:400px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+SD_STOCK_FIXED_LBL+'</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+esc(rep.store_name||'')+' · '+esc(l.material_code||'')+' · '+esc(l.material_name||'')+'</div>'+
+    '<div style="font-size:12px;color:#1e293b;margin-bottom:12px;">Обектът отново ще види „ЗАЯВКАТА Е ПУСНАТА“ / „НЯМА НАЛИЧНОСТ В ЛОГИСТИКА“ и ще отговори наново.</div>'+
+    '<label class="fl">Коментар към обекта (по избор)</label>'+
+    '<textarea class="fi" id="sdfix-comment" rows="2"></textarea>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'sdfix-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button id="sdfix-save" data-lid="'+l.id+'" onclick="submitSDStockFixed(this.dataset.lid)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✅ Потвърди</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+/* Новият ред в warehouse_comment — досегашният коментар (ако има) остава отгоре. */
+function sdStockFixedComment(l, by, at, comment){
+  var line = '✅ Наличността е оправена '+sdFmtDayMonth(at)+' ('+by+') — обектът беше отговорил „Няма наличност“'+
+    (l.store_response_at ? ' '+sdFmtDayMonth(l.store_response_at) : '')+
+    (String(l.store_response_comment||'').trim() ? ': '+String(l.store_response_comment).trim() : '')+
+    (comment ? ' · '+comment : '');
+  var prev = String(l.warehouse_comment||'').trim();
+  return prev ? prev+'\n'+line : line;
+}
+function submitSDStockFixed(lineId){
+  var line = sdData.find(function(x){ return String(x.id) === String(lineId); });
+  var rep = line ? diffReports.find(function(x){ return x.id === line.report_id; }) : null;
+  if(!line || !sdCanStockFixed(line, rep)) return Promise.resolve(false);
+  var el = document.getElementById('sdfix-comment');
+  var comment = el ? String(el.value || '').trim() : '';
+  sdKeepScroll(line.report_id);
+  var at = new Date().toISOString(), by = sdActor();
+  var data = { store_response: null, store_response_by: null, store_response_at: null, store_response_comment: null,
+    warehouse_comment: sdStockFixedComment(line, by, at, comment) };
+  return sbPatch('stock_differences', 'id=eq.' + line.id, data).then(function(res){
+    if(!res.ok){ toast('Грешка при запис','#dc2626'); return false; }
+    var ov = document.getElementById('sdfix-ov'); if(ov) ov.remove();
+    Object.assign(line, data);
+    toast('✅ Записано — ходът е при обекта');
+    var msg = 'Наличността е оправена — пуснете заявката пак: '+(line.material_code||'')+' '+(line.material_name||'');
+    var p;
+    try{ p = typeof pushInterstoreDiff === 'function' ? pushInterstoreDiff(rep.store_name, '✅ Разлика: наличността е оправена', msg) : null; }catch(e){ p = null; }
+    loadStockDiff();
+    return Promise.resolve(p).then(function(r){ return !!(r && r.ok); }, function(){ return false; }).then(function(ok){
+      if(!ok) toast('⚠️ Записано, но известието до обекта не тръгна','#d97706');
+      return true;
+    });
+  });
 }
 /* Push до отсрещната страна по междускладов ред. Fire-and-forget: вика се
    след успешен запис и след toast-а на действието, не се чака, грешка в него
@@ -1663,7 +1732,7 @@ function sdInterstoreTurn(l, rep){
       return { who: 'store', text: 'обекта — да пусне движението в SAP или да отбележи, че няма наличност' };
     }
     if(s === 'sap_done') return { who: 'warehouse', text: 'склада — „📬 Прието обратно“' };
-    if(s === 'no_stock') return { who: 'co', text: 'ЦО — складът и обектът нямат следващ ход' };
+    if(s === 'no_stock') return { who: 'co', text: 'ЦО — или складът, ако оправи наличността' };
   }
   return null;
 }
