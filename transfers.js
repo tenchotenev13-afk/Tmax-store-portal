@@ -98,6 +98,15 @@ function tfKindLabel(k) {
   for (var i = 0; i < TF_KINDS.length; i++) if (TF_KINDS[i][0] === k) return TF_KINDS[i][1];
   return k || '';
 }
+/* Видът на ред от товарен лист (списъкът „Ред от товарен лист" за склад).
+   Видовете там са тези на loading.js (pallet / oversize / roll / bulk), не
+   TF_KINDS — „извънгабаритен" НЕ е вид товар в трансферите. Думата идва от
+   LL_KIND_WORD (loading.js, зарежда се преди този файл), с главна буква като
+   „Палет"; резервът е за случай без loading.js. Насип → tfKindLabel (19.11.2026). */
+function tfLlKindLabel(k) {
+  var w = (typeof LL_KIND_WORD !== 'undefined' && LL_KIND_WORD && LL_KIND_WORD[k]) || (k === 'oversize' ? 'извънгабаритен' : '');
+  return w ? w.charAt(0).toUpperCase() + w.slice(1) : tfKindLabel(k);
+}
 
 /* ── Обекти ──────────────────────────────────────────────────────────────── */
 
@@ -637,7 +646,7 @@ function tfLoadLinkOptions() {
       return { id: o.id, label: (o.date ? fmtDate(o.date) + ' · ' : '') + (o.customer_name || '') + (o.address ? ' · ' + o.address : '') };
     });
     tfLlOpts = (isWh && Array.isArray(r[2]) ? r[2] : []).map(function (it) {
-      return { id: it.id, label: fmtDate(it._date) + ' · ' + it.store_name + ' · ' + tfKindLabel(it.kind) +
+      return { id: it.id, label: fmtDate(it._date) + ' · ' + it.store_name + ' · ' + tfLlKindLabel(it.kind) +
         (it.pallet_no ? ' ' + it.pallet_no + (it.pallet_total ? '/' + it.pallet_total : '') : '') +
         (it.purchase_doc ? ' · ' + it.purchase_doc : '') };
     });

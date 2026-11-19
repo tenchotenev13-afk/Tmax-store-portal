@@ -470,6 +470,7 @@ const TESTS = [
   'trf-edit-plate.test.js',
   'transfers-co-label.test.js',
   'transfers-labels.test.js',
+  'transfers-oversize-label.test.js',
   'transfers-units.test.js',
   'transfer-loading-print-checked.test.js',
   'transfers-card-note.test.js',
