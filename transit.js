@@ -578,11 +578,14 @@ function renderTransit(){
      Клик на таб НУЛИРА чипа към подразбирания за таба (етап 3, 04.11.2026 —
      „Чакат мен" оставаше избран в „Изпращам" и таблицата беше празна), затова
      числото под таба = редовете след клик с подразбирания чип:
-     „Всички" — получател „Все още недоставени"; „Получавам (N чакат)" —
-     получател pending; „Изпращам (N за изпр.)" — изпращач „Неизпратени". */
+     „Всички" — получател „Все още недоставени"; „Получавам (N недоставени)" —
+     получател pending; „Изпращам (N за изпр.)" — изпращач „Неизпратени".
+     До 19.11.2026 „Получавам (N чакат)" — решение на Тенчо: „чакат" обещаваше
+     същото като банера и „📥 Чакат мен", а те броят друго (без засечката и
+     без неизпратените). Числото не е променено. */
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
   [['all','📦📤 Всички',(transitData.length?'('+transitRows({dir:'all',status:TRANSIT_TAB_DEFAULT.all}).length+' недоставени)':'')],
-   ['in','📥 Получавам',_vp?'('+transitRows({dir:'in',status:TRANSIT_TAB_DEFAULT['in']}).length+' чакат)':''],
+   ['in','📥 Получавам',_vp?'('+transitRows({dir:'in',status:TRANSIT_TAB_DEFAULT['in']}).length+' недоставени)':''],
    ['out','📤 Изпращам',_vp?'('+transitRows({dir:'out',status:TRANSIT_TAB_DEFAULT.out}).length+' за изпр.)':'']].forEach(function(t){
     var active=transitDir===t[0];
     h+='<button onclick="setTDir(\''+t[0]+'\')" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';

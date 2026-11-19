@@ -175,7 +175,8 @@ const shown = h => h.w._transitVisible.map(r => r.id).sort().join(',');
        Без него двете числа съвпадат случайно и мутант X4 оцелява (проверено 04.11). */
     const h = env(WAREHOUSE, DATA.concat([row('e2', { status: 'received' })]));
     ok('„Изпращам (N за изпр.)" = неизпратени от склада (a1, a2, d1, e2 = 4), не получател pending (3)', tabNum(h, 'out') === 4, tabNum(h, 'out'));
-    ok('„Получавам (N чакат)" = получател pending (c1 = 1)', tabNum(h, 'in') === 1, tabNum(h, 'in'));
+    ok('„Получавам (N недоставени)" = получател pending (c1 = 1)', tabNum(h, 'in') === 1, tabNum(h, 'in'));
+    ok('надписът е „(1 недоставени)", без „чакат" (19.11.2026)', /\(1 недоставени\)/.test(tabBtn(h, 'in').textContent) && !/чакат/.test(tabBtn(h, 'in').textContent), tabBtn(h, 'in').textContent);
     realClick(h.w, tabBtn(h, 'out'), 'Изпращам');
     ok('клик на „Изпращам" → чип „📭 Неизпратени"', h.w.transitFilter === 'snone' && shown(h) === 'a1,a2,d1,e2', h.w.transitFilter + ' / ' + shown(h));
     const keys = Array.from(mod(h).querySelectorAll('[data-tt-f]')).map(b => b.getAttribute('data-tt-f')).join(',');

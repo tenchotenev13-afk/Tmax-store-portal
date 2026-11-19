@@ -368,7 +368,7 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
     const cnt = h.doc.getElementById('t-review-counter');
     ok('броячът на обекта: необработени 1 (без архива)', !!cnt && /необработени 1/.test(cnt.textContent), cnt && cnt.textContent);
     ok('„✕ Всички чакащи — недоставени (1)"', !!btn(mod(), 'Всички чакащи — недоставени (1)'));
-    ok('табът „Получавам" брои 1 чакащ', /\(1 чакат\)/.test(mod().textContent));
+    ok('табът „Получавам" брои 1 недоставен', /\(1 недоставени\)/.test(mod().textContent));
     const ach = chip('archive');
     ok('чипът „🗄 Архив" брои 1', !!ach && ach.textContent === '1', ach && ach.textContent);
     const archBtn = mod().querySelector('[data-tt-f="archive"]');

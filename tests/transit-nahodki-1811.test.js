@@ -9,7 +9,8 @@
    1. Обект Монтана: жълтият банер (t-recv-note), чипът „📥 Чакат мен" и скокът
       при влизане НЕ броят редовете със засечка; сивият ред „ваши изпратени
       реда чакат получателя" (t-other-note) — също. Чипът „🔍 Чака засечка" и
-      числото „N чакат" под таба „📥 Получавам" ги БРОЯТ, както досега.
+      числото под таба „📥 Получавам (N недоставени)" ги БРОИ, както досега
+      (надписът до 19.11.2026 — „N чакат", виж раздел 1д).
       Клик „↩ Махни засечка" → редът се връща в банера и в „Чакат мен".
    2. Табът „📦📤 Всички" — „(N недоставени)", същото N.
    3. „📤 Цялата доставка (N неизпратени)"; кликът праща същия PATCH (ВД +
@@ -28,6 +29,7 @@
    M2 „Друго (outgoing)" в формата;
    M3 без изтриването на собствения обект от менюто;
    M4 transitSenderKindText → всеки немагазин „От склад" (старото правило).
+   M5 (сесия transit-tab-nadpis) върнато „ чакат)" на таба „Получавам".
    Оцелели мутанти: няма.
 
    Пускане: node tests/transit-nahodki-1811.test.js . */
@@ -131,7 +133,7 @@ const storeOpts = h => { const s = mod(h).querySelector('select[onchange^="setTS
         ['r4', 'r5'].every(id => !!mod(h).querySelector('button[data-id="' + id + '"]')) &&
         ['r1', 'r2', 'r3'].every(id => !mod(h).querySelector('button[data-id="' + id + '"]')));
       ok('чипът „🔍 Чака засечка" още ги брои (3)', chipN(h, 'recon') === 3, txt(chip(h, 'recon')));
-      ok('„📥 Получавам (5 чакат)" — непроменено, броят и засечката', tabSub(h, 'in') === '(5 чакат)', tabSub(h, 'in'));
+      ok('„📥 Получавам (5 недоставени)" — числото непроменено, брои и засечката', tabSub(h, 'in') === '(5 недоставени)', tabSub(h, 'in'));
       const o = h.doc.getElementById('t-other-note');
       ok('t-other-note: 1 ваш изпратен ред (без реда със засечка)', !!o && txt(o) === '📤 1 ваш изпратен ред чака получателя.', txt(o));
 
@@ -146,7 +148,7 @@ const storeOpts = h => { const s = mod(h).querySelector('select[onchange^="setTS
         ok('банерът вече брои 3', !!b2 && txt(b2.querySelector('b')) === '3', txt(b2));
         ok('„📥 Чакат мен" = 3', chipN(h, 'mine') === 3, txt(chip(h, 'mine')));
         ok('„🔍 Чака засечка" = 2', chipN(h, 'recon') === 2, txt(chip(h, 'recon')));
-        ok('„Получавам (5 чакат)" — пак 5', tabSub(h, 'in') === '(5 чакат)', tabSub(h, 'in'));
+        ok('„Получавам (5 недоставени)" — пак 5', tabSub(h, 'in') === '(5 недоставени)', tabSub(h, 'in'));
       }
 
       section('2. „📦📤 Всички (N недоставени)"');
@@ -195,6 +197,22 @@ const storeOpts = h => { const s = mod(h).querySelector('select[onchange^="setTS
     if (h) {
       ok('без t-recv-note', !h.doc.getElementById('t-recv-note'));
       ok('без скок в „Чакат мен"', h.w.transitFilter !== 'mine', h.w.transitDir + '/' + h.w.transitFilter);
+      h.close();
+    }
+  }
+
+  section('1д. Таб „Получавам (N недоставени)" — 3 изпратени реда, всички със засечка (решение 19.11.2026)');
+  {
+    seq = 0;
+    const h = await open(STORE_USER, [row(RECON), row(RECON), row(RECON)]);
+    if (h) {
+      ok('банер няма', !h.doc.getElementById('t-recv-note'));
+      realClick(h.w, tabBtn(h, 'in')); await settle(5);
+      ok('„📥 Чакат мен" = 0', chipN(h, 'mine') === 0, txt(chip(h, 'mine')));
+      ok('табът „(3 недоставени)", без „чакат"', tabSub(h, 'in') === '(3 недоставени)', tabSub(h, 'in'));
+      ok('кликът на таба → чип „⏳ Все още недоставени"', h.w.transitFilter === 'pending', h.w.transitFilter);
+      ok('… и точно 3 реда в таблицата', h.w._transitVisible.length === 3 &&
+        ['r1', 'r2', 'r3'].every(id => !!mod(h).querySelector('button[data-id="' + id + '"]')), h.w._transitVisible.length);
       h.close();
     }
   }

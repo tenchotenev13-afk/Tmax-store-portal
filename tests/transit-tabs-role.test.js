@@ -30,7 +30,7 @@
      M4 сверката не праща direction                             → ❌ д)
      M5 transitApplyOpenFocus пак към 'transfer'                → ❌ е)
    04.11.2026 (складът и „чака гледната точка"):
-     W1 „Получавам (N чакат)" без изпратените към гледната точка → ❌ з)
+     W1 „Получавам (N недоставени)" без изпратените към гледната точка → ❌ з)
      W2 банерът само за обекта (isGlobal)                        → ❌ з)
      W3 скокът при влизане само за обекта                         → ❌ з)
      W4 чипът „Чакат мен" само за обекта                          → ❌ з)
@@ -135,7 +135,7 @@ const tabNum = (h, key) => { const b = tabBtn(h, key); const m = b && /\((\d+) /
     const nin = tabNum(h, 'in'), nout = tabNum(h, 'out');
     /* Само кликът на таба — той слага подразбирания чип (етап 3). */
     realClick(h.w, tabBtn(h, 'in'), 'in');
-    ok('„Получавам (N чакат)" = редовете след клик (чип „Все още недоставени", 2)', nin === 2 && h.w.transitFilter === 'pending' && h.w._transitVisible.length === nin,
+    ok('„Получавам (N недоставени)" = редовете след клик (чип „Все още недоставени", 2)', nin === 2 && h.w.transitFilter === 'pending' && h.w._transitVisible.length === nin,
       nin + ' / ' + h.w._transitVisible.length + ' / ' + h.w.transitFilter);
     realClick(h.w, tabBtn(h, 'out'), 'out');
     ok('„Изпращам (N за изпр.)" = редовете след клик (чип „Неизпратени", 2)', nout === 2 && h.w.transitFilter === 'snone' && h.w._transitVisible.length === nout,
@@ -232,7 +232,8 @@ const tabNum = (h, key) => { const b = tabBtn(h, key); const m = b && /\((\d+) /
     ];
     const h = env(WAREHOUSE, data);
     h.w.transitDir = 'in'; h.w.renderTransit();   /* „Чакат мен" е чип на „Получавам" (етап 3) */
-    ok('„Получавам (3 чакат)" = 1 pending + 2 sent към склада', tabNum(h, 'in') === 3, tabNum(h, 'in'));
+    ok('„Получавам (3 недоставени)" = 1 pending + 2 sent към склада', tabNum(h, 'in') === 3, tabNum(h, 'in'));
+    ok('надписът е „(3 недоставени)" (19.11.2026)', /\(3 недоставени\)/.test(tabBtn(h, 'in').textContent), tabBtn(h, 'in').textContent);
     const chip = mod(h).querySelector('[data-tt-f="mine"]');
     ok('чипът „📥 Чакат мен" е там и казва 2', !!chip && /Чакат мен\s*2/.test(chip.textContent), chip && chip.textContent);
     const ban = h.doc.getElementById('t-recv-note');
@@ -257,7 +258,7 @@ const tabNum = (h, key) => { const b = tabBtn(h, key); const m = b && /\((\d+) /
 
     /* Обектът — без промяна: числата са като преди. */
     const hs = env(STORE);
-    ok('обект Раднево: „Получавам (2 чакат)" и „Изпращам (2 за изпр.)" както преди', tabNum(hs, 'in') === 2 && tabNum(hs, 'out') === 2,
+    ok('обект Раднево: „Получавам (2 недоставени)" и „Изпращам (2 за изпр.)" както преди', tabNum(hs, 'in') === 2 && tabNum(hs, 'out') === 2,
       tabNum(hs, 'in') + ' / ' + tabNum(hs, 'out'));
   }
 
