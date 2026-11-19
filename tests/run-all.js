@@ -560,7 +560,8 @@ const TESTS = [
   'preocenka-buletin-vrazka.test.js',
   'preocenka-dovarshvane.test.js',
   'co-comment-pending.test.js',
-  'korekcii-1511.test.js'
+  'korekcii-1511.test.js',
+  'publish-instrukcii.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

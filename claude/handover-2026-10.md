@@ -1776,6 +1776,17 @@ processed пак нулира `co_note` (shared.js). НЕ влиза: извес
 при нов коментар; показване в имейл отчетите (`send-scheduled-report` чете
 `co_note` само за processed) и в „Днес". Проверка на живо — `claude/open/12-11-co-komentar-izchakva-live.md`.
 
+**Инструкции в портала — качване с команда (сесия instrukcii-publish, 19.11):**
+`npm run instrukcii` (сухо) / `npm run instrukcii -- --go` качва PDF-ите от
+`%USERPROFILE%DocumentsTemax-instrukcii` по списъка `tools/instrukcii.json` на
+постоянни пътища `instrukcii/<модул>-<роля>.pdf` в bucket `docs` и държи по една
+карта в `documents` (PATCH, INSERT само ако няма). Без схема, без docs.js.
+**Компромис (решение на Тенчо 19.11.2026):** „Само за офиса“ крие само картата;
+bucket-ът е публичен и файлът се отваря от всеки с адреса, без вход, а
+постоянните пътища са лесни за отгатване. Прието — в инструкциите няма лични
+данни. Първо истинско качване и проверка на живо —
+`claude/open/19-11-instrukcii-publish-parvo-kachvane.md`.
+
 ## 6. Отворени точки → виж claude/open/ (npm run open). Затворени — claude/open/closed/.
 
 ## 7. Бизнес факти, които лесно се губят

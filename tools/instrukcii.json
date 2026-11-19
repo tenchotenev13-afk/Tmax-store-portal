@@ -1,0 +1,13 @@
+[
+  { "file": "Товарни-листи-складове.pdf", "path": "instrukcii/tovarni-listi-skladove.pdf", "title": "Товарни листи — складове", "category": "Само за офиса", "description": "Кратка инструкция за складове" },
+  { "file": "Товарни-листи-обекти.pdf", "path": "instrukcii/tovarni-listi-obekti.pdf", "title": "Товарни листи — обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
+  { "file": "Товарни-листи-инструкция.pdf", "path": "instrukcii/tovarni-listi-palna.pdf", "title": "Товарни листи — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
+  { "file": "Стока-на-път-магазини.pdf", "path": "instrukcii/stoka-na-pat-magazini.pdf", "title": "Стока на път — магазини", "category": "Само за офиса", "description": "Кратка инструкция за магазини" },
+  { "file": "Стока-на-път-складове.pdf", "path": "instrukcii/stoka-na-pat-skladove.pdf", "title": "Стока на път — складове", "category": "Само за офиса", "description": "Кратка инструкция за складове" },
+  { "file": "Стока-на-път-инструкция.pdf", "path": "instrukcii/stoka-na-pat-palna.pdf", "title": "Стока на път — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
+  { "file": "Клиентски-заявки-в-товарния-лист-складове.pdf", "path": "instrukcii/kz-tovaren-list-skladove.pdf", "title": "Клиентски заявки в товарния лист — складове", "category": "Само за офиса", "description": "Кратка инструкция за складове" },
+  { "file": "Клиентски-заявки-в-товарния-лист-обекти.pdf", "path": "instrukcii/kz-tovaren-list-obekti.pdf", "title": "Клиентски заявки в товарния лист — обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
+  { "file": "Клиентски-заявки-в-товарния-лист-инструкция.pdf", "path": "instrukcii/kz-tovaren-list-palna.pdf", "title": "Клиентски заявки в товарния лист — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
+  { "file": "Трансфери-обекти.pdf", "path": "instrukcii/transferi-obekti.pdf", "title": "Трансфери — обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
+  { "file": "Трансфери-инструкция.pdf", "path": "instrukcii/transferi-palna.pdf", "title": "Трансфери — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" }
+]

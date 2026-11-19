@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node tests/run-all.js",
     "brief": "node tools/brief.js",
-    "open": "node tools/open.js"
+    "open": "node tools/open.js",
+    "instrukcii": "node tools/publish-instrukcii.js"
   }
 }
