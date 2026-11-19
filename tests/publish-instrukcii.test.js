@@ -13,12 +13,23 @@
         → пада „обратното четене се разминава → без карта".
      M5 (19.11.2026) validateTitles не проверява подтаба (`if (false)`)
         → пада „Заглавията — табове и подтабове от портала".
+   Втори кръг (19.11.2026, проверката е по /object/info/, не по изтегляне —
+   изтеглянето минава през кеша на Cloudflare):
+     M6 проверката след качване през изтегляне от /authenticated/
+        → пада „eTag ≠ MD5 → без карта" (кешът дава „качено" вместо грешка);
+     M7 сравнението преди качване през изтегляне от /authenticated/
+        → пада „Сухо: кешът не решава „същият / различен"";
+     M8 eTag-ът се сравнява с кавичките → нищо не излиза „същото",
+        проверката след качване пада винаги;
+     M9 пропусната проверка след качване (`if (false)`) → пада „eTag ≠ MD5";
+     M10 сравнение само по размер → пада „Същият размер, различен MD5".
    Оцелели мутанти: няма.
 */
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const P = require(path.join(ROOT, 'tools', 'publish-instrukcii.js'));
@@ -62,14 +73,24 @@ function fakeSb(o) {
       arrayBuffer: function () { const b = isBuf ? body : Buffer.from(String(body)); return Promise.resolve(b.buffer.slice(b.byteOffset, b.byteOffset + b.length)); }
     });
   }
+  // cdn: { path: Buffer } — каквото Cloudflare връща при ИЗТЕГЛЯНЕ (cf=HIT),
+  // независимо от хранилището. /object/info/ не минава през него (cf=DYNAMIC).
+  st.cdn = Object.assign({}, o.cdn || {});
   st.fetch = function (url, init) {
     const m = (init && init.method) || 'GET';
     st.calls.push({ method: m, url: url });
     const u = url.replace(DOCS_SB, '');
     let mm;
-    if ((mm = /^\/storage\/v1\/object\/authenticated\/docs\/(.+)$/.exec(u)) && m === 'GET') {
-      if (st.fail.readback && st.calls.filter(function (c) { return c.method === 'POST'; }).length) return res(200, Buffer.from('развалено'));
-      return st.storage[mm[1]] ? res(200, st.storage[mm[1]]) : res(400, '{"statusCode":"404","error":"not_found","message":"Object not found"}');
+    if ((mm = /^\/storage\/v1\/object\/(?:authenticated|public)\/docs\/([^?]+)/.exec(u)) && m === 'GET') {
+      const b = st.cdn[mm[1]] || st.storage[mm[1]];
+      return b ? res(200, b) : res(400, '{"statusCode":"404","error":"not_found","message":"Object not found"}');
+    }
+    if ((mm = /^\/storage\/v1\/object\/info\/docs\/(.+)$/.exec(u)) && m === 'GET') {
+      const b = st.storage[mm[1]];
+      if (!b) return res(400, '{"statusCode":"404","error":"not_found","message":"Object not found","code":"NoSuchKey"}');
+      let etag = '"' + crypto.createHash('md5').update(b).digest('hex') + '"';
+      if (st.fail.readback && st.calls.filter(function (c) { return c.method === 'POST'; }).length) etag = '"' + 'f'.repeat(32) + '"';
+      return res(200, { name: mm[1], bucket_id: 'docs', size: b.length, etag: etag, content_type: 'application/pdf', cache_control: 'no-cache' });
     }
     if ((mm = /^\/storage\/v1\/object\/docs\/(.+)$/.exec(u))) {
       if (m === 'DELETE') {
@@ -235,11 +256,52 @@ const OLD_OBJ = { 'docs/1700000000000_sap.pdf': Buffer.from('стар SAP'), 'do
     ok(/POST instrukcii\/test-obekti\.pdf: HTTP 500/.test(r.out) && /1 с грешка/.test(r.out), 'грешката е в обобщението');
   }
 
-  section('Обратното четене се разминава → без карта');
+  section('Проверката след качване: eTag ≠ MD5 на локалния → без карта, exit ≠ 0');
   {
-    const sb = fakeSb({ fail: { readback: true } });
+    const prev = { id: 'k1', title: ITEM.title, category: ITEM.category, url: PUB + 'instrukcii/test-obekti.pdf?v=202611010900', description: 'Кратка инструкция за обекти · обновена 01.11.2026' };
+    const sb = fakeSb({ storage: { 'instrukcii/test-obekti.pdf': Buffer.from('стара версия') }, docs: [prev], fail: { readback: true } });
     const r = await go(sb, mkFolder({ 'Тест-обекти.pdf': 'нов' }), mkList([ITEM]), ['--go']);
-    ok(r.code !== 0 && sb.docs.length === 0 && /не съвпада/.test(r.out), 'exit ≠ 0, нула карти, „не съвпада"');
+    ok(r.code !== 0, 'exit ' + r.code);
+    ok(!sb.writes().some(function (c) { return c.method === 'PATCH' || c.url.indexOf('/rest/') >= 0; }), 'нито PATCH, нито INSERT на карта');
+    ok(sb.docs[0].url === prev.url, 'картата е непипната');
+    ok(/ФАЙЛЪТ Е КАЧЕН \(POST мина\), НО ПРОВЕРКАТА СЛЕД КАЧВАНЕТО НЕ МИНА — картата не е записана/.test(r.out), 'изрично „ФАЙЛЪТ Е КАЧЕН … ПРОВЕРКАТА … НЕ МИНА"');
+    const md5 = crypto.createHash('md5').update('нов').digest('hex');
+    ok(r.out.indexOf('eTag ' + 'f'.repeat(32)) >= 0 && r.out.indexOf('MD5 ' + md5) >= 0, 'съобщението казва какво е сравнено (eTag срещу MD5)');
+  }
+
+  section('19.11.2026: изтеглянето дава СТАРИ байтове (CDN), метаданните — новия eTag → --go стига до PATCH, exit 0');
+  {
+    const prev = { id: 'k1', title: ITEM.title, category: ITEM.category, url: PUB + 'instrukcii/test-obekti.pdf?v=202611010900', description: 'Кратка инструкция за обекти · обновена 01.11.2026' };
+    const sb = fakeSb({ storage: { 'instrukcii/test-obekti.pdf': Buffer.from('стара версия') }, docs: [prev], cdn: { 'instrukcii/test-obekti.pdf': Buffer.from('стара версия') } });
+    const r = await go(sb, mkFolder({ 'Тест-обекти.pdf': 'нова версия' }), mkList([ITEM]), ['--go']);
+    ok(r.code === 0, 'exit ' + r.code + (r.code ? ' — ' + r.out : ''));
+    const w = sb.writes().map(function (c) { return c.method + (c.url.indexOf('/rest/') >= 0 ? ' rest' : ' obj'); });
+    ok(JSON.stringify(w) === JSON.stringify(['DELETE obj', 'POST obj', 'PATCH rest']), 'записи: ' + w.join(' → '));
+    ok(sb.docs[0].url === PUB + 'instrukcii/test-obekti.pdf?v=202611191405', 'картата е с нов ?v');
+    ok(!sb.calls.some(function (c) { return /\/object\/(authenticated|public)\//.test(c.url); }), 'нито една заявка за изтегляне — само /object/info/');
+  }
+
+  section('Сухо: кешът не решава „същият / различен"');
+  {
+    const prev = { id: 'k1', title: ITEM.title, category: ITEM.category, url: PUB + 'instrukcii/test-obekti.pdf?v=202611010900', description: 'Кратка инструкция за обекти · обновена 01.11.2026' };
+    // кеширани СТАРИ байтове, а живият обект (eTag) = локалния → „същият"
+    let sb = fakeSb({ storage: { 'instrukcii/test-obekti.pdf': Buffer.from('нова версия') }, docs: [prev], cdn: { 'instrukcii/test-obekti.pdf': Buffer.from('стара версия') } });
+    let r = await go(sb, mkFolder({ 'Тест-обекти.pdf': 'нова версия' }), mkList([ITEM]));
+    ok(r.code === 0 && /обектът е същият/.test(r.out) && /нищо за правене/.test(r.out), 'стари кеширани байтове + нов eTag → „същият", нищо за правене');
+    ok(sb.writes().length === 0, 'нула записи');
+    // кеширани НОВИ байтове (= локалния), а живият обект е стар → „за качване"
+    sb = fakeSb({ storage: { 'instrukcii/test-obekti.pdf': Buffer.from('стара версия') }, docs: [prev], cdn: { 'instrukcii/test-obekti.pdf': Buffer.from('нова версия') } });
+    r = await go(sb, mkFolder({ 'Тест-обекти.pdf': 'нова версия' }), mkList([ITEM]));
+    ok(r.code === 0 && /обектът е различен/.test(r.out) && /би направил замяна \+ PATCH/.test(r.out), 'нови кеширани байтове + стар eTag → „за качване"');
+    ok(sb.writes().length === 0, 'нула записи (сухо)');
+  }
+
+  section('Същият размер, различен MD5 → „различен"');
+  {
+    const prev = { id: 'k1', title: ITEM.title, category: ITEM.category, url: PUB + 'instrukcii/test-obekti.pdf?v=202611010900', description: 'Кратка инструкция за обекти · обновена 01.11.2026' };
+    const sb = fakeSb({ storage: { 'instrukcii/test-obekti.pdf': Buffer.from('abcd') }, docs: [prev] });
+    const r = await go(sb, mkFolder({ 'Тест-обекти.pdf': 'abce' }), mkList([ITEM]));
+    ok(/обектът е различен/.test(r.out), 'еднакъв size, друг eTag → различен');
   }
 
   section('Успешен POST, неуспешна карта → изрично съобщение, exit ≠ 0');

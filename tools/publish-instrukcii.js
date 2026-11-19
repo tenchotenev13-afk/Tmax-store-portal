@@ -4,8 +4,9 @@
 // public.documents за всеки път. Списъкът е tools/instrukcii.json.
 //
 // По подразбиране е СУХО пускане — само GET заявки, нищо не се пише.
-// С --go: непроменен файл (байт в байт с живия) → без запис; иначе
-// DELETE на обекта → POST на същия път → обратно четене и сверка → карта
+// С --go: непроменен файл (размер и MD5 = size и eTag на живия обект от
+// /object/info/ — не изтегляне, то минава през CDN кеша) → без запис; иначе
+// DELETE на обекта → POST на същия път → сверка по същия път → карта
 // (PATCH на съществуващата, INSERT само ако няма). Bucket-ът няма UPDATE
 // политика за anon, затова замяната е DELETE + POST, не upsert.
 //
@@ -20,6 +21,7 @@
 var fs = require('fs');
 var path = require('path');
 var os = require('os');
+var crypto = require('crypto');
 
 var PREFIX = 'instrukcii/';
 var PATH_RE = /^instrukcii\/[a-z0-9][a-z0-9-]*\.pdf$/;
@@ -145,19 +147,26 @@ function Api(cfg, fetchFn) {
       var pre = self.publicUrl(PREFIX);
       if (!row || baseUrl(row.url).indexOf(pre) !== 0) throw new Error('защита: редът ' + (row && row.id) + ' не сочи към ' + PREFIX);
     },
-    // Живият обект през API-то (не през публичния адрес — без CDN кеша).
-    download: function (p) {
+    // Метаданните на живия обект: { size, etag } (etag без кавичките) или null.
+    // САМО през /object/info/: изтеглянето — и /object/public/, и
+    // /object/authenticated/, с ?cb= или без — минава през кеша на Cloudflare
+    // (cf=HIT) и на 19.11.2026 върна стария файл час след замяната. info е
+    // cf=DYNAMIC, а eTag-ът при обикновен POST е MD5 на байтовете.
+    info: function (p) {
       self.guard(p);
-      return fetchFn(cfg.sb + '/storage/v1/object/authenticated/' + cfg.bucket + '/' + p, { method: 'GET', headers: auth })
+      return fetchFn(cfg.sb + '/storage/v1/object/info/' + cfg.bucket + '/' + p, { method: 'GET', headers: auth })
         .then(function (r) {
           if (r.status === 404 || r.status === 400) {
             return r.text().then(function (t) {
               if (r.status === 404 || /not.?found/i.test(t)) return null;
-              throw new Error('изтегляне ' + p + ': HTTP ' + r.status + ' ' + t);
+              throw new Error('метаданни ' + p + ': HTTP ' + r.status + ' ' + t);
             });
           }
-          if (!r.ok) return r.text().then(function (t) { throw new Error('изтегляне ' + p + ': HTTP ' + r.status + ' ' + t); });
-          return r.arrayBuffer().then(function (b) { return Buffer.from(b); });
+          if (!r.ok) return r.text().then(function (t) { throw new Error('метаданни ' + p + ': HTTP ' + r.status + ' ' + t); });
+          return r.json().then(function (j) {
+            if (!j || typeof j.size !== 'number' || typeof j.etag !== 'string') throw new Error('метаданни ' + p + ': няма size/etag');
+            return { size: j.size, etag: j.etag.replace(/^(W\/)?"|"$/g, '').toLowerCase() };
+          });
         });
     },
     remove: function (p) {
@@ -228,6 +237,7 @@ function processItem(it, ctx) {
     return Promise.resolve(res);
   }
   var buf = fs.readFileSync(local);
+  var md5 = crypto.createHash('md5').update(buf).digest('hex');
   var pub = api.publicUrl(it.path);
   var rows = ctx.cards.filter(function (r) { return baseUrl(r.url) === pub; });
   var row = rows[0] || null;
@@ -241,11 +251,11 @@ function processItem(it, ctx) {
     return Promise.resolve(res);
   }
 
-  return api.download(it.path).then(function (live) {
-    var same = !!live && live.length === buf.length && live.equals(buf);
+  return api.info(it.path).then(function (live) {
+    var same = !!live && live.size === buf.length && live.etag === md5;
     var cardMeta = row && row.title === it.title && row.category === it.category &&
       String(row.description || '').replace(DATE_SUFFIX_RE, '') === wantDescBase;
-    var liveTxt = live === null ? 'няма обект' : (same ? 'обектът е същият' : 'обектът е различен (' + fmtSize(live.length) + ')');
+    var liveTxt = live === null ? 'няма обект' : (same ? 'обектът е същият' : 'обектът е различен (' + fmtSize(live.size) + ')');
     var cardTxt = row ? 'карта id ' + row.id : 'няма карта';
 
     if (same && cardMeta) {
@@ -276,9 +286,13 @@ function processItem(it, ctx) {
 
     return api.remove(it.path)
       .then(function () { return api.upload(it.path, buf); })
-      .then(function () { return api.download(it.path); })
+      .then(function () { return api.info(it.path); })
       .then(function (back) {
-        if (!back || !back.equals(buf)) throw new Error('обратното четене на ' + it.path + ' не съвпада с локалния файл');
+        if (!back) throw new Error('POST мина, но при проверката обектът ' + it.path + ' липсва — картата не е записана');
+        if (back.size !== buf.length || back.etag !== md5) {
+          throw new Error('ФАЙЛЪТ Е КАЧЕН (POST мина), НО ПРОВЕРКАТА СЛЕД КАЧВАНЕТО НЕ МИНА — картата не е записана: ' +
+            'живият обект е ' + back.size + ' байта с eTag ' + back.etag + ', локалният — ' + buf.length + ' байта с MD5 ' + md5);
+        }
         res.uploaded = true;
         var data = { url: pub + '?v=' + ver, title: it.title, category: it.category, description: wantDescBase + ' · обновена ' + stamp };
         return (row ? api.patchCard(row, data) : api.insertCard(data)).catch(function (e) {
