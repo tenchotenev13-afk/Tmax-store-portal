@@ -135,6 +135,21 @@ function coNotifyToast(text,id,hover,onClick){
   t._hideTimer=setTimeout(function(){t.style.display='none';},8000);
 }
 
+/* Провал на kasa-api в банера: червен toast + карта — мълчанието би
+   значило „няма върнат отчет / няма разминаване“, а това не е проверено.
+   Двете карти делят една заявка, затова и една грешка — показва се веднъж. */
+function notifKasaApiFail(e){
+  if(!(e&&e.kasaApi)){ return; }
+  if(e.bannerShown) return;
+  e.bannerShown=true;
+  toast('Касовите известия не се заредиха: '+e.message,'#dc2626');
+  var el=document.getElementById('notif-banner');if(!el)return;
+  el.innerHTML='<div class="notif-card urgent"><div class="notif-icon">⚠️</div><div class="notif-text">'+
+    '<div class="notif-title">Касовите известия не се заредиха</div>'+
+    '<div class="notif-sub">'+esc(e.message)+'</div>'+
+    '</div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>'+el.innerHTML;
+  el.style.display='block';
+}
 function showLoginBanner(){
   var banner=document.getElementById('notif-banner');if(!banner)return;
   var all=transportOrders.concat(clientOrders);
@@ -173,8 +188,16 @@ function showLoginBanner(){
   if(td.length) html+='<div class="notif-card info"><div class="notif-icon">🔵</div><div class="notif-text"><div class="notif-title">'+td.length+' доставк'+(td.length===1?'а':'и')+' ДНЕС</div><div class="notif-sub">Заявки с дата на доставка за днес.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(oldOrders&&oldOrders.length) html+='<div class="notif-card warning"><div class="notif-icon">⏳</div><div class="notif-text"><div class="notif-title">'+oldOrders.length+' клиентска заявка за изпълнение над 5 дни!</div><div class="notif-sub">Заявките трябва да се изпълнят в рамките на 7-10 дни.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(tm.length) html+='<div class="notif-card warning"><div class="notif-icon">🟡</div><div class="notif-text"><div class="notif-title">'+tm.length+' доставк'+(tm.length===1?'а':'и')+' УТРЕ</div><div class="notif-sub">Подготви стоката навреме.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+  /* kasa-api (етап 1б-2): една заявка „banner“ за двете карти долу (R28 + R29),
+     когато превключвателят е включен; иначе — старите заявки. */
+  var kasaBannerP=null;
+  var kasaBanner=function(){ return kasaBannerP||(kasaBannerP=kasaApi('banner',{})); };
   /* Върнати за корекция */
-  sbGet('kasa_reports','store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&status=eq.returned&select=return_reason,returned_by').then(function(ret){
+  kasaApiReady().then(function(){
+    var own=currentUser.store_name;
+    if(!own||!kasaApiOn(own)) return sbGet('kasa_reports','store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&status=eq.returned&select=return_reason,returned_by');
+    return kasaBanner().then(function(d){ return (d&&d.returned_reports)||[]; });
+  }).then(function(ret){
     if(Array.isArray(ret)&&ret.length){
       var r=ret[0];
       var el=document.getElementById('notif-banner');
@@ -186,41 +209,51 @@ function showLoginBanner(){
         el.innerHTML=card+el.innerHTML;el.style.display='block';
       }
     }
-  }).catch(function(){});
+  }).catch(notifKasaApiFail);
 
   /* Сторно бележки с разминаване (нова сума < върната) — само за admin/accounting,
-     последните 30 дни, за да не се налага да влизат в История, за да разберат. */
+     последните 30 дни, за да не се налага да влизат в История, за да разберат.
+     Двата пътя дават едно и също {count, by_store, read, partial}: старият го
+     смята тук от редовете, kasa-api — в функцията със същото stornoIndicator
+     (копие + синхронизиращ тест, решение 13). */
   if(['admin','accounting'].indexOf(currentUser.role)>=0){
     var stFrom=new Date();stFrom.setDate(stFrom.getDate()-30);
-    /* sbGetAll + order=id.asc: 30 дни са над 1000 реда (2287 на 11.10.2026),
-       а PostgREST реже тихо. При .partial банерът НЕ мълчи — тишината би
-       значила „няма разминаване“, а това не е проверено. */
-    sbGetAll('kasa_storno','storno_date=gte.'+localDateISO(stFrom)+'&select=store_name,returned_sum,new_sum,articles&order=id.asc').then(function(rows){
-      if(!Array.isArray(rows)) return;
-      var partialNote=rows.partial?' &nbsp;·&nbsp; ⚠️ Непълни данни — прочетени '+rows.length+' реда':'';
-      /* Правилото е САМО stornoIndicator (kasa.js) — изключва капаро/ваучер
-         (900001/900009), както История. Със собствено сравнение банерът казваше
-         52 при 47 в История за същия период (12.11.2026). */
-      var flagged=rows.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;});
+    kasaApiReady().then(function(){
+      if(kasaApiOn()) return kasaBanner().then(function(d){ return (d&&d.storno_flagged)||null; });
+      /* sbGetAll + order=id.asc: 30 дни са над 1000 реда (2287 на 11.10.2026),
+         а PostgREST реже тихо. При .partial банерът НЕ мълчи — тишината би
+         значила „няма разминаване“, а това не е проверено. */
+      return sbGetAll('kasa_storno','storno_date=gte.'+localDateISO(stFrom)+'&select=store_name,returned_sum,new_sum,articles&order=id.asc').then(function(rows){
+        if(!Array.isArray(rows)) return null;
+        /* Правилото е САМО stornoIndicator (kasa.js) — изключва капаро/ваучер
+           (900001/900009), както История. Със собствено сравнение банерът казваше
+           52 при 47 в История за същия период (12.11.2026). */
+        var flagged=rows.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;});
+        var stores={};flagged.forEach(function(r){stores[r.store_name]=(stores[r.store_name]||0)+1;});
+        return {count:flagged.length,by_store:stores,read:rows.length,partial:!!rows.partial};
+      });
+    }).then(function(sf){
+      if(!sf) return;
+      var partialNote=sf.partial?' &nbsp;·&nbsp; ⚠️ Непълни данни — прочетени '+sf.read+' реда':'';
       var el=document.getElementById('notif-banner');if(!el)return;
-      if(!flagged.length){
-        if(!rows.partial) return;
+      if(!sf.count){
+        if(!sf.partial) return;
         el.innerHTML='<div class="notif-card urgent"><div class="notif-icon">⚠️</div><div class="notif-text">'+
           '<div class="notif-title">Сторно бележки: непълни данни</div>'+
-          '<div class="notif-sub">Прочетени '+rows.length+' реда, четенето прекъсна — разминаванията за последните 30 дни не са проверени.</div>'+
+          '<div class="notif-sub">Прочетени '+sf.read+' реда, четенето прекъсна — разминаванията за последните 30 дни не са проверени.</div>'+
           '</div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>'+el.innerHTML;
         el.style.display='block';
         return;
       }
-      var stores={};flagged.forEach(function(r){stores[r.store_name]=(stores[r.store_name]||0)+1;});
+      var stores=sf.by_store||{};
       var storeList=Object.keys(stores).map(function(s){return s+' ('+stores[s]+')';}).join(', ');
       var card='<div class="notif-card urgent"><div class="notif-icon">🧾</div><div class="notif-text">'+
-        '<div class="notif-title">'+flagged.length+' сторно бележк'+(flagged.length===1?'а':'и')+' с по-малка сума на новата покупка!</div>'+
+        '<div class="notif-title">'+sf.count+' сторно бележк'+(sf.count===1?'а':'и')+' с по-малка сума на новата покупка!</div>'+
         '<div class="notif-sub">'+esc(storeList)+' &nbsp;·&nbsp; последните 30 дни'+partialNote+'</div>'+
         '</div><button onclick="goToStornoHistory()" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Виж →</button>'+
         '<span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
       el.innerHTML=card+el.innerHTML;el.style.display='block';
-    }).catch(function(){});
+    }).catch(notifKasaApiFail);
   }
 
   if(!lateCo.length&&!lateTr.length&&!old7.length&&!td.length&&!tm.length) html='<div class="notif-card success"><div class="notif-icon">✅</div><div class="notif-text"><div class="notif-title">Всичко е наред!</div><div class="notif-sub">Няма просрочени или спешни заявки.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';

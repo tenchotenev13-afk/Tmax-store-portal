@@ -825,6 +825,184 @@ function storeQ(col){
   return '&'+col+'=in.('+stores.map(encodeURIComponent).join(',')+')';
 }
 
+/* ─── Каса през kasa-api (етап 1б-2, 20.11.2026) ─────────────────────────
+   Проектът: claude/kasa-api-dizajn.md (т.3.4, решения 11 и 12 в т.7). Само
+   ЧЕТЕНЕТО на касовите таблици; записите (W1–W23) не са тук.
+
+   Превключвател: app_settings.kasa_api_stores — „all“ или имена със запетая.
+   Липсващ / празен ключ, паднала заявка за ключа или вход без пропуск →
+   стария път (sbGet). kasaApiOn(store):
+   - с обект (един ден на един обект, документ, банерът „върнат“) — обектът е
+     в списъка. Така admin в пилота минава през kasa-api за Кърджали и
+     Раднево (детайл, документ), без да му трябва „all“.
+   - без обект (четене през ЦЕЛИЯ обхват — списъкът в Каса, дневният преглед,
+     банерът за сторно) — ВСЕКИ обект от обхвата е в списъка. Обхватът е
+     този на kasa-api (resolveScope): admin — всички, винаги; accounting —
+     assigned_stores или всички; останалите — своя обект. Обхват „всички“
+     значи само при „all“ — иначе част от обектите тръгва по нов път, част по
+     стария, а една заявка не може да е и двете. */
+var kasaApiStores=null;      /* null = изключено; 'all'; или масив имена */
+var kasaApiStoresReady=null; /* обещанието на последното четене на ключа */
+var kasaApiStoresSeq=0;
+function kasaApiParseStores(v){
+  var s=v==null?'':String(v).trim();
+  if(!s) return null;
+  if(s.toLowerCase()==='all') return 'all';
+  var arr=s.split(',').map(function(x){return x.trim();}).filter(Boolean);
+  return arr.length?arr:null;
+}
+/* Чете се при всеки вход (startApp). Никога не отхвърля — провал = стария път. */
+function kasaApiLoadStores(){
+  var seq=++kasaApiStoresSeq;
+  kasaApiStores=null;
+  kasaApiStoresReady=sbGetOk('app_settings','key=eq.kasa_api_stores&select=key,value').then(function(r){
+    if(!r||!r.ok){
+      try{console.error('kasa_api_stores: '+((r&&r.error)||'няма отговор')+' — Каса по стария път');}catch(e){}
+      return null;
+    }
+    var row=r.rows.filter(function(x){return x&&x.key==='kasa_api_stores';})[0];
+    var val=kasaApiParseStores(row&&row.value);
+    if(seq===kasaApiStoresSeq) kasaApiStores=val;
+    return val;
+  }).catch(function(){ return null; });
+  return kasaApiStoresReady;
+}
+function kasaApiReady(){ return kasaApiStoresReady||kasaApiLoadStores(); }
+/* Обхватът, както го смята kasa-api (handler.ts resolveScope): null = всички. */
+function kasaApiScopeStores(){
+  if(!currentUser) return [];
+  if(currentUser.role==='admin') return null;
+  if(currentUser.role==='accounting'){ var a=assignedStores(); return a&&a.length?a:null; }
+  return currentUser.store_name?[currentUser.store_name]:[];
+}
+function kasaApiOn(store){
+  var L=kasaApiStores;
+  if(!L||!currentUser||!currentSession) return false;
+  if(L==='all') return true;
+  if(store) return L.indexOf(store)>=0;
+  var sc=kasaApiScopeStores();
+  if(!sc||!sc.length) return false;
+  return sc.every(function(s){return L.indexOf(s)>=0;});
+}
+
+/* Една заявка към kasa-api: {ok, status, data}. Тялото се строи при всяко
+   извикване — повторението след нов вход носи НОВИЯ пропуск. */
+function kasaApiCall(action,params){
+  var body={action:action,session:currentSession};
+  for(var k in (params||{})) if(Object.prototype.hasOwnProperty.call(params,k)) body[k]=params[k];
+  return fetch(SB_URL+'/functions/v1/kasa-api',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_KEY,'apikey':SB_KEY},
+    body:JSON.stringify(body)
+  }).then(function(r){
+    return r.json().catch(function(){return null;}).then(function(d){
+      return {ok:r.ok&&!!d&&d.ok===true,status:r.status,data:d||{}};
+    });
+  }).catch(function(){
+    return {ok:false,status:0,data:{reason:'network',message:'Няма връзка със сървъра.'}};
+  });
+}
+function kasaApiError(status,reason,message){
+  var e=new Error(message||('Грешка '+(status||'')));
+  e.kasaApi=true; e.status=status||0; e.reason=reason||'';
+  return e;
+}
+/* Обещание с данните (тялото на отговора) или ГРЕШКА — никога празен резултат
+   на мястото на провал. 401 session_expired → модалът за повторен вход;
+   успех → същата заявка още веднъж (само веднъж); отказ → грешка. */
+function kasaApi(action,params){
+  return kasaApiCall(action,params).then(function(res){
+    if(res.status===401&&res.data&&res.data.reason==='session_expired'){
+      return kasaReauth().then(function(){ return kasaApiCall(action,params); });
+    }
+    return res;
+  }).then(function(res){
+    if(res.ok) return res.data;
+    var d=res.data||{};
+    throw kasaApiError(res.status,d.reason,d.message);
+  });
+}
+
+/* ─── Повторен вход в модал (решение 11) ────────────────────────────────
+   Сменя САМО currentSession: без startApp() и без пререндер, затова
+   въведеното в отворена форма остава. Имейлът е на текущия потребител и не
+   се сменя; върне ли auth-login друг потребител — пълен изход. Няколко
+   едновременни 401 чакат ЕДИН модал. */
+var kasaReauthPending=null, kasaReauthDone=null;
+function kasaReauth(){
+  if(kasaReauthPending) return kasaReauthPending;
+  kasaReauthPending=new Promise(function(resolve,reject){ kasaReauthDone={resolve:resolve,reject:reject}; });
+  var box=document.createElement('div');
+  box.id='kasa-reauth';
+  box.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px;';
+  box.innerHTML='<div style="background:#fff;border-radius:10px;padding:20px;max-width:360px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.25);">'+
+    '<div style="font-size:15px;font-weight:700;margin-bottom:6px;">🔒 Сесията изтече</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">Въведи паролата си, за да продължиш. Отвореното на екрана остава.</div>'+
+    '<input id="kasa-reauth-email" type="email" readonly value="'+escAttr((currentUser&&currentUser.email)||'')+'" style="width:100%;box-sizing:border-box;border:1.5px solid #e2e8f0;border-radius:7px;padding:8px;margin-bottom:8px;background:#f1f5f9;color:#475569;font-family:inherit;">'+
+    '<input id="kasa-reauth-pass" type="password" autocomplete="current-password" placeholder="Парола" onkeydown="if(event.key===\'Enter\')kasaReauthSubmit()" style="width:100%;box-sizing:border-box;border:1.5px solid #e2e8f0;border-radius:7px;padding:8px;margin-bottom:8px;font-family:inherit;">'+
+    '<div id="kasa-reauth-err" style="display:none;color:#dc2626;font-size:12px;margin-bottom:8px;"></div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+      '<button id="kasa-reauth-cancel" onclick="kasaReauthCancel()" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:7px;padding:7px 14px;cursor:pointer;">Отказ</button>'+
+      '<button id="kasa-reauth-ok" onclick="kasaReauthSubmit()" style="border:none;background:#2563eb;color:#fff;border-radius:7px;padding:7px 14px;font-weight:600;cursor:pointer;">Влез →</button>'+
+    '</div></div>';
+  document.body.appendChild(box);
+  try{ document.getElementById('kasa-reauth-pass').focus(); }catch(e){}
+  return kasaReauthPending;
+}
+function kasaReauthFinish(err){
+  /* Паролата живее само в полето и в тялото към auth-login — нулира се изрично
+     и при успех, и при отказ, преди модалът да се махне. */
+  var passEl=document.getElementById('kasa-reauth-pass');
+  if(passEl) passEl.value='';
+  var box=document.getElementById('kasa-reauth');
+  if(box&&box.parentNode) box.parentNode.removeChild(box);
+  var d=kasaReauthDone;
+  kasaReauthPending=null; kasaReauthDone=null;
+  if(!d) return;
+  if(err) d.reject(err); else d.resolve();
+}
+function kasaReauthCancel(){
+  kasaReauthFinish(kasaApiError(401,'reauth_cancelled','Сесията е изтекла и входът е отказан — данните не са заредени.'));
+}
+function kasaReauthSubmit(){
+  var passEl=document.getElementById('kasa-reauth-pass');
+  var errEl=document.getElementById('kasa-reauth-err');
+  var okBtn=document.getElementById('kasa-reauth-ok');
+  if(!passEl||!currentUser) return;
+  var showErr=function(m){ if(errEl){ errEl.textContent=m; errEl.style.display='block'; } if(okBtn) okBtn.disabled=false; };
+  var pass=passEl.value;
+  if(!pass){ showErr('Въведи паролата.'); return; }
+  if(okBtn) okBtn.disabled=true;
+  var email=String(currentUser.email||'').toLowerCase();
+  fetch(SB_URL+'/functions/v1/auth-login',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_KEY,'apikey':SB_KEY},
+    body:JSON.stringify({email:email,password:pass})
+  }).then(function(r){
+    return r.json().catch(function(){return{};});
+  }).then(function(d){
+    d=d||{};
+    if(!d.ok||!d.session){
+      logAudit('login_failed',{email:email,success:false,details:{reason:d.reason||'unknown',reauth:'kasa-api'}});
+      showErr(d.message||'Грешка при вход.');
+      passEl.value='';
+      return;
+    }
+    var u=d.user||{};
+    if(String(u.email||'').toLowerCase()!==email||(currentUser.id&&u.id&&u.id!==currentUser.id)){
+      /* Друг потребител → не се смесват данни на двама: пълен изход. */
+      kasaReauthFinish(kasaApiError(401,'reauth_other_user','Входът е с друг потребител — излизане.'));
+      doLogout();
+      return;
+    }
+    currentSession=d.session;
+    logAudit('login_success',{details:{reauth:'kasa-api'}});
+    kasaReauthFinish(null);
+  }).catch(function(){
+    showErr('Грешка при връзка. Опитай отново.');
+  });
+}
+
 /* UTILS */
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'—';}
 /* esc() покрива & < > — достатъчно за ТЕКСТ между тагове, но НЕ за стойност
@@ -1746,6 +1924,7 @@ function startApp(){
   document.getElementById('nav-name').textContent=currentUser.display_name||currentUser.email;
   document.getElementById('nav-store').textContent=isGlobal()?'Всички магазини':currentUser.store_name;
   setupTabsForRole();
+  kasaApiLoadStores(); /* Каса: kasa-api или стария път (пилот, 20.11.2026) */
   rolesPendingTodayDeepLink=false;
   rolesLoadRegional();
   if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);

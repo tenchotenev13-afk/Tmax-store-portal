@@ -156,10 +156,103 @@ function kasaUpsert(table,matchQuery,body){
   });
 }
 
+/* ─── ЧЕТЕНЕ ПРЕЗ kasa-api (етап 1б-2, 20.11.2026) ─────────────────────
+   Всяко касово четене минава през един от двата помощника долу: oldFn е
+   ТОЧНО старата заявка (sbGet / sbGetOk) и тръгва, когато kasaApiOn() (shared.js)
+   каже „не“. Новият път връща същата форма (масив редове; {ok,rows} при okShape),
+   а при грешка — ОТХВЪРЛЯ с червен toast. Никога празен списък на мястото на
+   провал: местата, които рисуват списък, показват kasaApiFailPanel(). */
+function kasaApiFailToast(e){
+  if(e&&e.kasaApi&&!e.toasted){ e.toasted=true; toast('Касовите данни не се заредиха: '+e.message,'#dc2626'); }
+  throw e;
+}
+/* За веригите без собствен екран за грешка: toast-ът вече е показан. */
+function kasaApiCatch(e){ if(!(e&&e.kasaApi)) try{console.error(e);}catch(x){} }
+/* Видимото съобщение в таба на мястото на списъка. true = грешката е от
+   kasa-api и е показана; false = чужда грешка, извикващият продължава по стария начин. */
+function kasaApiFailPanel(e){
+  if(!(e&&e.kasaApi)) return false;
+  var wrap=document.getElementById('mod-kasa');
+  if(wrap) wrap.innerHTML='<div class="page">'+kasaTabBar()+
+    '<div id="kasa-api-err" style="background:#fee2e2;border:2px solid #dc2626;border-radius:8px;padding:14px;color:#991b1b;">'+
+      '<div style="font-weight:700;margin-bottom:4px;">⚠️ Касовите данни не се заредиха</div>'+
+      '<div style="font-size:13px;margin-bottom:10px;">'+esc(e.message)+'</div>'+
+      '<button onclick="loadKasa()" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer;">🔄 Опитай пак</button>'+
+    '</div></div>';
+  return true;
+}
+/* Една заявка „day“ за обект+ден, споделена от едновременните четения
+   (Главна каса: отчети + главна; печатът: три; детайлът: четири). */
+var kasaDayInflight={};
+function kasaApiDay(store,date){
+  var k=store+'|'+date;
+  if(kasaDayInflight[k]) return kasaDayInflight[k];
+  var p=kasaApi('day',{store:store,date:date});
+  kasaDayInflight[k]=p;
+  var clr=function(){ if(kasaDayInflight[k]===p) delete kasaDayInflight[k]; };
+  p.then(clr,clr);
+  return p;
+}
+var KASA_DAY_PART={kasa_reports:'reports',kasa_glavna:'glavna',kasa_zoborot:'zoborot',kasa_documents:'documents'};
+/* Ден + обект: R2–R7, R9, R13, R15, R17. post(rows) — само за новия път
+   (стесняване/подредба, които старата заявка правеше в URL-а). */
+function kasaDayGet(table,store,date,oldFn,post,okShape){
+  return kasaApiReady().then(function(){
+    if(!kasaApiOn(store)) return oldFn();
+    return kasaApiDay(store,date).then(function(d){
+      var rows=(d&&d[KASA_DAY_PART[table]])||[];
+      if(post) rows=post(rows);
+      return okShape?{ok:true,rows:rows}:rows;
+    },kasaApiFailToast);
+  });
+}
+var kasaRangeInflight={};
+function kasaApiRange(params){
+  var k=JSON.stringify(params);
+  if(kasaRangeInflight[k]) return kasaRangeInflight[k];
+  var p=kasaApi('range',params);
+  kasaRangeInflight[k]=p;
+  var clr=function(){ if(kasaRangeInflight[k]===p) delete kasaRangeInflight[k]; };
+  p.then(clr,clr);
+  return p;
+}
+/* Период: R1, R10, R14. params.store — един обект; без него — целият обхват. */
+function kasaRangeGet(kind,params,oldFn,post){
+  return kasaApiReady().then(function(){
+    if(!kasaApiOn(params.store)) return oldFn();
+    return kasaApiRange(params).then(function(d){
+      var rows=(d&&d.kinds&&d.kinds[kind]&&d.kinds[kind].rows)||[];
+      return post?post(rows):rows;
+    },kasaApiFailToast);
+  });
+}
+/* R1 — списъкът в Каса. Обект (обхват от един обект): цялата история, както
+   стария път. Повече обекти (admin): последните 60 дни + всички върнати
+   (решение 6) — горната граница е до тавана на kasa-api от 400 дни. */
+function kasaListParams(){
+  var sc=kasaApiScopeStores();
+  if(sc&&sc.length===1) return {kinds:['reports'],from:'2000-01-01',to:'2099-12-31'};
+  var d=new Date();
+  d.setDate(d.getDate()-60); var from=localDateISO(d);
+  d.setDate(d.getDate()+400); var to=localDateISO(d);
+  return {kinds:['reports'],from:from,to:to,include_returned:true};
+}
+
+/* Функцията „Виж“ в генерирания прозорец (печат R8, детайл R16) при kasa-api:
+   без ключ и без заявки. Празният раздел се отваря ВЕДНАГА при клика — иначе
+   блокерът на изскачащи прозорци го спира, защото основната страница няма
+   собствен клик — и основната страница го насочва към подписания линк. */
+function kasaDocOpenerFn(fn){
+  return 'function '+fn+'(id){var w=window.open("","_blank");var o=window.opener;'+
+    'if(o&&!o.closed&&typeof o.kasaOpenDocById==="function"){o.kasaOpenDocById(id,w);}'+
+    'else{if(w)w.close();alert("Порталът е затворен — отвори документа от портала.");}}';
+}
+var KASA_PRINT_DOC_SCRIPT='<script>'+kasaDocOpenerFn('openDocFromPrint')+'<\/script>';
+
 /* ─── LOAD ──────────────────────────────────────────────────── */
 function loadKasa(){
   var q='order=date.desc,pos_number.asc'+storeQ();
-  sbGet('kasa_reports',q).then(function(data){
+  kasaRangeGet('reports',kasaListParams(),function(){return sbGet('kasa_reports',q);}).then(function(data){
     kasaReports=Array.isArray(data)?data:[];
     /* Всеки таб има СВОЙ клон. Докато беше двоично (pos, иначе renderGlavna),
        влизането в модула с активен Равнение/Сторно/Оборот — напр. връщане от
@@ -174,10 +267,10 @@ function loadKasa(){
       case 'oborot':  loadOborot();   break;
       default:        renderKasa();
     }
-  }).catch(function(){renderKasa();});
+  }).catch(function(e){if(kasaApiFailPanel(e))return;renderKasa();});
   /* Главна каса за днес */
   var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
-  sbGet('kasa_glavna',gq).then(function(data){
+  kasaDayGet('kasa_glavna',currentUser.store_name,kasaActiveDate(),function(){return sbGet('kasa_glavna',gq);}).then(function(data){
     kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
     if(kasaView==='glavna') renderGlavna();
   }).catch(function(){});
@@ -195,16 +288,17 @@ function kasaTab(tab){
   else if(tab==='glavna'){
     var activeDate=kasaActiveDate();
     var enc=encodeURIComponent(currentUser.store_name);
+    var own=currentUser.store_name;
     Promise.all([
-      sbGet('kasa_reports','order=pos_number.asc&date=eq.'+activeDate+'&store_name=eq.'+enc),
-      sbGet('kasa_glavna','store_name=eq.'+enc+'&date=eq.'+activeDate)
+      kasaDayGet('kasa_reports',own,activeDate,function(){return sbGet('kasa_reports','order=pos_number.asc&date=eq.'+activeDate+'&store_name=eq.'+enc);}),
+      kasaDayGet('kasa_glavna',own,activeDate,function(){return sbGet('kasa_glavna','store_name=eq.'+enc+'&date=eq.'+activeDate);})
     ]).then(function(res){
       var fresh=Array.isArray(res[0])?res[0]:[];
       var other=kasaReports.filter(function(r){return r.date!==activeDate;});
       kasaReports=other.concat(fresh);
       kasaGlavna=(Array.isArray(res[1])&&res[1].length)?res[1][0]:null;
       renderGlavna();
-    }).catch(function(){renderGlavna();});
+    }).catch(function(e){if(kasaApiFailPanel(e))return;renderGlavna();});
   }
   else if(tab==='zoborot'){loadZoborot();}
   else if(tab==='storno'){loadStorno();}
@@ -656,7 +750,11 @@ function submitKasaForm(){
   var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+
         '&date=eq.'+p.date+'&pos_number=eq.'+p.pos_number+
         '&select=id,status,cashier_name';
-  sbGet('kasa_reports',q).then(function(rows){
+  /* kasa-api: денят идва цял — ПОС-ът се отсява тук. Провал по новия път →
+     toast и записът минава, както при стария (sbGet връща []). */
+  kasaDayGet('kasa_reports',currentUser.store_name,p.date,function(){return sbGet('kasa_reports',q);},function(rs){
+    return rs.filter(function(x){return String(x.pos_number)===String(p.pos_number);});
+  }).catch(function(e){if(e&&e.kasaApi)return [];throw e;}).then(function(rows){
     rows=Array.isArray(rows)?rows:[];
     /* Върнатият отчет си има свой път — „✏️ Редактирай". Нов ред на негово
        място оставя върнатия да виси в „Непоправени от по-рано" завинаги
@@ -753,7 +851,7 @@ function kasaCloseReturnedDay(storeName,date,by,at,done){
   var fin=function(){if(typeof done==='function')done();};
   if(!storeName||!date){fin();return;}
   var f='store_name=eq.'+encodeURIComponent(storeName)+'&date=eq.'+date;
-  sbGet('kasa_reports',f+'&select=status,confirmed_at,returned_at').then(function(rows){
+  kasaDayGet('kasa_reports',storeName,date,function(){return sbGet('kasa_reports',f+'&select=status,confirmed_at,returned_at');}).then(function(rows){
     if(!Array.isArray(rows)||!rows.length){fin();return;}
     var everReturned=false,allOk=true;
     rows.forEach(function(r){
@@ -1065,10 +1163,10 @@ function saveGlavna(){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('💾 Главна каса е запазена!');
     /* Reload */
-    sbGet('kasa_glavna',gq).then(function(data){
+    kasaDayGet('kasa_glavna',p.store_name,p.date,function(){return sbGet('kasa_glavna',gq);}).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
       renderGlavna();
-    });
+    }).catch(kasaApiCatch);
   });
 }
 
@@ -1087,10 +1185,10 @@ function confirmGlavna(){
     if(!res.ok){toast('Грешка при потвърждаване','#dc2626');return;}
     toast('✅ Главна каса е потвърдена и заключена!');
     var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
-    sbGet('kasa_glavna',gq).then(function(data){
+    kasaDayGet('kasa_glavna',currentUser.store_name,kasaActiveDate(),function(){return sbGet('kasa_glavna',gq);}).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
       renderGlavna();
-    });
+    }).catch(kasaApiCatch);
   });
 }
 
@@ -1101,10 +1199,10 @@ function unlockGlavna(){
     if(!res.ok){toast('Грешка','#dc2626');return;}
     toast('🔓 Главна каса е разключена за редакция.');
     var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
-    sbGet('kasa_glavna',gq).then(function(data){
+    kasaDayGet('kasa_glavna',currentUser.store_name,kasaActiveDate(),function(){return sbGet('kasa_glavna',gq);}).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
       renderGlavna();
-    });
+    }).catch(kasaApiCatch);
   });
 }
 
@@ -1123,10 +1221,11 @@ function printKasaReport(){
   var gq='store_name=eq.'+enc2+'&date=eq.'+todayStr;
   var dq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.asc';
   /* Зареждаме zoborot, glavna и документи директно от базата */
+  var own=currentUser.store_name;
   Promise.all([
-    sbGet('kasa_zoborot',zq),
-    sbGet('kasa_glavna',gq),
-    sbGet('kasa_documents',dq)
+    kasaDayGet('kasa_zoborot',own,todayStr,function(){return sbGet('kasa_zoborot',zq);}),
+    kasaDayGet('kasa_glavna',own,todayStr,function(){return sbGet('kasa_glavna',gq);}),
+    kasaDayGet('kasa_documents',own,todayStr,function(){return sbGet('kasa_documents',dq);})
   ]).then(function(res){
     zoborotData=(Array.isArray(res[0])&&res[0].length)?res[0][0]:null;
     var gl=(Array.isArray(res[1])&&res[1].length)?res[1][0]:null;
@@ -1134,6 +1233,8 @@ function printKasaReport(){
     var docs=Array.isArray(res[2])?res[2]:[];
     _doPrintKasaReport(todayStr,reps,gl,g,docs);
   }).catch(function(e){
+    /* kasa-api: без главна, равнение и документи печатът би излъгал — не се прави. */
+    if(e&&e.kasaApi)return;
     console.error('Print load error:',e);
     _doPrintKasaReport(todayStr,reps,null,{},[]);
   });
@@ -1320,7 +1421,10 @@ function _doPrintKasaReport(todayStr,reps,gl,g,docs){
     '</div></div>':
     '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Равнение — не е попълнено</div>';
 
-  /* Документи */
+  /* Документи. kasa-api (R8): бутонът носи id на реда, а прозорецът на печата
+     НЕ чете сам — праща id-то на основната страница (kasaOpenDocById,
+     kasa-docs.js), която подписва през kasa-api. Без anon ключ в HTML-а. */
+  var viaApi=kasaApiOn(currentUser.store_name);
   var docsHTML = '';
   if(docs && docs.length){
     docsHTML = '<h2>📎 Документи</h2><div class="card">';
@@ -1330,7 +1434,7 @@ function _doPrintKasaReport(todayStr,reps,gl,g,docs){
       docsHTML+='<span style="font-size:18px;">'+(isPdf?'📄':'🖼️')+'</span>';
       docsHTML+='<div style="flex:1;"><div style="font-size:10pt;font-weight:500;">'+esc(d.file_name||'')+'</div>';
       docsHTML+='<div style="font-size:8.5pt;color:#6b7280;">'+esc(d.doc_type||'')+' · '+esc(d.uploaded_by||'')+'</div></div>';
-      docsHTML+='<button onclick="openDocFromPrint(\''+esc(d.file_url)+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:4px;padding:3px 10px;font-size:9pt;cursor:pointer;">Виж</button>';
+      docsHTML+='<button onclick="openDocFromPrint(\''+(viaApi?esc(d.id):esc(d.file_url))+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:4px;padding:3px 10px;font-size:9pt;cursor:pointer;">Виж</button>';
       docsHTML+='</div>';
     });
     docsHTML += '</div>';
@@ -1388,7 +1492,7 @@ function _doPrintKasaReport(todayStr,reps,gl,g,docs){
     '<h2>Равнение на оборота</h2>'+zobHTML+
     docsHTML+
     '</div>'+
-    '<script>function openDocFromPrint(path){var enc=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");fetch("https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1/object/sign/kasa-docs/"+enc,{method:"POST",headers:{"Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA","Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1"+d.signedURL,"_blank");else alert("Грешка: "+JSON.stringify(d));}).catch(function(e){alert(e);});}<\/script>'+
+    (viaApi?KASA_PRINT_DOC_SCRIPT:'<script>function openDocFromPrint(path){var enc=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");fetch("https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1/object/sign/kasa-docs/"+enc,{method:"POST",headers:{"Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA","Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1"+d.signedURL,"_blank");else alert("Грешка: "+JSON.stringify(d));}).catch(function(e){alert(e);});}<\/script>')+
     '</body></html>');
   win.document.close();
   setTimeout(function(){win.focus();},300);
@@ -1532,8 +1636,8 @@ function loadZoborot(){
      sbGetOk, не sbGet: sbGet връща [] и при грешка, а тогава подсказката би
      казала „няма отчети" вместо да мълчи. */
   Promise.all([
-    sbGet('kasa_zoborot',q),
-    sbGetOk('kasa_reports','order=pos_number.asc&date=eq.'+activeDate+'&store_name=eq.'+enc)
+    kasaDayGet('kasa_zoborot',currentUser.store_name,activeDate,function(){return sbGet('kasa_zoborot',q);}),
+    kasaDayGet('kasa_reports',currentUser.store_name,activeDate,function(){return sbGetOk('kasa_reports','order=pos_number.asc&date=eq.'+activeDate+'&store_name=eq.'+enc);},null,true)
   ]).then(function(res){
     var data=res[0];
     zoborotData=(Array.isArray(data)&&data.length)?data[0]:null;
@@ -1543,7 +1647,7 @@ function loadZoborot(){
       kasaReports=other.concat(res[1].rows);
     }
     renderZoborot();
-  }).catch(function(){zoborotReportsOk=false;renderZoborot();});
+  }).catch(function(e){if(kasaApiFailPanel(e))return;zoborotReportsOk=false;renderZoborot();});
 }
 
 /* Подсказка откъде идва разликата в Равнение: сравнява въведените ФУ с ПОС
@@ -2032,12 +2136,13 @@ function stornoSortPriority(r){
 
 function loadStorno(){
   var q=STORNO_SELECT+'&store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&order=storno_date.desc,created_at.desc';
-  sbGet('kasa_storno',q).then(function(data){
+  /* kasa-api: същият select с вложените редове и същата подредба; цялата история на обекта, както стария път. */
+  kasaRangeGet('storno',{kinds:['storno'],store:currentUser.store_name,from:'2000-01-01',to:'2099-12-31'},function(){return sbGet('kasa_storno',q);}).then(function(data){
     kasaStorno=Array.isArray(data)?data:[];
     kasaStorno.sort(function(a,b){return stornoSortPriority(a)-stornoSortPriority(b);});
     stornoIndexItems(kasaStorno);
     renderStorno();
-  }).catch(function(){kasaStorno=[];stornoItemsById={};renderStorno();});
+  }).catch(function(e){if(kasaApiFailPanel(e))return;kasaStorno=[];stornoItemsById={};renderStorno();});
 }
 
 function renderStorno(){
@@ -2174,7 +2279,14 @@ function openStornoForm(id){
   var r=id?(kasaStorno.find(function(x){return x.id===id;})||{}):{};
 
   if(id){
-    sbGet('kasa_storno_items','storno_id=eq.'+id+'&order=kind.asc,line_no.asc').then(function(data){
+    /* kasa-api (R11): редовете — само ако сторното е в обхвата (проверката е в
+       функцията). Провал НЕ отваря формата с празни редове: записът би изтрил
+       истинските (stornoSaveItems трие и пише наново). */
+    var itemsP=kasaApiReady().then(function(){
+      if(!kasaApiOn(r.store_name||currentUser.store_name)) return sbGet('kasa_storno_items','storno_id=eq.'+id+'&order=kind.asc,line_no.asc');
+      return kasaApi('storno_items',{storno_id:id}).then(function(d){return (d&&d.items)||[];},kasaApiFailToast);
+    });
+    itemsP.then(function(data){
       var items=Array.isArray(data)?data:[];
       stornoFormReturned=items.filter(function(x){return x.kind==='returned';})
         .map(function(x){return {sap_code:x.sap_code||'',article_name:x.article_name||''};});
@@ -2182,7 +2294,8 @@ function openStornoForm(id){
         .map(function(x){return {sap_code:x.sap_code||'',article_name:x.article_name||''};});
       if(!stornoFormReturned.length) stornoFormReturned=[{sap_code:'',article_name:''}];
       renderStornoForm(r);
-    }).catch(function(){
+    }).catch(function(e){
+      if(e&&e.kasaApi){kasaStornoEditId=null;return;}
       stornoFormReturned=[{sap_code:'',article_name:''}];
       stornoFormReplacement=[];
       renderStornoForm(r);

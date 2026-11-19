@@ -61,9 +61,34 @@ function getSignedUrl(path, onUrl) {
   .catch(function() { onUrl(null); });
 }
 
+/* kasa-api (R12): линк по id на реда — пътят е от базата. win е празен раздел,
+   отворен при клика в генерирания прозорец (печат / детайл); без него —
+   нов раздел оттук, както openKasaDoc. */
+function kasaOpenDocById(id, win) {
+  return kasaApi('doc_url', { document_id: id }).then(function(d) {
+    if (win && !win.closed) win.location.href = d.url;
+    else window.open(d.url, '_blank');
+  }).catch(function(e) {
+    if (win && !win.closed) { try { win.close(); } catch (x) {} }
+    toast('Грешка при отваряне: ' + ((e && e.message) || e), '#dc2626');
+  });
+}
+
 function loadKasaDocs(date, cb) {
   var q = 'store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+date+'&order=created_at.desc';
-  sbGet('kasa_documents', q).then(cb).catch(function() { cb([]); });
+  /* kasa-api връща документите на деня по created_at.asc — тук са най-новите първи. */
+  kasaDayGet('kasa_documents', currentUser.store_name, date, function() { return sbGet('kasa_documents', q); },
+    function(rows) { return rows.slice().reverse(); }).then(cb).catch(function(e) {
+    if (e && e.kasaApi) { kasaDocsFail(e); return; }
+    cb([]);
+  });
+}
+/* Провал по новия път: „Няма прикачени документи“ би излъгал. */
+function kasaDocsFail(e) {
+  var els = document.querySelectorAll('[id^="docs-section-"]');
+  Array.prototype.forEach.call(els, function(el) {
+    el.innerHTML = '<div class="card" style="margin-top:14px;color:#991b1b;background:#fee2e2;border:1px solid #dc2626;">⚠️ Документите не се заредиха: ' + esc(e.message) + '</div>';
+  });
 }
 
 function renderDocsSection(containerId, reportType, docs) {
@@ -97,7 +122,7 @@ function renderDocsSection(containerId, reportType, docs) {
         + '<div style="font-size:12px;font-weight:500;">'+esc(d.file_name)+'</div>'
         + '<div style="font-size:10px;color:#94a3b8;">'+(types[d.doc_type]||d.doc_type)+' · '+fmtDate(d.date)+' · '+esc(d.uploaded_by||'')+sz+'</div>'
         + '</div>'
-        + '<button onclick="openKasaDoc(\''+esc(d.file_url)+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;">Виж</button>'
+        + '<button onclick="'+(d.id && kasaApiOn(d.store_name || currentUser.store_name) ? 'kasaOpenDocById(\''+esc(d.id)+'\')' : 'openKasaDoc(\''+esc(d.file_url)+'\')')+'" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;">Виж</button>'
         + '</div>';
     });
     html += '</div>';
@@ -247,10 +272,17 @@ function loadDailyOverview(dateOverride) {
   var contentWrap = document.getElementById('daily-overview-content') || wrap;
 
   var todayStr = activeDate;
+  /* kasa-api: една заявка „range“ за трите вида (kasaRangeGet я споделя);
+     отчетите — подредени по обект, както order=store_name.asc. */
+  var ovP = { kinds: ['reports','zoborot','documents'], from: todayStr, to: todayStr };
   Promise.all([
-    sbGet('kasa_reports','date=eq.'+todayStr+'&order=store_name.asc'+storeQ()),
-    sbGet('kasa_zoborot','date=eq.'+todayStr+storeQ()),
-    sbGet('kasa_documents','date=eq.'+todayStr+storeQ()),
+    kasaRangeGet('reports', ovP, function() { return sbGet('kasa_reports','date=eq.'+todayStr+'&order=store_name.asc'+storeQ()); },
+      function(rows) { return rows.map(function(r, i) { return [r, i]; }).sort(function(a, b) {
+        var sa = String(a[0].store_name || ''), sb = String(b[0].store_name || '');
+        return sa < sb ? -1 : sa > sb ? 1 : a[1] - b[1];
+      }).map(function(x) { return x[0]; }); }),
+    kasaRangeGet('zoborot', ovP, function() { return sbGet('kasa_zoborot','date=eq.'+todayStr+storeQ()); }),
+    kasaRangeGet('documents', ovP, function() { return sbGet('kasa_documents','date=eq.'+todayStr+storeQ()); }),
     sbGet('stores','select=name&order=name'+storeQ('name'))
   ]).then(function(res) {
     var reps   = Array.isArray(res[0]) ? res[0] : [];
@@ -317,8 +349,8 @@ function loadDailyOverview(dateOverride) {
     });
     html += '</tbody></table></div></div>';
     contentWrap.innerHTML = html;
-  }).catch(function() {
-    contentWrap.innerHTML = '<div style="color:#dc2626;padding:20px;">Грешка при зареждане.</div>';
+  }).catch(function(e) {
+    contentWrap.innerHTML = '<div style="color:#dc2626;padding:20px;">Грешка при зареждане.' + (e && e.kasaApi ? ' ' + esc(e.message) : '') + '</div>';
   });
 }
 
@@ -371,16 +403,19 @@ function openKasaDetail(storeName, date) {
 
   /* Зареди данните */
   var enc = encodeURIComponent(storeName);
+  /* kasa-api: една заявка „day“; обектът се проверява срещу обхвата в функцията. */
   Promise.all([
-    sbGet('kasa_reports', 'store_name=eq.' + enc + '&date=eq.' + date + '&order=pos_number.asc'),
-    sbGet('kasa_glavna',  'store_name=eq.' + enc + '&date=eq.' + date),
-    sbGet('kasa_zoborot', 'store_name=eq.' + enc + '&date=eq.' + date),
-    sbGet('kasa_documents', 'store_name=eq.' + enc + '&date=eq.' + date + '&order=created_at.asc')
+    kasaDayGet('kasa_reports', storeName, date, function() { return sbGet('kasa_reports', 'store_name=eq.' + enc + '&date=eq.' + date + '&order=pos_number.asc'); }),
+    kasaDayGet('kasa_glavna', storeName, date, function() { return sbGet('kasa_glavna',  'store_name=eq.' + enc + '&date=eq.' + date); }),
+    kasaDayGet('kasa_zoborot', storeName, date, function() { return sbGet('kasa_zoborot', 'store_name=eq.' + enc + '&date=eq.' + date); }),
+    kasaDayGet('kasa_documents', storeName, date, function() { return sbGet('kasa_documents', 'store_name=eq.' + enc + '&date=eq.' + date + '&order=created_at.asc'); })
   ]).then(function(res) {
     var reps  = Array.isArray(res[0]) ? res[0] : [];
     var gl    = (Array.isArray(res[1]) && res[1].length) ? res[1][0] : null;
     var zob   = (Array.isArray(res[2]) && res[2].length) ? res[2][0] : null;
     var docs  = Array.isArray(res[3]) ? res[3] : [];
+    /* R16: при kasa-api „Виж“ носи id и минава през основната страница — без ключ в прозореца. */
+    var viaApi = kasaApiOn(storeName);
 
     var canReturn = ['admin','accounting'].indexOf(currentUser.role) >= 0;
     var hasReturned = reps.some(function(r) { return r.status === 'returned'; });
@@ -570,7 +605,7 @@ function openKasaDetail(storeName, date) {
           '<span style="font-size:16px;">' + (/\.pdf$/i.test(d.file_name)?'📄':'🖼️') + '</span>' +
           '<div style="flex:1;"><div style="font-size:10pt;font-weight:500;">' + esc(d.file_name) + '</div>' +
           '<div style="font-size:8.5pt;color:#6b7280;">' + esc(d.doc_type) + ' · ' + esc(d.uploaded_by||'') + '</div></div>' +
-          '<button onclick="openKasaDocFromDetail(\'' + esc(d.file_url) + '\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:4px;padding:3px 10px;font-size:9pt;cursor:pointer;">Виж</button>' +
+          '<button onclick="openKasaDocFromDetail(\'' + (viaApi ? esc(d.id) : esc(d.file_url)) + '\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:4px;padding:3px 10px;font-size:9pt;cursor:pointer;">Виж</button>' +
         '</div>';
       }).join('') : '<div style="color:#94a3b8;padding:10px 0;">Няма прикачени документи.</div>') +
     '</div>';
@@ -597,6 +632,7 @@ function openKasaDetail(storeName, date) {
       '<h2>Документи</h2>' + docsHTML +
     '</div>' +
     '<script>' +
+    (viaApi ? kasaDocOpenerFn('openKasaDocFromDetail') : (
     'function openKasaDocFromDetail(path){' +
       'var encPath=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");' +
       'fetch("' + SB_STORAGE + '/object/sign/' + BUCKET + '/"+encPath, {' +
@@ -604,7 +640,7 @@ function openKasaDetail(storeName, date) {
         'headers:{"Authorization":"Bearer ' + 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA' + '","Content-Type":"application/json"},' +
         'body:JSON.stringify({expiresIn:3600})' +
       '}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("' + 'https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1' + '"+d.signedURL,"_blank");else alert("Грешка: "+JSON.stringify(d));});' +
-    '}' +
+    '}')) +
     'function returnForRevision(store, date){' +
       'var reason=prompt("Причина за връщане за корекция:");' +
       'if(!reason)return;' +
@@ -625,7 +661,7 @@ function returnKasaForRevision(storeName, date, reason) {
   var now = new Date().toISOString();
   var enc = encodeURIComponent(storeName);
   /* Вземи всички отчети за тази дата+магазин */
-  sbGet('kasa_reports', 'store_name=eq.' + enc + '&date=eq.' + date).then(function(reps) {
+  kasaDayGet('kasa_reports', storeName, date, function() { return sbGet('kasa_reports', 'store_name=eq.' + enc + '&date=eq.' + date); }).then(function(reps) {
     if (!Array.isArray(reps) || !reps.length) { toast('Няма отчети за тази дата', '#dc2626'); return; }
     /* ready_at/ready_by се нулират заедно със статуса. Иначе остават от
        първото подаване и магазинът виси в графата „изпратили" на дневния
@@ -674,5 +710,5 @@ function returnKasaForRevision(storeName, date, reason) {
       if(typeof loadHistory==='function') loadHistory();
       if(typeof loadKasa==='function') loadKasa();
     });
-  });
+  }).catch(kasaApiCatch); /* kasa-api: toast-ът е показан, нищо не се връща */
 }

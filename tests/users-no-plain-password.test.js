@@ -40,6 +40,8 @@ const ALLOWED = {
   'shared.js': [
     // тялото към auth-login, не колона
     `body:JSON.stringify({email:email,password:pass})`,
+    // полето за парола в модала за повторен вход (kasa-api, 20.11.2026)
+    `'<input id="kasa-reauth-pass" type="password" autocomplete="current-password" placeholder="Парола" onkeydown="if(event.key===\\'Enter\\')kasaReauthSubmit()" style="width:100%;box-sizing:border-box;border:1.5px solid #e2e8f0;border-radius:7px;padding:8px;margin-bottom:8px;font-family:inherit;">'+`,
   ],
   'supabase/functions/admin-users/handler.ts': [
     `// Бели списъци. Нищо извън тях не стига до базата — нито password,`,
