@@ -577,7 +577,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     ok('показва потвърждение, че е записан', /записан/.test(txt));
   }
 
-  section('12. Таблицата за 7 дни — липсващите дни се виждат');
+  section('12. Обектът НЕ вижда минали дни (решение 19.11.2026)');
   {
     const h = await view({
       data: {
@@ -588,17 +588,13 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
         stores: STORES
       }
     });
-    const tbl = h.doc.getElementById('dt-last7');
-    if (ok('таблицата за 7 дни съществува', !!tbl)) {
-      const rows = Array.prototype.slice.call(tbl.querySelectorAll('tr')).slice(1);
-      ok('показва точно 7 дни', rows.length === 7, 'редове: ' + rows.length);
-      const dashed = rows.filter(r => r.textContent.indexOf('—') >= 0);
-      ok('5-те дни без запис се показват като ред с тире, не се пропускат',
-        dashed.length === 5, 'с тире: ' + dashed.length);
-      const filled = rows.filter(r => r.textContent.indexOf('1000.00') >= 0);
-      ok('2-та дни със запис показват сумите', filled.length === 2);
-      ok('среден чек се смята', rows.some(r => r.textContent.indexOf('20.00') >= 0));
-    }
+    /* Беше: таблица #dt-last7 „Последните 7 дни". Махната — обектът вижда
+       само днешния ден. Подробно — tests/oborot-no-history.test.js. */
+    ok('таблицата за 7 дни НЕ съществува', !h.doc.getElementById('dt-last7'));
+    const txt = h.doc.getElementById('mod-kasa').textContent;
+    ok('няма надпис "Последните 7 дни"', txt.indexOf('Последните 7 дни') < 0);
+    ok('сумите от миналите дни не се виждат', txt.indexOf('1000.00') < 0);
+    ok('формата за днес си е на място', !!h.doc.getElementById('dt-total'));
   }
 
   section('13. Централен офис — обобщение вместо форма');
@@ -841,19 +837,15 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     ok('и сумира банката', totalRow.textContent.indexOf('250.50 EUR') >= 0);
   }
   {
-    /* Същото правило и в таблицата за 7 дни. */
+    /* Беше: същото правило в таблицата за 7 дни. Таблицата я няма от
+       19.11.2026 — миналият ден с банка не се показва на обекта изобщо. */
     const h = await view({
       data: {
         daily_turnover: [rec({ id: 'x', date: dayOffset(-1), bank_turnover: 0 })],
         stores: STORES_23, users: USERS_ROWS
       }
     });
-    const t7 = h.doc.getElementById('dt-last7');
-    const ths = Array.prototype.slice.call(t7.querySelectorAll('th')).map(x => x.textContent);
-    ok('7 дни без банка → няма колона', ths.indexOf('Банка') < 0, ths.join(','));
-    const rows = Array.prototype.slice.call(t7.querySelectorAll('tr')).slice(1);
-    ok('всички редове са с 6 клетки',
-      rows.every(r => r.querySelectorAll('td').length === 6));
+    ok('обект: няма таблица за 7 дни (и без банка)', !h.doc.getElementById('dt-last7'));
   }
   {
     const h = await view({
@@ -865,14 +857,9 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
         stores: STORES_23, users: USERS_ROWS
       }
     });
-    const t7 = h.doc.getElementById('dt-last7');
-    const ths = Array.prototype.slice.call(t7.querySelectorAll('th')).map(x => x.textContent);
-    ok('поне един ден с банка → колоната се появява', ths.indexOf('Банка') >= 0);
-    const rows = Array.prototype.slice.call(t7.querySelectorAll('tr')).slice(1);
-    ok('ВСИЧКИ редове стават 7 клетки, и празните',
-      rows.every(r => r.querySelectorAll('td').length === 7),
-      rows.map(r => r.querySelectorAll('td').length).join(','));
-    ok('денят с банка показва сумата', t7.textContent.indexOf('40.00 EUR') >= 0);
+    ok('обект: няма таблица за 7 дни (и с банка)', !h.doc.getElementById('dt-last7'));
+    ok('банката от минал ден не се вижда',
+      h.doc.getElementById('mod-kasa').textContent.indexOf('40.00 EUR') < 0);
   }
   {
     /* Записът за деня: редът „По банка" се появява само при ненулева. */

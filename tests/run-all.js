@@ -368,6 +368,7 @@ const TESTS = [
   'mail-from-name.test.js',
   'resend-email-attach.test.js',
   'daily-turnover.test.js',
+  'oborot-no-history.test.js',
   'kasa-tab-routing.test.js',
   'kasa-ui.test.js',
   'kasa-work-day.test.js',

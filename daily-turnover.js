@@ -313,8 +313,9 @@ function loadOborot(){
     }).catch(function(){renderOborot();});
     return;
   }
-  /* Един прочит покрива и трите нужди: днешния запис, таблицата за 7 дни
-     и средното за 30 дни. */
+  /* Един прочит покрива двете нужди: днешния запис и средното за 30 дни
+     (предупреждението „необичайно високо"). Миналите дни НЕ се показват на
+     обекта (19.11.2026), но четенето остава заради средното. */
   var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+
         '&date=gte.'+dtDay(29)+'&order=date.desc';
   sbGet('daily_turnover',q).then(function(data){
@@ -358,8 +359,10 @@ function renderOborot(){
 /* ── Изглед МАГАЗИН ── */
 /* Предупреждението е НАД картата, не вътре в нея: то важи и когато записът
    още не се е върнал от базата и долу пак се вижда формата. */
+/* Обектът вижда САМО днешния ден — без история на минали дни (решение на
+   Теодор, 19.11.2026). Миналите дни остават само в справката за ЦО. */
 function dtStoreView(){
-  return dtTaskWarnBand()+dtTodayBlock()+dtLast7Block();
+  return dtTaskWarnBand()+dtTodayBlock();
 }
 
 function dtTodayBlock(){
@@ -439,60 +442,6 @@ function dtInpRow(label,id,suffix,isInt,allowNeg){
       'font-family:DM Mono,monospace;font-size:13px;text-align:right;">'+
     '</td>'+
     '<td style="padding:6px 4px;color:#64748b;width:34px;">'+(suffix||'')+'</td></tr>';
-}
-
-/* Последните 7 дни за собствения обект. Ден без запис се показва като ред с
-   тире, а не се пропуска — иначе липсата остава невидима. */
-function dtLast7Block(){
-  var byDate={};
-  for(var i=0;i<oborotRecent.length;i++) byDate[oborotRecent[i].date]=oborotRecent[i];
-
-  /* Колоната „Банка" се решава ВЕДНЪЖ за целите 7 дни, а не за всеки ред —
-     иначе редовете щяха да имат различен брой клетки. */
-  var days=[];
-  for(var q=0;q<7;q++){ var kk=dtDay(q); if(byDate[kk]) days.push(byDate[kk]); }
-  var showBank=dtAnyBank(days);
-
-  var rows='';
-  for(var d=0;d<7;d++){
-    var key=dtDay(d), r=byDate[key];
-    if(r){
-      rows+='<tr style="border-bottom:1px solid #f1f5f9;">'+
-        '<td style="padding:7px 4px;">'+fmtDate(key)+'</td>'+
-        '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;font-weight:600;">'+dtMoney(r.total_turnover)+'</td>'+
-        '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(r.cash_turnover)+'</td>'+
-        '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(r.card_turnover)+'</td>'+
-        (showBank?'<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtBankCell(r)+'</td>':'')+
-        '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+(parseInt(r.customers,10)||0)+'</td>'+
-        '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtAvgCheck(r.total_turnover,r.customers)+'</td>'+
-      '</tr>';
-    } else {
-      rows+='<tr style="border-bottom:1px solid #f1f5f9;color:#94a3b8;">'+
-        '<td style="padding:7px 4px;">'+fmtDate(key)+'</td>'+
-        '<td style="text-align:right;padding:7px 4px;">—</td>'+
-        '<td style="text-align:right;padding:7px 4px;">—</td>'+
-        '<td style="text-align:right;padding:7px 4px;">—</td>'+
-        (showBank?'<td style="text-align:right;padding:7px 4px;">—</td>':'')+
-        '<td style="text-align:right;padding:7px 4px;">—</td>'+
-        '<td style="text-align:right;padding:7px 4px;">—</td>'+
-      '</tr>';
-    }
-  }
-  return '<div class="card">'+
-    '<div class="card-title">Последните 7 дни</div>'+
-    '<div style="overflow-x:auto;">'+
-    '<table id="dt-last7" style="width:100%;font-size:13px;border-collapse:collapse;">'+
-      '<tr style="border-bottom:1px solid #e2e8f0;color:#64748b;">'+
-        '<th style="text-align:left;padding:7px 4px;font-weight:500;">Дата</th>'+
-        '<th style="text-align:right;padding:7px 4px;font-weight:500;">Общ</th>'+
-        '<th style="text-align:right;padding:7px 4px;font-weight:500;">В брой</th>'+
-        '<th style="text-align:right;padding:7px 4px;font-weight:500;">С карта</th>'+
-        (showBank?'<th style="text-align:right;padding:7px 4px;font-weight:500;">Банка</th>':'')+
-        '<th style="text-align:right;padding:7px 4px;font-weight:500;">Клиенти</th>'+
-        '<th style="text-align:right;padding:7px 4px;font-weight:500;">Среден чек</th>'+
-      '</tr>'+rows+
-    '</table></div>'+
-  '</div>';
 }
 
 /* ── Изглед ЦЕНТРАЛЕН ОФИС ──
