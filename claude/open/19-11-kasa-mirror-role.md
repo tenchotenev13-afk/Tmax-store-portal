@@ -1,0 +1,3 @@
+Отворено: 19.11 · Кой чака: Тенчо · Сесия: kasa-api-etap1b
+
+**Каса — огледалото след етап 2 (вариант А, решение 19.11).** Когато в етап 2 се отнеме SELECT за anon от седемте касови таблици (`kasa_reports`, `kasa_glavna`, `kasa_zoborot`, `kasa_documents`, `kasa_storno`, `kasa_storno_items`, `daily_turnover`), огледалото на Живко спира да ги получава. Решено: отделна Postgres роля само за четене (напр. `mirror_reader`) с JWT само за огледалото — подробности и рискове в `claude/kasa-api-dizajn.md`, т.6. Миграцията за етап 2 не тръгва преди това. Отделно: `perform_daily_backup` не включва `kasa_storno`, `kasa_storno_items`, `kasa_documents`, `daily_turnover`. Също отделно (решение 10): `tools/regression/*` четат таблиците с anon ключа и след етап 2 ще връщат празно.
