@@ -51,8 +51,13 @@ const crypto = require('crypto');
    m3 — един блок от 252 знака, едно срещане и нищо друго: без него HTML-ът е
    байт по байт старата снимка 51ced347… (6247), проверено машинно.
    Виж preocenka-dovarshvane.test.js. */
-const MODAL_SHA = 'b06d658c2459645656141ae76447980c7a310ab424267c28f376b1ad12daf530';
-const MODAL_LEN = 6499;
+/* Обновена на 19.11.2026 (6499 -> 6575): етап 7а на Разлики — предупреждението
+   „⚠️ Проблемен артикул“ под реда: oninput="sdPaWarnRow(this)" (28),
+   ;sdPaWarnRow(this) в onblur (18) и празният <div class="di-pa-warn"></div> (30),
+   по едно срещане и нищо друго: без тях HTML-ът е байт по байт старата снимка
+   b06d658c… (6499), проверено машинно. Виж razliki-etap7a.test.js. */
+const MODAL_SHA = '4519db9fd177567a1ad6fd6ad34aea573f123844a223baad6adcdaa8a682d604';
+const MODAL_LEN = 6575;
 
 const WH = 'Логистичен склад Търговище';
 const STORE = { email: 'petrich@temax.bg', display_name: 'Управител Петрич',

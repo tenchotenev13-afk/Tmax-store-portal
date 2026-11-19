@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията problem_articles, problem-articles-schema.sql, версия 20261119102207, приложена 19.11.2026; началните 23 реда — миграцията problem_articles_seed, версия 20261119102729)
+- 19.11 · нова таблица problem_articles — id uuid NOT NULL (PK), default gen_random_uuid() · material_code text NOT NULL · material_name text NULL · reads_as_code text NULL · reads_as_name text NULL · store_action text NOT NULL, default 'за преналепяне' · note text NULL · photos jsonb NOT NULL, default '[]' · valid_from date NOT NULL, default current_date · status text NOT NULL, default 'active' (стойности 'active' / 'closed') · source text NOT NULL, default 'office' (стойности 'seed' / 'office' / 'diff') · source_line_id uuid NULL · created_by text NULL · created_at timestamptz NULL, default now() · updated_by text NULL · updated_at timestamptz NULL · closed_by text NULL · closed_at timestamptz NULL
+
 (информативно, не схема — миграцията loading_list_delete_draft, loading-list-delete-draft-schema.sql, версия 20261118095818, приложена 18.11.2026)
 - 18.11 · loading_lists, loading_list_items — нова колона НЯМА. От тази дата черновите (status 'draft') на товарни листи могат да се трият от портала („🗑 Изтрий черновата"): редове от loading_lists и loading_list_items (+ loading_list_products, loading_list_photos по каскада) изчезват от базата. Огледалото ги пази — ако синхронизацията трие изчезналите редове, черновата изчезва и там; ако не — остава като сирак със status 'draft'.
 

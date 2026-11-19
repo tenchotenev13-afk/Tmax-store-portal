@@ -20,7 +20,11 @@ function sdViewGet(){
 }
 function sdViewSave(v){ try{ localStorage.setItem(SD_VIEW_KEY, v); }catch(e){} }
 var sdView = sdViewGet();
-function setSDView(v){ sdView = (v==='rows') ? 'rows' : 'reports'; sdViewSave(sdView); renderStockDiff(); }
+/* 'problems' (етап 7а) не се помни — следващото отваряне е на бланките/редовете. */
+function setSDView(v){
+  if(v==='problems'){ sdView = 'problems'; renderStockDiff(); return; }
+  sdView = (v==='rows') ? 'rows' : 'reports'; sdViewSave(sdView); renderStockDiff();
+}
 /* Отваря изгледа с бланките, без да рендира (за скокове отвън, преди showModule). */
 function sdOpenReportsView(){ sdView = 'reports'; sdViewSave('reports'); }
 /* Скок отвън до един ред (Минуси, „Отвори в Разлики", 19.11.2026). l носи
@@ -412,7 +416,7 @@ function loadStockDiff() {
     diffReports = Array.isArray(res[1]) ? res[1] : [];
     /* Размените и връзките към „За връщане" зависят от вече заредените
        редове - затова след Promise.all, не в него. */
-    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks(), sdLoadStornoNotes(sq), sdLoadMe()]);
+    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks(), sdLoadStornoNotes(sq), sdLoadMe(), sdLoadProblemArticles()]);
   }).then(function(){
     renderStockDiff();
   }).catch(function(err) {
@@ -474,7 +478,7 @@ function renderStockDiff() {
      (грижа на Цвети) с междускладовите (грижа на логистичните складове).
      Не важи за самите складове - тяхната видимост вече е ограничена
      другояче (само собствените им насрещни). */
-  if(sdDirTabsActive()){
+  if(sdDirTabsActive() && sdView !== 'problems'){
     /* Броячите се СТРОЯТ от регистъра, а не са литерали - иначе всяка нова
        посока би се броила като 0, без нищо да се счупи видимо. */
     var dirCounts = {}, dirNew = {};
@@ -520,20 +524,22 @@ function renderStockDiff() {
 
   /* Търсене + чипове по магазин - филтрират И новите бланки, И таблицата
      (както в таб "За връщане") */
-  h += '<input id="sd-search-input" value="'+escVal(sdSearch)+'" oninput="setSDSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик/изпращач, артикул, SAP, документ, поръчка..." style="width:100%;max-width:520px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
-  h += sdStoreChipsHtml();
+  /* Търсенето, чиповете по магазин и банерът са за бланките и редовете — не за
+     „🏷️ Проблемни артикули“ (там има свое търсене). */
+  if (sdView !== 'problems') h += '<input id="sd-search-input" value="'+escVal(sdSearch)+'" oninput="setSDSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик/изпращач, артикул, SAP, документ, поръчка..." style="width:100%;max-width:520px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
+  if (sdView !== 'problems') h += sdStoreChipsHtml();
 
   /* Какво остава на ОБЕКТА и какво следва от това. Броят е ОБЩИЯТ, не този в
      подтаба: задачата гледа всички междускладови редове, а обект, изчистил
      „Доставчици", иначе би решил, че е готов, и би чакал отметка, която няма
      да дойде. */
-  h += sdStoreBannerHtml();
+  if (sdView !== 'problems') h += sdStoreBannerHtml();
 
   /* Превключвател на изгледите — ВИНАГИ видим (и при 0). Числата са това, което се вижда при
      текущите филтри: бланките — както в заглавието на секцията (sdReportsCount), редовете — sdTableRows(). */
   var swWh = isLogisticsWarehouseUser();
   h += '<div id="sd-view-switch" style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:520px;">';
-  [['reports', swWh ? 'Бланки към мен' : 'Бланки за преглед', sdReportsCount()], ['rows', swWh ? 'Приети редове' : 'Решени редове', list.length]].forEach(function(v){
+  [['reports', swWh ? 'Бланки към мен' : 'Бланки за преглед', sdReportsCount()], ['rows', swWh ? 'Приети редове' : 'Решени редове', list.length], ['problems', '🏷️ Проблемни артикули', sdPaActive().length]].forEach(function(v){
     var a = sdView===v[0];
     h += '<button data-sd-view="'+v[0]+'" onclick="setSDView(this.dataset.sdView)" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:'+(a?'#2f2f2f':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+v[1]+' ('+v[2]+')</button>';
   });
@@ -548,6 +554,9 @@ function renderStockDiff() {
     h += sdWhChipsHtml();
     var repHtml = renderDiffReportsSection();
     h += repHtml || '<div id="sd-reports-empty" style="text-align:center;padding:50px 20px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:14px;"><div style="font-size:36px;">📭</div><div style="margin-top:8px;">Няма бланки за преглед</div></div>';
+  } else if (sdView === 'problems') {
+    /* Изглед „🏷️ Проблемни артикули“ (етап 7а). */
+    h += sdPaHtml();
   } else {
     /* Изглед „Редове“: чипове по тип и статус, Excel и таблицата. */
     /* Филтър по тип. Числото е "колко реда ще видиш при клик" - затова минава
@@ -4585,11 +4594,13 @@ function diffItemRowHtml(item,direction){
   var meta=item.category?diffCatMeta(item.category):null;
   return '<div class="diff-item-row" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:8px;">'+
     '<div style="display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-bottom:6px;">'+
-      '<input class="fi di-sap" placeholder="SAP №" value="'+escVal(item.sap)+'" onblur="lookupCatalogBySap(this)">'+
+      '<input class="fi di-sap" placeholder="SAP №" value="'+escVal(item.sap)+'" oninput="sdPaWarnRow(this)" onblur="lookupCatalogBySap(this);sdPaWarnRow(this)">'+
       '<input class="fi di-name" placeholder="Наименование на артикула *" value="'+escVal(item.name)+'">'+
     '</div>'+
     /* Бележка от търсенето в каталога - пълни се от lookupCatalogBySap() */
     '<div class="di-lookup-hint"></div>'+
+    /* Етап 7а: „⚠️ Проблемен артикул“ — от регистъра, по въведения SAP код. */
+    '<div class="di-pa-warn">'+sdPaWarnHtml(item.sap)+'</div>'+
     /* Колоните са същите (quantity / quantity_received), сменя се само думата:
        при сторната сравнението е фактура ↔ заприходено. Надписът е НАД полето
        и е постоянен (diffQtyLabels().form*); в полето - само „бр.", за да не се
@@ -6885,4 +6896,217 @@ if(typeof startApp === 'function'){
     _sdOrigStartApp();
     setTimeout(startSDBadgePolling, 2500);
   };
+}
+
+/* ══ Проблемни артикули (етап 7а, 19.11.2026; решения на Миглена 14.10 и 22.10,
+   Тенчо 22.10 — отделен под-таб в Разлики, Минуси само чете оттам) ══
+   Регистър problem_articles: артикул, чийто баркод се чете като друг (за
+   преналепяне). Изгледът sdView 'problems' — третият бутон в превключвателя
+   „Бланки / Решени редове“, видим за всички роли, които виждат Разлики.
+   · Четене — веднъж при отваряне на модула (sdLoadProblemArticles; повторно
+     само след собствен запис). Паднало четене → console.error, празен
+     регистър, червен ред само в под-таба; във формата — без кутийка и без
+     грешка към обекта.
+   · Писане — само групите 'razliki_co' / 'razliki_barcode' (sdMe, етап 5а);
+     ролята admin сама — не; складът и обектът — само четене. Не се трие:
+     „✅ Затвори“ → status 'closed' + closed_by / closed_at.
+   · Един активен запис на код — проверка тук (червен toast, без POST) и
+     уникален частичен индекс в базата (грешката не се поглъща).
+   · Предупреждение във формата за подаване (sdPaWarnRow): SAP кодът е
+     material_code или reads_as_code на АКТИВЕН запис → жълта кутийка под
+     реда; не спира подаването. */
+var sdPa = [];
+var sdPaLoaded = false;
+var sdPaFailed = false;
+var sdPaSearch = '';
+var sdPaShowClosed = false;
+function sdLoadProblemArticles(force){
+  if(sdPaLoaded && !force) return Promise.resolve();
+  return sbGetOk('problem_articles', 'select=*&order=material_code.asc,id.asc').then(function(res){
+    sdPaLoaded = true;
+    if(!res.ok){
+      sdPa = []; sdPaFailed = true;
+      try{ console.error('problem_articles: ' + res.error); }catch(e){}
+      return;
+    }
+    /* По код с числова подредба — текстовата в базата слага 104894 преди 34924. */
+    sdPa = (res.rows || []).slice().sort(function(x, y){ return sdPaCode(x.material_code).localeCompare(sdPaCode(y.material_code), 'bg', { numeric: true }) || String(x.id).localeCompare(String(y.id)); });
+    sdPaFailed = false;
+  });
+}
+function sdPaCanWrite(){
+  if(!currentUser || isLogisticsWarehouseUser()) return false;
+  var g = (typeof sdMe === 'object' && sdMe && sdMe.groups) || [];
+  return g.indexOf('razliki_co') >= 0 || g.indexOf('razliki_barcode') >= 0;
+}
+function sdPaActive(){ return sdPa.filter(function(p){ return p && p.status === 'active'; }); }
+function sdPaClosed(){ return sdPa.filter(function(p){ return p && p.status === 'closed'; }); }
+function sdPaCode(v){ return String(v == null ? '' : v).trim(); }
+/* Активният запис с този код като material_code (exceptId — без него, за
+   редакцията). */
+function sdPaActiveByCode(code, exceptId){
+  var c = sdPaCode(code);
+  if(!c) return null;
+  return sdPaActive().filter(function(p){ return sdPaCode(p.material_code) === c && String(p.id) !== String(exceptId || ''); })[0] || null;
+}
+/* Предупреждението за въведен SAP код: {p, as:'code'|'reads'} или null. */
+function sdPaMatch(code){
+  var c = sdPaCode(code);
+  if(!c) return null;
+  var act = sdPaActive();
+  var a = act.filter(function(p){ return sdPaCode(p.material_code) === c; })[0];
+  if(a) return { p: a, as: 'code' };
+  var b = act.filter(function(p){ return sdPaCode(p.reads_as_code) === c; })[0];
+  return b ? { p: b, as: 'reads' } : null;
+}
+function sdPaWarnHtml(code){
+  var m = sdPaMatch(code);
+  if(!m) return '';
+  var p = m.p, txt;
+  var who = function(c, n){ return esc(sdPaCode(c)) + (n ? ' ' + esc(n) : ''); };
+  if(m.as === 'code'){
+    txt = '⚠️ Проблемен артикул: <b>' + who(p.material_code, p.material_name) + '</b> — ' +
+      (p.reads_as_code ? 'баркодът чете като <b>' + who(p.reads_as_code, p.reads_as_name) + '</b>.' : 'баркодът не се чете правилно.');
+  } else {
+    txt = '⚠️ Проблемен артикул: <b>' + who(p.reads_as_code, p.reads_as_name) + '</b> — този баркод се чете и за <b>' + who(p.material_code, p.material_name) + '</b>.';
+  }
+  txt += ' В обектите: <b>' + esc(p.store_action || '') + '</b>.' + (p.note ? ' <span style="font-weight:400;">(' + esc(p.note) + ')</span>' : '');
+  return '<div class="sd-pa-warn" style="background:#fef9c3;border:1px solid #facc15;border-radius:5px;padding:5px 8px;font-size:11.5px;color:#713f12;margin:0 0 6px;">' + txt + '</div>';
+}
+/* Обновява кутийката под реда от въведения SAP код. */
+function sdPaWarnRow(inputEl){
+  var row = inputEl && inputEl.closest ? inputEl.closest('.diff-item-row') : null;
+  var box = row ? row.querySelector('.di-pa-warn') : null;
+  if(!box) return;
+  box.innerHTML = sdPaWarnHtml(inputEl.value);
+}
+function setSDPaSearch(v){
+  sdPaSearch = String(v || '');
+  var el = document.getElementById('sd-pa-body');
+  if(el){ el.innerHTML = sdPaRowsHtml(); return; }
+  renderStockDiff();
+}
+function setSDPaShowClosed(on){ sdPaShowClosed = !!on; renderStockDiff(); }
+function sdPaVisible(){
+  var q = sdPaSearch.trim().toLowerCase();
+  return (sdPaShowClosed ? sdPaClosed() : sdPaActive()).filter(function(p){
+    if(!q) return true;
+    return [p.material_code, p.material_name, p.reads_as_code, p.reads_as_name].join(' ').toLowerCase().indexOf(q) >= 0;
+  });
+}
+function sdPaRowsHtml(){
+  var list = sdPaVisible(), w = sdPaCanWrite();
+  if(!list.length){
+    return '<tr><td colspan="' + (w ? 8 : 7) + '" id="sd-pa-empty" style="padding:24px;text-align:center;color:#94a3b8;">' +
+      (sdPaShowClosed ? 'Няма затворени записи' : 'Няма активни записи') + (sdPaSearch.trim() ? ' по това търсене' : '') + '</td></tr>';
+  }
+  var TD = 'padding:6px 8px;font-size:12px;border-bottom:1px solid #eef1f6;vertical-align:top;';
+  return list.map(function(p){
+    var closed = p.status === 'closed';
+    return '<tr class="sd-pa-row" data-id="' + esc(String(p.id)) + '">' +
+      '<td style="' + TD + 'font-weight:700;white-space:nowrap;">' + esc(sdPaCode(p.material_code)) + '</td>' +
+      '<td style="' + TD + '">' + esc(p.material_name || '') + '</td>' +
+      '<td style="' + TD + '">' + (p.reads_as_code ? '<b>' + esc(sdPaCode(p.reads_as_code)) + '</b> ' + esc(p.reads_as_name || '') : (p.reads_as_name ? esc(p.reads_as_name) : '<span style="color:#94a3b8;">—</span>')) + '</td>' +
+      '<td style="' + TD + '">' + esc(p.store_action || '') + '</td>' +
+      '<td style="' + TD + 'color:#475569;">' + esc(p.note || '') + '</td>' +
+      '<td style="' + TD + 'white-space:nowrap;">' + esc(fmtDate(p.valid_from)) + '</td>' +
+      '<td style="' + TD + 'white-space:nowrap;">' + (closed
+        ? '<span style="color:#64748b;">Затворен' + (p.closed_at ? ' · ' + esc(sdFmtDayMonth(p.closed_at)) : '') + (p.closed_by ? ' · ' + esc(p.closed_by) : '') + '</span>'
+        : '<span style="color:#047857;font-weight:600;">Активен</span>') + '</td>' +
+      (w ? '<td style="' + TD + 'white-space:nowrap;">' + (closed ? '' :
+        '<button class="sd-pa-edit" data-id="' + esc(String(p.id)) + '" onclick="openSDPaModal(this.dataset.id)" title="Редакция" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button> ' +
+        '<button class="sd-pa-close" data-id="' + esc(String(p.id)) + '" onclick="closeSDPa(this.dataset.id)" style="border:none;background:#047857;color:#fff;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;">✅ Затвори</button>') + '</td>' : '') +
+      '</tr>';
+  }).join('');
+}
+function sdPaHtml(){
+  var w = sdPaCanWrite(), nClosed = sdPaClosed().length;
+  var h = '<div id="sd-pa" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;">';
+  h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">' +
+    '<div style="font-size:15px;font-weight:700;">🏷️ Проблемни артикули</div>' +
+    '<div style="font-size:12px;color:#64748b;flex:1 1 200px;">Артикули, чийто баркод се чете като друг. Във формата за подаване на разлика излиза предупреждение.</div>' +
+    (w ? '<button id="sd-pa-new" onclick="openSDPaModal(null)" style="border:none;background:#7c3aed;color:#fff;border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">➕ Нов запис</button>' : '') +
+    '</div>';
+  if(sdPaFailed) h += '<div id="sd-pa-failed" style="margin-bottom:10px;padding:8px 10px;background:#FDECEA;border:1px solid #C0392B;border-radius:6px;font-size:12px;font-weight:700;color:#C0392B;">⚠️ Регистърът не можа да се зареди</div>';
+  h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">' +
+    '<input id="sd-pa-search" value="' + escVal(sdPaSearch) + '" oninput="setSDPaSearch(this.value)" placeholder="🔍 Код или име (и „чете се като“)" style="flex:1 1 260px;max-width:420px;border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:inherit;">' +
+    '<button id="sd-pa-closed-chip" onclick="setSDPaShowClosed(!sdPaShowClosed)" style="border:1px solid ' + (sdPaShowClosed ? '#334155' : '#e2e8f0') + ';background:' + (sdPaShowClosed ? '#334155' : '#fff') + ';color:' + (sdPaShowClosed ? '#fff' : '#64748b') + ';border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">Затворени (' + nClosed + ')</button>' +
+    '</div>';
+  var TH = 'padding:6px 8px;font-size:10.5px;font-weight:700;color:#6B7280;text-align:left;background:#F9FAFC;border-bottom:1px solid #e2e8f0;';
+  h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr>' +
+    '<th style="' + TH + '">Код</th><th style="' + TH + '">Име</th><th style="' + TH + '">Чете се като</th>' +
+    '<th style="' + TH + '">Какво прави обектът</th><th style="' + TH + '">Бележка</th><th style="' + TH + '">От кога</th><th style="' + TH + '">Статус</th>' +
+    (w ? '<th style="' + TH + '"></th>' : '') + '</tr></thead><tbody id="sd-pa-body">' + sdPaRowsHtml() + '</tbody></table></div>';
+  return h + '</div>';
+}
+function openSDPaModal(id){
+  if(!sdPaCanWrite()) return;
+  var p = id ? sdPa.filter(function(x){ return String(x.id) === String(id); })[0] : null;
+  if(id && !p) return;
+  p = p || { store_action: 'за преналепяне', valid_from: today() };
+  var ex = document.getElementById('sdpa-ov'); if(ex) ex.remove();
+  var fld = function(lbl, idAttr, val, type){
+    return '<label class="fl">' + lbl + '</label><input class="fi" id="' + idAttr + '"' + (type ? ' type="' + type + '"' : '') + ' value="' + escVal(val) + '" style="margin-bottom:8px;">';
+  };
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdpa-ov"><div class="bmod" style="width:460px;">' +
+    '<div style="font-size:15px;font-weight:600;margin-bottom:10px;">' + (id ? '✏️ Проблемен артикул' : '➕ Нов проблемен артикул') + '</div>' +
+    fld('Код по система *', 'sdpa-code', p.material_code) +
+    fld('Име', 'sdpa-name', p.material_name) +
+    fld('Баркодът чете като — код', 'sdpa-rcode', p.reads_as_code) +
+    fld('Баркодът чете като — име', 'sdpa-rname', p.reads_as_name) +
+    fld('Какво прави обектът *', 'sdpa-action', p.store_action) +
+    fld('Бележка', 'sdpa-note', p.note) +
+    fld('От кога', 'sdpa-from', p.valid_from, 'date') +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
+    '<button onclick="document.getElementById(\'sdpa-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button id="sdpa-save" data-id="' + escVal(id || '') + '" onclick="submitSDPa(this.dataset.id)" style="border:none;background:#7c3aed;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>' +
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+function submitSDPa(id){
+  if(!sdPaCanWrite()) return;
+  var v = function(x){ var el = document.getElementById(x); return el ? String(el.value || '').trim() : ''; };
+  var code = v('sdpa-code'), action = v('sdpa-action');
+  if(!code || !action){ toast('Код по система и „Какво прави обектът“ са задължителни', '#dc2626'); return; }
+  var dup = sdPaActiveByCode(code, id);
+  if(dup){ toast('Вече има активен запис за код ' + code, '#dc2626'); return; }
+  var body = {
+    material_code: code, material_name: v('sdpa-name') || null,
+    reads_as_code: v('sdpa-rcode') || null, reads_as_name: v('sdpa-rname') || null,
+    store_action: action, note: v('sdpa-note') || null, valid_from: v('sdpa-from') || today()
+  };
+  var at = new Date().toISOString(), by = sdActor();
+  var req;
+  if(id){
+    body.updated_by = by; body.updated_at = at;
+    req = sbPatch('problem_articles', 'id=eq.' + encodeURIComponent(id), body);
+  } else {
+    body.status = 'active'; body.source = 'office'; body.created_by = by;
+    req = sbPost('problem_articles', body);
+  }
+  return req.then(function(res){
+    if(!res || !res.ok){
+      var msg = (typeof sbErrMsg === 'function') ? sbErrMsg(res) : 'грешка';
+      /* 23505 — уникалният индекс в базата (паралелен запис от друг човек). */
+      var isDup = !!(res && res.error && (res.error.code === '23505' || /duplicate|unique/i.test(String(res.error.message || ''))));
+      toast(isDup ? 'Вече има активен запис за код ' + code + ' (базата отказа)' : 'Грешка при запис (' + code + '): ' + msg, '#dc2626');
+      return;
+    }
+    var ov = document.getElementById('sdpa-ov'); if(ov) ov.remove();
+    toast('✅ Записано');
+    return sdLoadProblemArticles(true).then(function(){ renderStockDiff(); });
+  });
+}
+function closeSDPa(id){
+  if(!sdPaCanWrite()) return;
+  var p = sdPa.filter(function(x){ return String(x.id) === String(id); })[0];
+  if(!p || p.status !== 'active') return;
+  if(!confirm('Затваряш записа за ' + sdPaCode(p.material_code) + '? Остава в „Затворени“, не се трие.')) return;
+  var body = { status: 'closed', closed_by: sdActor(), closed_at: new Date().toISOString() };
+  return sbPatch('problem_articles', 'id=eq.' + encodeURIComponent(id), body).then(function(res){
+    if(!res || !res.ok){ toast('Грешка при затваряне (' + sdPaCode(p.material_code) + '): ' + ((typeof sbErrMsg === 'function') ? sbErrMsg(res) : 'грешка'), '#dc2626'); return; }
+    toast('✅ Затворен');
+    return sdLoadProblemArticles(true).then(function(){ renderStockDiff(); });
+  });
 }
