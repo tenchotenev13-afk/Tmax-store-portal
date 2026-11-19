@@ -264,6 +264,7 @@ const TESTS = [
   'task-window-report.test.js',
   'rec-window-from-version.test.js',
   'notify-today-window.test.js',
+  'bulletin-notify-loading-pending.test.js',
   'na-auto-complete-guard.test.js',
   'na-store-declare.test.js',
   'na-office-view.test.js',

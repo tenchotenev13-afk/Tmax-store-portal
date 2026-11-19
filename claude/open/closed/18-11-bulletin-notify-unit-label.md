@@ -1,3 +1,4 @@
 Отворено: 18.11 · Кой чака: Code · Сесия: ll-nahodki
+Затворено: 19.11 · Как: bulletin-notify v25 (сесия bulletin-notify-ll) — loadingUnitLabel като llKindLabel („руло / извънгабаритен N от M"), плюс wrong_store is null в темата; tests/bulletin-notify-loading-pending.test.js (32 проверки, 4 мутанта убити). Деплоят и сухото пускане — в claude/log/2026-11-19-bulletin-notify-ll.md.
 
 - **`bulletin-notify` — `loadingUnitLabel` (index.ts ~2241) не знае извънгабаритния и номера на рулото.** Намерено при сверката по правило 7 (ll-nahodki, т.3/т.4). За `roll` връща „рула" без номер, за `oversize` — суровото `oversize`. Порталът (`llKindLabel`) казва „руло N от M" / „извънгабаритен N от M". Засяга напомнянето за неприети редове (тема `loading_lists_pending`). Едж функциите бяха извън обхвата на ll-nahodki — поправката е отделна сесия (заедно с напомнянето за неприет лист, което и без това пипа същата функция). Деплой по стъпките в CLAUDE.md (CLI, обратно четене).

@@ -12,6 +12,19 @@
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //   store_open_items — Незавършено за обекта: по едно писмо на обект (v19)
 //
+// v25 (19.11.2026, след v24 от sutreshno-obekt-2-razliki) — САМО темата
+//   loading_lists_pending (сесия bulletin-notify-ll; v24 е store_open_items),
+//   за да смята и назовава като портала:
+//   (1) ред с wrong_store („🔀 За друг обект", 17.11.2026) НЕ е чакащ —
+//   заявката е с wrong_store is null, както notifLoadingListsPending()
+//   (notifications.js) и llHandled() (loading.js); двойка лист+обект само с
+//   такива редове не влиза изобщо. (2) loadingUnitLabel като llKindLabel():
+//   „палет / руло / извънгабаритен N от M", без номер — само думата, „насип";
+//   досега рулото беше „рула" без номер, а извънгабаритният — суровото
+//   „oversize". (3) Писмото казва и „за друг обект" — в бележката горе и в
+//   реда „Отметни ги …". Получателите, часовете, кронът и другите теми —
+//   непроменени.
+//
 // v24 (17.11.2026; деплой 19.11, след v23) — store_open_items, етап 2,
 //   първа секция: „Разлики — чакат вас" (SOI_SECTIONS → 'razliki'). Правилото е това на „Решени
 //   редове" за обекта (sdStoreMustAct → sdRowAwaitsMark, копие от
@@ -2171,13 +2184,17 @@ async function runPromoExpiring(supabase: any, topic: any, bg: any, dryRun: bool
    което да се закачи, значи мястото му е в крона.
 
    КРИТЕРИЙ: status='sent' И sent_at по-старо от 48 часа И поне един ред за
-   обекта, който е received=false И missing=false.
+   обекта, който е received=false И missing=false И wrong_store is null.
 
-   Защо и двете условия по реда: „неполучен" НЕ е същото като „чакащ".
+   Защо трите условия по реда: „неполучен" НЕ е същото като „чакащ".
    Обектът, който е заявил липса, вече се е произнесъл — камионът няма да я
-   донесе и напомнянето не иска нищо от него. Само `received=false` би
-   напомняло вечно за редове, по които въпросът е решен. Същата разлика като
-   в notifLoadingListsPending() (notifications.js).
+   донесе и напомнянето не иска нищо от него. Същото е „🔀 За друг обект"
+   (wrong_store, от 17.11.2026): стоката е пристигнала, но е за друг обект —
+   редът е обработен и чака склада, не обекта. Само `received=false` би
+   напомняло вечно за редове, по които въпросът е решен. Същото правило като
+   llHandled() (loading.js) и notifLoadingListsPending() (notifications.js);
+   синхронът е заковано в tests/bulletin-notify-loading-pending.test.js
+   (v25, 19.11.2026 — дотогава wrong_store не се гледаше тук).
 
    ЕДНО НАПОМНЯНЕ НА ЛИСТ НА ОБЕКТ, не всеки ден: ref_key е
    list_id + '|' + store_name. Без това кронът би удрял всеки ден, докато
@@ -2207,7 +2224,8 @@ async function buildLoadingListsPending(supabase: any, bg: ReturnType<typeof bgN
     .select('id,list_id,store_name,kind,pallet_no,pallet_total,purchase_doc,position')
     .in('list_id', ids)
     .eq('received', false)
-    .eq('missing', false);
+    .eq('missing', false)
+    .is('wrong_store', null);
 
   if (!rows || !rows.length) {
     return { skip: 'Няма неприети редове по тези листи' };
@@ -2246,13 +2264,17 @@ async function buildLoadingListsPending(supabase: any, bg: ReturnType<typeof bgN
   return { entries: entries, cutoff: cutoff, lists: lists.length };
 }
 
+/* Като llKindLabel() + LL_KIND_WORD в loading.js (v25): номерираните видове
+   с „N от M", без номер — само думата. Непознат вид — суровият ключ, както
+   досега. Синхронът с портала е заковано в теста. */
+const LOADING_KIND_WORD: Record<string, string> = { pallet: 'палет', oversize: 'извънгабаритен', roll: 'руло' };
 function loadingUnitLabel(r: any): string {
-  if (r.kind === 'pallet') {
+  const w = LOADING_KIND_WORD[r.kind];
+  if (w) {
     return (r.pallet_no && r.pallet_total)
-      ? 'палет ' + r.pallet_no + ' от ' + r.pallet_total
-      : 'палет';
+      ? w + ' ' + r.pallet_no + ' от ' + r.pallet_total
+      : w;
   }
-  if (r.kind === 'roll') return 'рула';
   if (r.kind === 'bulk') return 'насип';
   return String(r.kind || '—');
 }
@@ -2268,7 +2290,7 @@ function loadingPendingHtmlFor(entries: any[], bg: ReturnType<typeof bgNow>) {
     + '<h2 style="margin:0 0 4px;font-size:19px;color:#b45309;">Неприети товарни листи</h2>'
     + '<div style="font-size:13px;color:#6b7280;margin-bottom:14px;">'
     + esc(bgDate(bg.dateStr)) + ' — изпратени преди повече от ' + LOADING_PENDING_HOURS
-    + ' часа и още неотметнати. Ред, отбелязан като „неполучен", НЕ влиза тук.</div>';
+    + ' часа и още неотметнати. Ред, отбелязан като „неполучен" или „за друг обект", НЕ влиза тук.</div>';
 
   for (const e of entries) {
     const d = daysSince(e.sent_at);
@@ -2289,7 +2311,7 @@ function loadingPendingHtmlFor(entries: any[], bg: ReturnType<typeof bgNow>) {
   }
 
   h += '<div style="font-size:12px;color:#6b7280;margin-top:14px;">'
-    + 'Отметни ги в Транспорт → Товарни листи: „✅ Получено" или „⛔ Неполучено".</div>'
+    + 'Отметни ги в Транспорт → Товарни листи: „✅ Получено", „⛔ Неполучено" или „🔀 За друг обект".</div>'
     + '<div style="margin-top:12px;"><a href="' + PORTAL_URL + '" '
     + 'style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;'
     + 'font-size:13px;font-weight:600;padding:10px 18px;border-radius:6px;">Отвори портала</a></div>'
