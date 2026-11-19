@@ -6,4 +6,5 @@
 - **Проба на живо (публичният ключ, само GET/list, два кръга):** `/object/info/`, HEAD на `/authenticated/` и `POST /object/list` → `cf=DYNAMIC`, size/eTag = `storage.objects`; GET `/authenticated/` (и с `?cb=`) и GET `/public/` → `cf=HIT`. Избран `info` (по един обект, 404 = същата форма като досега). Смяна на обект в пробата няма — сесията беше само за четене.
 - **Тест** `tests/publish-instrukcii.test.js` — 73 проверки; нови: стари кеширани байтове + нов eTag → PATCH и exit 0; eTag ≠ MD5 след качване → exit ≠ 0 без PATCH; сухо в двете посоки на кеша; същият размер с друг MD5. Мутанти M6–M10 — убити.
 - **Сухо на живо от worktree-а:** 11 в списъка · 11 непроменени · 0 за качване, exit 0.
+- **Комит** `d347dc8` (пушнат по SHA върху `05aa7c6`; след rebase npm test 512 теста, exit 0). Pages не е засегнат — `tools/` не се зарежда от портала.
 - **Проверка на живо, която остава:** първият `--go` със сменен файл — `claude/open/19-11-instrukcii-publish-parvo-kachvane.md`.
