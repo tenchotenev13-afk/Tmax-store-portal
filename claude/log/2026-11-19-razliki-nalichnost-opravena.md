@@ -7,4 +7,4 @@
 - База 19.11: 17 реда, всички Логистичен склад Търговище / excess, най-старият 20.10, 0 с размяна.
 - Функции stock-differences.js 344 → 349. Тест `tests/razliki-nalichnost-opravena.test.js` (59 проверки). Мутанти: бутонът и без no_stock 4 ❌, коментарът се презаписва 1 ❌, store_response не се нулира 8 ❌ — всички exit 1.
 - Текст на хода за return + no_stock (решение на Тенчо 19.11, едно място — sdInterstoreTurn): „Ход: ЦО — или складът, ако оправи наличността“; who остава co, чипът „🏢 Ход: ЦО“ не е пипан. Текстът стига само до картата (sdInterstoreTurnHtml); report.js / send-scheduled-report имат свое правило, което връща само кой е на ход — co → „офис“, не текста; „Днес“ ползва отчетите; push и Excel — свои низове. Очакването — обновено в razliki-etap6a, razliki-etap6b и новия тест.
-- Комит: SHA — след комита.
+- Комит: `9e42685` (върху `71f1aa1`, след rebase през `3b8a8f0` — kasa-api, пипа tests/run-all.js, двата реда запазени — и `71f1aa1`); пълният npm test — exit 0, 511 теста, TEST_JOBS=4, на финалния SHA; пушнат по SHA 19.11. Pages сверен — `stock-differences.js` байт в байт (545 775 байта, маркер `sdCanStockFixed` — 0 в `71f1aa1`).
