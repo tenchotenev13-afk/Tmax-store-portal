@@ -49,18 +49,55 @@ function renderDocs(){
   var icons={SAP:'🖥',Процедури:'📋',Обучения:'🎓',Формуляри:'📝',Друго:'📄'};
   icons[DOCS_OFFICE_CAT]='🔒';
   var isAdmin=currentUser&&['admin','accounting'].indexOf(currentUser.role)>=0;
-  grid.innerHTML=list.map(function(d){
+  /* label — текстът на картата (частта след тирето в група); grp — модулът
+     (само за карта в група, data-doc-group). Без група картата е като преди. */
+  function card(d,label,grp){
     var delBtn=isAdmin
       ? '<button data-id="'+d.id+'" onclick="event.stopPropagation();docsDelete(this)" style="position:absolute;top:6px;right:6px;border:none;background:#fee2e2;color:#dc2626;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;font-weight:700;">✕</button>'
       : '';
-    return '<div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;position:relative;" data-url="'+esc(d.url)+'" onclick="docsOpen(this)">' +
+    return '<div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;position:relative;" data-url="'+esc(d.url)+'"'+(grp!=null?' data-doc-group="'+escAttr(grp)+'"':'')+' onclick="docsOpen(this)">' +
       delBtn +
       '<div style="font-size:24px;">'+(icons[d.category]||'📄')+'</div>'+
-      '<div style="font-size:13px;font-weight:500;">'+esc(d.title||'')+'</div>'+
+      '<div style="font-size:13px;font-weight:500;">'+esc(label||'')+'</div>'+
       '<div style="font-size:11px;color:#94a3b8;">'+esc(d.category||'')+'</div>'+
       (d.description?'<div style="font-size:11px;color:#64748b;">'+esc(d.description)+'</div>':'')+
       '</div>';
+  }
+  /* Групиране по модул (18.11.2026) — СЛЕД филтъра, тоест офисните документи
+     за не-admin вече ги няма и не влизат в броя. */
+  var groups={},mods=[],loose=[];
+  list.forEach(function(d){
+    var s=docsSplitTitle(d.title);
+    if(!s){loose.push(d);return;}
+    if(!groups.hasOwnProperty('m:'+s.mod)){groups['m:'+s.mod]=[];mods.push(s.mod);}
+    groups['m:'+s.mod].push({d:d,part:s.part});
+  });
+  mods.sort(function(a,b){return a.localeCompare(b,'bg');});
+  var html=mods.map(function(m){
+    var items=groups['m:'+m].sort(function(a,b){return a.part.localeCompare(b.part,'bg');});
+    var open=!!docsOpenGroups['m:'+m];
+    return '<div class="doc-group-hd" role="button" data-mod="'+escAttr(m)+'" onclick="docsToggleGroup(this)" style="grid-column:1/-1;cursor:pointer;padding:8px 10px;border-radius:8px;background:#f1f5f9;font-size:13px;font-weight:600;user-select:none;">'+
+      (open?'▾':'▸')+' 📂 '+esc(m)+' ('+items.length+')</div>'+
+      (open?items.map(function(it){return card(it.d,it.part,m);}).join(''):'');
   }).join('');
+  grid.innerHTML=html+loose.map(function(d){return card(d,d.title,null);}).join('');
+}
+
+/* „Модул — част": първото „ — ", „ – " или „ - " в заглавието. Без разделител
+   (или с празна страна) → null, документът е без група. */
+function docsSplitTitle(title){
+  var t=String(title||''),m=/ [—–-] /.exec(t);
+  if(!m)return null;
+  var mod=t.slice(0,m.index).trim(),part=t.slice(m.index+m[0].length).trim();
+  return (mod&&part)?{mod:mod,part:part}:null;
+}
+
+/* Отворените групи — само в паметта за сесията, по модул. */
+var docsOpenGroups={};
+function docsToggleGroup(el){
+  var k='m:'+el.getAttribute('data-mod');
+  docsOpenGroups[k]=!docsOpenGroups[k];
+  renderDocs();
 }
 
 function docsOpen(el){var url=el.getAttribute('data-url');if(url)window.open(url,'_blank');}
