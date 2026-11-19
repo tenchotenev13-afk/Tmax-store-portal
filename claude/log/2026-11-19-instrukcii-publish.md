@@ -1,9 +1,10 @@
 # 19.11 — instrukcii-publish
 
-Инструкциите (PDF) — качване в таб „Инструкции“ с една команда: `npm run instrukcii` (сухо, само GET) / `-- --go`. Списък `tools/instrukcii.json` (11 инструкции, всички „Само за офиса“), скрипт `tools/publish-instrukcii.js`, папка `%USERPROFILE%\Documents\Temax-instrukcii` (създадена празна). Без схема, без DDL, без docs.js, без едж функции; ред за Живко няма (documents получава редове, не колони). SHA — в комита „Предавка“.
+Инструкциите (PDF) — качване в таб „Инструкции“ с една команда: `npm run instrukcii` (сухо, само GET) / `-- --go`. Списък `tools/instrukcii.json` (11 инструкции, всички „Само за офиса“), скрипт `tools/publish-instrukcii.js`, папка `%USERPROFILE%\Documents\Temax-instrukcii` (създадена празна). Без схема, без DDL, без docs.js, без едж функции; ред за Живко няма (documents получава редове, не колони). **SHA `c241bf2`** (push по SHA 19.11 върху d31190d; `npm test` exit 0 — 28173 проверки, 507 теста). Pages сверен: `tools/publish-instrukcii.js` и `tools/instrukcii.json` = `git cat-file blob c241bf2:…` (cmp 0).
 
 - Постоянен път `instrukcii/<модул>-<роля>.pdf`; същият файл → нищо; иначе DELETE + POST (няма UPDATE политика за anon) → обратно четене → PATCH на картата с `?v=` (INSERT само ако няма; две карти за пътя → отказ). Сменена само `category` → само PATCH.
 - Защита: пипа само `instrukcii/` и картите с url там; ключът — публичният от `docs.js`, проверен role=anon.
 - Тест `tests/publish-instrukcii.test.js` (фалшив fetch, временна папка). Мутанти M1–M4 (без сверка с живия обект, INSERT вместо PATCH, без защитата за `instrukcii/`, без сверката на обратното четене) — всички exit 1.
 - Компромисът (публичен bucket, отгатваеми пътища) — прието от Тенчо 19.11; записано в CLAUDE.md и handover секция 5.
-- Проба в истинското хранилище и първо качване — `claude/open/19-11-instrukcii-publish-parvo-kachvane.md`.
+- Проба в истинското хранилище (19.11, `instrukcii/_proverka.txt`, без ред в documents): POST → DELETE (200) → POST на същия път (200) → обратно четене съвпада — **замяната DELETE + POST минава**, без миграция. Публичният адрес върна новото съдържание веднага (под 1 с) и без `?v`, и със стария, и с нов `?v` — Storage дава `cache-control: no-cache`, CDN (`cf-cache-status: HIT`) се инвалидира при промяна. **Кешът е мерен с текстов файл, не с PDF.** След пробата под `instrukcii/` няма обекти (list → `[]`, публичният адрес → 404), в documents пак 10 реда.
+- Първо истинско качване и проверка на живо — `claude/open/19-11-instrukcii-publish-parvo-kachvane.md`.
