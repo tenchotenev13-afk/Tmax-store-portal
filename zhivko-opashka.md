@@ -14,18 +14,23 @@
 
 ## Чака изпращане
 
-(в базата от миграцията problem_articles, problem-articles-schema.sql, версия 20261119102207, приложена 19.11.2026; началните 23 реда — миграцията problem_articles_seed, версия 20261119102729)
-- 19.11 · нова таблица problem_articles — id uuid NOT NULL (PK), default gen_random_uuid() · material_code text NOT NULL · material_name text NULL · reads_as_code text NULL · reads_as_name text NULL · store_action text NOT NULL, default 'за преналепяне' · note text NULL · photos jsonb NOT NULL, default '[]' · valid_from date NOT NULL, default current_date · status text NOT NULL, default 'active' (стойности 'active' / 'closed') · source text NOT NULL, default 'office' (стойности 'seed' / 'office' / 'diff') · source_line_id uuid NULL · created_by text NULL · created_at timestamptz NULL, default now() · updated_by text NULL · updated_at timestamptz NULL · closed_by text NULL · closed_at timestamptz NULL
-
 (информативно, не схема — миграцията loading_list_delete_draft, loading-list-delete-draft-schema.sql, версия 20261118095818, приложена 18.11.2026)
 - 18.11 · loading_lists, loading_list_items — нова колона НЯМА. От тази дата черновите (status 'draft') на товарни листи могат да се трият от портала („🗑 Изтрий черновата"): редове от loading_lists и loading_list_items (+ loading_list_products, loading_list_photos по каскада) изчезват от базата. Огледалото ги пази — ако синхронизацията трие изчезналите редове, черновата изчезва и там; ако не — остава като сирак със status 'draft'.
 
+## Изпратено 19.11.2026
+
+(в базата от миграцията problem_articles, problem-articles-schema.sql, версия 20261119102207, приложена 19.11.2026; началните 23 реда — миграцията problem_articles_seed, версия 20261119102729)
+- 19.11 · нова таблица problem_articles — id uuid NOT NULL (PK), default gen_random_uuid() · material_code text NOT NULL · material_name text NULL · reads_as_code text NULL · reads_as_name text NULL · store_action text NOT NULL, default 'за преналепяне' · note text NULL · photos jsonb NOT NULL, default '[]' · valid_from date NOT NULL, default current_date · status text NOT NULL, default 'active' (стойности 'active' / 'closed') · source text NOT NULL, default 'office' (стойности 'seed' / 'office' / 'diff') · source_line_id uuid NULL · created_by text NULL · created_at timestamptz NULL, default now() · updated_by text NULL · updated_at timestamptz NULL · closed_by text NULL · closed_at timestamptz NULL
+
+## Потвърдено 19.11.2026
+
 (в базата от миграцията loading_client_order_link, loading-client-order-link-schema.sql, версия 20261117125425, приложена 17.11.2026)
 - 17.11 · loading_list_items.client_order_id — uuid, NULL, без default
+(Живко, 19.11 17:19: колоната е добавена и проверена, с обикновен индекс; 0 попълнени реда — сверено с базата на 19.11: и там 0)
 
 (данни, не схема — миграцията transferi_zachistvane_20261116, transferi-zachistvane-2026-11-16.sql, версия 20261116105503, приложена 16.11.2026)
 - 16.11 · transfers, transfer_cargo, transfer_cargo_events — ВСИЧКИ редове изтрити (старт на чисто от 17.11; 144 / 482 / 794 реда). Огледалото трябва да изтрие своите стари редове в тези три таблици; схемата им не е пипана. Таблиците transfers_archive_20261116, transfer_cargo_archive_20261116, transfer_cargo_events_archive_20261116 НЕ се огледалят (без права за anon). transfer_counters не е пипан — номерата продължават.
-(Живко, 18.11: трансферите са при него и броят им расте заедно с нашия; дали старите редове са изтрити и в огледалото — НЕ е потвърдено. Въпросът е зададен в имейла от 18.11.)
+(Живко, 19.11: старите редове са изтрити при него на 16.11; към 17:17 — 27 / 82 / 76 реда, сверено с базата: същите)
 
 ## Потвърдено 18.11.2026
 
