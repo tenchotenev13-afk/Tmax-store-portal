@@ -134,6 +134,11 @@ const settle = async () => { for (let i = 0; i < 6; i++) await ticks(); };
     ok('показана е седмица 39', h.w.checklistWeek === 39, String(h.w.checklistWeek));
     /* Етап 2: отварянето не пише, а заявките за четене тръгват от изчислението. */
     ok('нула POST към weekly_checklist при отваряне', writes(h).length === 0, 'реално: ' + writes(h).length);
+    /* От 19.11.2026 (checklist-storno-detail) отварянето тегли редовете
+       ВЕДНЪЖ — за ▾ „какво е сторнирано"; изчислението долу се брои отделно. */
+    const openGets = h.calls.get.filter(u => u.indexOf('/stock_differences') >= 0).length;
+    ok('отварянето тегли редовете точно веднъж (за ▾)', openGets === 1, String(openGets));
+    const g0 = h.calls.get.length;
     await compute(h);
     const a = got(h, 'Раднево', 'storna_priem');
     ok('Раднево: изчислено „2/5"', a === '2/5', JSON.stringify(a));
@@ -143,7 +148,7 @@ const settle = async () => { for (let i = 0; i < 6; i++) await ticks(); };
     ok('Петрич (без сторна): „0/0"', b === '0/0', JSON.stringify(b));
     /* Махнати: „клетката показва 2/5 / 0/0" (клетката идва от rpc от етап 2) и
        „записът носи САМО portal_value" (запис при отваряне няма — горе нула POST). */
-    const lineGets = h.calls.get.filter(u => u.indexOf('/stock_differences') >= 0);
+    const lineGets = h.calls.get.slice(g0).filter(u => u.indexOf('/stock_differences') >= 0);
     ok('редовете се теглят само за бланките от седмицата (2 id)',
       lineGets.length === 1 && (decodeURIComponent(lineGets[0]).match(/rep-\d+/g) || []).length === 2,
       lineGets.map(decodeURIComponent).join(' | '));

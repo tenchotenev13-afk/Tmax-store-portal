@@ -254,6 +254,7 @@ function loadChecklist() {
   }
 
   var storeMode = checklistStoreMode();
+  checklistWrDetails = null;   /* от предишната седмица — не се пренася */
   wrap.innerHTML = '<div class="page"><div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане...</div></div>';
 
   if (checklistWeek === null) {
@@ -343,13 +344,16 @@ function loadChecklist() {
        всяко отваряне — снимка от момента на отварянето, която после не се
        местеше (Теодор, 26.10). Рендерът е СЛЕД живите стойности — иначе
        мрежата мигва веднъж празна. */
-    if (checklistWeekFrozen) return null;
-    return checklistLoadLiveValues();
+    /* Подробностите за сторната (▾) — паралелно, никога не отхвърлят. */
+    var wr = checklistLoadWrDetails();
+    if (checklistWeekFrozen) return wr;
+    return Promise.all([checklistLoadLiveValues(), wr]);
   }).then(function () {
     renderChecklist();
   }).catch(function () {
     checklistMetrics = []; checklistRows = []; checklistStores = [];
     checklistLastSend = null; checklistResponses = []; checklistWeekFrozen = null;
+    checklistWrDetails = null;
     renderChecklist();
   });
 }
@@ -734,22 +738,116 @@ function checklistWrongReceiptRows() {
     'direction=eq.wrong_receipt' +
     '&created_at=gte.' + encodeURIComponent(b.from.toISOString()) +
     '&created_at=lt.' + encodeURIComponent(b.to.toISOString()) +
-    '&select=id,store_name'
+    '&select=id,store_name,created_at'
   ).then(function (reps) {
     if (!reps.length) return [];
     var ids = reps.map(function (r) { return r.id; });
     var batches = [];
     for (var i = 0; i < ids.length; i += CHECKLIST_WR_BATCH) batches.push(ids.slice(i, i + CHECKLIST_WR_BATCH));
     return Promise.all(batches.map(function (part) {
-      return checklistGetAll('stock_differences', 'report_id=in.(' + part.join(',') + ')&select=id,report_id');
+      return checklistGetAll('stock_differences', 'report_id=in.(' + part.join(',') + ')' +
+        '&select=id,report_id,order_number,material_code,material_name,quantity');
     })).then(function (parts) {
-      var lines = {};
+      /* items — САМО за подробностите в клетката (checklistWrDetailsHtml,
+         19.11.2026). Стойността „бланки/редове" брои items.length, както
+         преди броеше редовете; новите колони не я пипат. */
+      var items = {};
       parts.forEach(function (p) {
-        p.forEach(function (l) { if (l && l.report_id) lines[l.report_id] = (lines[l.report_id] || 0) + 1; });
+        p.forEach(function (l) {
+          if (!l || !l.report_id) return;
+          (items[l.report_id] = items[l.report_id] || []).push({
+            order_number: l.order_number, material_code: l.material_code,
+            material_name: l.material_name, quantity: l.quantity
+          });
+        });
       });
-      return reps.map(function (r) { return { store_name: r.store_name, lines: lines[r.id] || 0 }; });
+      return reps.map(function (r) {
+        var it = items[r.id] || [];
+        return { store_name: r.store_name, created_at: r.created_at, lines: it.length, items: it };
+      });
     });
   });
+}
+
+/* ПОДРОБНОСТИ „какво е сторнирано" (Цветелина, 07.11.2026; решение на
+   Тенчо 19.11.2026 — САМО в портала, не в писмото, отчета и „Днес").
+   Стойността в клетката остава от checklist_portal_values() (или
+   control_num); тук се тегли само списъкът, ВЕДНЪЖ при отваряне на таба,
+   със същото правило (checklistWrongReceiptRows) — без заявка при клик.
+   checklistWrDetails: { обект: [бланка…] } или null — не е заредено /
+   провал / бъдеща седмица. null → никъде няма ▾ (не празен списък). */
+var checklistWrDetails = null;
+function checklistLoadWrDetails() {
+  checklistWrDetails = null;
+  var has = checklistMetrics.some(function (m) { return checklistModuleId(m) === 'wrong_receipt'; });
+  if (!has) return Promise.resolve();
+  return checklistWrongReceiptRows().then(function (rows) {
+    if (!Array.isArray(rows)) return;
+    var by = {};
+    rows.forEach(function (r) {
+      if (!r || !r.store_name) return;
+      (by[r.store_name] = by[r.store_name] || []).push(r);
+    });
+    Object.keys(by).forEach(function (s) {
+      by[s].sort(function (a, b) { return String(a.created_at || '').localeCompare(String(b.created_at || '')); });
+    });
+    checklistWrDetails = by;
+  }, function () { checklistWrDetails = null; });
+}
+
+/* ▾ до стойността — само за колоната wrong_receipt, само ако за обекта има
+   заредени бланки и показаното в клетката не е празно или „0/0". */
+function checklistWrToggleHtml(metric, store, row) {
+  if (checklistModuleId(metric) !== 'wrong_receipt' || !checklistWrDetails) return '';
+  var reps = checklistWrDetails[store];
+  if (!reps || !reps.length || !row) return '';
+  var shown = (row.control_num !== null && row.control_num !== undefined && row.control_num !== '')
+    ? String(row.control_num) : String(row.portal_value || '');
+  if (shown === '' || shown === '0/0') return '';
+  return '<button type="button" class="cl-wr-btn" title="Какво е сторнирано"' +
+    ' style="margin-left:4px;padding:0 4px;font-size:11px;line-height:1.3;border:1px solid #cbd5e1;' +
+    'border-radius:4px;background:#fff;color:#334155;cursor:pointer;">▾</button>';
+}
+
+/* Списъкът под стойността: по бланка — дата на подаване, поръчка(и), редове. */
+function checklistWrDetailsHtml(store) {
+  var reps = (checklistWrDetails && checklistWrDetails[store]) || [];
+  return '<div class="cl-wr-list" style="margin-top:4px;text-align:left;font-size:11px;color:#334155;' +
+    'background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:4px 6px;cursor:default;">' +
+    reps.map(function (r) {
+      var d = r.created_at ? new Date(r.created_at) : null;
+      var day = d && !isNaN(d.getTime()) ? checklistPad2(d.getDate()) + '.' + checklistPad2(d.getMonth() + 1) : '—';
+      var orders = [];
+      (r.items || []).forEach(function (it) {
+        var o = it && it.order_number;
+        if (o && orders.indexOf(String(o)) < 0) orders.push(String(o));
+      });
+      return '<div class="cl-wr-rep" style="margin:2px 0;">' +
+        '<div style="font-weight:600;">' + esc(day) + ' · поръчка ' + esc(orders.join(', ')) + '</div>' +
+        (r.items || []).map(function (it) {
+          var q = (it.quantity === null || it.quantity === undefined) ? '' : String(it.quantity);
+          return '<div class="cl-wr-line" style="padding-left:8px;">' + esc(it.material_code) + ' — ' +
+            esc(it.material_name) + ' × ' + esc(q) + '</div>';
+        }).join('') +
+      '</div>';
+    }).join('') +
+  '</div>';
+}
+
+/* Клик по ▾: отваря/затваря списъка в същата клетка. Не стига до клетката —
+   иначе контролингът би завъртял стойността / отворил полето за число. */
+function checklistWrToggleClick(ev) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  var btn = this;
+  var td = btn.parentNode;
+  var ctx = td && checklistCellCtx(td);
+  if (!ctx) return;
+  var open = td.querySelector('.cl-wr-list');
+  if (open) { open.parentNode.removeChild(open); btn.textContent = '▾'; return; }
+  td.insertAdjacentHTML('beforeend', checklistWrDetailsHtml(ctx.store));
+  var list = td.querySelector('.cl-wr-list');
+  if (list) list.addEventListener('click', function (e) { e.stopPropagation(); });
+  btn.textContent = '▴';
 }
 
 /* „бланки/редове" за един обект: „2/5" = 2 сторнирани поръчки с общо 5
@@ -1389,7 +1487,8 @@ function renderChecklist() {
         (editable ? 'cursor:pointer;' : '') +
         (busy ? 'opacity:.45;' : '') + '">' +
         checklistCellInner(m, idx[store + ' ' + m.key], earlyBy[m.key], earlyTitleBy[m.key],
-          respIdx[store + ' ' + m.key]) + '</td>';
+          respIdx[store + ' ' + m.key]) +
+        checklistWrToggleHtml(m, store, idx[store + ' ' + m.key]) + '</td>';
     });
     h += '</tr>';
   });
@@ -1697,6 +1796,9 @@ function checklistWireCells() {
   var cells = tbl.querySelectorAll('td[data-si]');
   for (var i = 0; i < cells.length; i++) {
     var td = cells[i];
+    /* ▾ за сторната — за всеки, който вижда клетката (обект и офис). */
+    var wb = td.querySelector('.cl-wr-btn');
+    if (wb) wb.addEventListener('click', checklistWrToggleClick);
     /* Балончето се закача ВИНАГИ при право на редакция — и на клетки без
        ред в базата, там се създава нов запис само с коментара. */
     if (canEditChecklist()) {
