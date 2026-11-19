@@ -543,7 +543,7 @@ function loadMinusi(){
       mnLastUpload = r2[1] && r2[1].ok ? (r2[1].rows[0] || null) : null;
       if(mnIsCO()) mnPriceState = 'loading';
       mnRender();
-      return Promise.all([mnLoadCo(seq), mnLoadUr(seq), mnLoadPrices(seq)]);
+      return Promise.all([mnLoadCo(seq), mnLoadUr(seq), mnLoadPrices(seq), mnLoadPa(seq)]);
     });
   });
 }
@@ -738,6 +738,29 @@ function mnUrChipsHtml(r){
    „📋 Дневен", и в „📦 По артикул"; за обекта и за офиса. Днес, Чек лист,
    bulletin-notify и send-scheduled-report НЕ го знаят (стъпка 1 от 3). */
 function mnPartialEmpty(){ var e = []; e.partial = true; return e; }
+/* ─── „🏷️ Проблемен артикул“ (етап 7б на Разлики, 19.11.2026; решение на
+   Тенчо 22.10 — Минуси само чете регистъра) ───
+   Минус по код, който е material_code ИЛИ reads_as_code на АКТИВЕН запис в
+   problem_articles: значка с текста на кутийката от формата за подаване —
+   ЕДНА логика, sdPaWarnText в stock-differences.js (зареден преди minusi.js),
+   не копие. Регистърът се чете веднъж при първото отваряне на Минуси
+   (sdLoadProblemArticles(true) — общият кеш sdPa на Разлики); паднало четене →
+   празен регистър, console.error, без значка и без toast. Само на екрана —
+   Excel, печатът, отчетът minus_multi и send-scheduled-report НЕ я знаят. */
+var mnPaRead = false;
+function mnLoadPa(seq){
+  if(mnPaRead || typeof sdLoadProblemArticles !== 'function') return Promise.resolve();
+  mnPaRead = true;
+  return sdLoadProblemArticles(true).then(function(){
+    if(seq === mnLoadSeq && document.getElementById('mn-body')) mnRenderBody();
+  });
+}
+function mnPaHtml(material){
+  if(typeof sdPaWarnText !== 'function') return '';
+  var t = sdPaWarnText(material);
+  if(!t) return '';
+  return '<div class="mn-pa" style="margin-top:3px;font-size:11px;color:#713f12;white-space:normal;"><span class="mn-pa-badge" style="display:inline-block;background:#fef9c3;border:1px solid #facc15;border-radius:4px;padding:0 4px;font-weight:700;">🏷️ Проблемен артикул</span> ' + t + '</div>';
+}
 function mnOdBuild(rows){
   var idx = {};
   (rows || []).forEach(function(x){
@@ -1024,7 +1047,7 @@ function mnDailyHtml(rows){
     var val = function(k){ return d[k] != null ? d[k] : (r[k] == null ? '' : r[k]); };
     /* Закритите и под прага — сив текст; жълтите колони си остават жълти. */
     var gray = r._state === 'open' ? '' : ' style="color:#94a3b8;"';
-    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + mnBadgeHtml(r) + mnCoChipsHtml(r) + mnUrChipsHtml(r) + mnOdHtml(r.store_name, r.material) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
+    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + mnBadgeHtml(r) + mnCoChipsHtml(r) + mnUrChipsHtml(r) + mnOdHtml(r.store_name, r.material) + mnPaHtml(r.material) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
     /* Мерната единица е в „Количество", „Състояние" се пренася на два реда,
        служител / бележка — 110px: с отделна колона „Мерна ед." таблицата беше
        1342 px срещу карта 1246 и „Запази" излизаше навън (Playwright, 22.10). */
@@ -1233,7 +1256,7 @@ function mnByMatHtml(rows){
   var all = mnIsAll();
   var h = '<div class="card" style="overflow-x:auto;"><table id="mn-bymat"><thead><tr>' + (all ? '<th>Обект</th>' : '') + '<th>Материал</th><th>Описание</th><th>955</th><th>956</th><th>Остатък</th><th>Мерна ед.</th></tr></thead><tbody>';
   rows.forEach(function(r){
-    h += '<tr id="mn-mat-' + escAttr((all ? r.store_name + '-' : '') + r.material) + '">' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.desc) + mnOdHtml(r.store_name, r.material) + '</td>';
+    h += '<tr id="mn-mat-' + escAttr((all ? r.store_name + '-' : '') + r.material) + '">' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.desc) + mnOdHtml(r.store_name, r.material) + mnPaHtml(r.material) + '</td>';
     h += '<td class="mn-s955" style="text-align:right;">' + esc(mnFmtQty(r.s955)) + '</td><td class="mn-s956" style="text-align:right;">' + esc(mnFmtQty(r.s956)) + '</td>';
     h += '<td class="mn-rest" style="text-align:right;font-weight:600;">' + esc(mnFmtQty(r.rest)) + '</td><td>' + esc(r.uom) + '</td></tr>';
   });
