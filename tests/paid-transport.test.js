@@ -469,17 +469,18 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     const ov = doc.getElementById('sap-ov');
     ok('модалът се показва', !!ov);
     ok('съдържа номера на заявката', ov.textContent.indexOf('0042') >= 0);
-    ok('текстът идва от Наръчника (MIGO 951)', ov.textContent.indexOf('951') >= 0);
+    ok('текстът идва от Наръчника (КЛ.ПОРЪЧКИ, 955/956 — co-sap-955, 19.11.2026)', ov.textContent.indexOf('КЛ.ПОРЪЧКИ') >= 0 && ov.textContent.indexOf('956') >= 0 && !/951|952/.test(ov.textContent));
     ok('съдържа ZSTOCK / ZSTR', /ZSTOCK/.test(ov.textContent) && /ZSTR/.test(ov.textContent));
     ok('съдържа MB51', ov.textContent.indexOf('MB51') >= 0);
-    ok('съдържа предупреждението за ревизия', /НЕ се ревизират/.test(ov.textContent));
+    ok('съдържа предупреждението за ревизия', /не се ревизират/.test(ov.textContent));
     ok('показва и двата варианта (неналичен + с капаро)', /капаро/.test(ov.textContent));
 
     realClick(w, btnIn(ov, '📖 Отвори в Наръчника'));
     ok('отваря таб Наръчник', doc.getElementById('mod-handbook').style.display === 'block');
     ok('модалът е затворен', !doc.getElementById('sap-ov'));
     ok('Наръчникът е позициониран на категория "Клиентски"', w.hbState.cat === 'Клиентски');
-    ok('картите за клиентски поръчки са отворени', w.hbState.openCards['kl-poruchki'] === true);
+    /* От 19.11.2026 записът е един — 'proc-kl-poruchki' (co-sap-955). */
+    ok('картата за клиентски поръчки е отворена', w.hbState.openCards['proc-kl-poruchki'] === true && !('kl-poruchki' in w.hbState.openCards));
   }
   {
     const { w, doc } = boot();

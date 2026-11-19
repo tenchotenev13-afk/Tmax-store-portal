@@ -780,12 +780,14 @@ function toggleClientPT(){
 
 /* ═══ SAP НАПОМНЯНЕ ═══
    Текстът НЕ се дублира — чете се от Наръчника (handbook.js: HB_SAP/HB_PROC),
-   за да има едно място за поддръжка. */
+   за да има едно място за поддръжка. От 19.11.2026 записът е ЕДИН —
+   'proc-kl-poruchki' (процесът с 955/956); 'kl-poruchki' („MIGO 951/952“) е
+   махнат от Наръчника (Миглена 19.11 — дублираше се и описваше стария процес). */
 function sapClientEntries(){
   var out=[];
   try{
     var pool=(typeof HB_SAP!=='undefined'?HB_SAP:[]).concat(typeof HB_PROC!=='undefined'?HB_PROC:[]);
-    ['kl-poruchki','proc-kl-poruchki'].forEach(function(id){
+    ['proc-kl-poruchki'].forEach(function(id){
       var it=pool.filter(function(x){return x.id===id;})[0];
       if(it)out.push(it);
     });
@@ -828,7 +830,7 @@ function closeSapReminder(){var el=document.getElementById('sap-ov');if(el)el.re
 function openHandbookClientOrders(){
   if(typeof hbState!=='undefined'){
     hbState.search='';hbState.type='all';hbState.cat='Клиентски';
-    hbState.openCards={'kl-poruchki':true,'proc-kl-poruchki':true};
+    hbState.openCards={'proc-kl-poruchki':true};
   }
   showModule('handbook');
 }
@@ -852,7 +854,7 @@ function renderCoSapBanner(){
   el.innerHTML='<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:10px 13px;margin-bottom:12px;">'+
     '<div onclick="toggleCoSapBanner()" style="display:flex;align-items:center;gap:8px;cursor:pointer;">'+
       '<span style="font-size:15px;">⚠️</span>'+
-      '<div style="flex:1;font-size:13px;font-weight:600;color:#92400e;">След всяка клиентска заявка се пуска заявка и през SAP (MIGO 951/952 · ZSTOCK / ZSTR тип 1 · MB51)</div>'+
+      '<div style="flex:1;font-size:13px;font-weight:600;color:#92400e;">След всяка клиентска поръчка се пуска заявка в SAP</div>'+
       '<span style="font-size:12px;color:#a16207;">'+(coSapBannerOpen?'▲ скрий':'▼ покажи')+'</span>'+
     '</div>'+
     (coSapBannerOpen?'<div style="margin-top:10px;">'+
