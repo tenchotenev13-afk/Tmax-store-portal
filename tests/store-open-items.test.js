@@ -433,6 +433,7 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     ok('notification_log НЕ е писан', d.notification_log.length === 0 && !L.log.some(q => q.table === 'notification_log'), JSON.stringify(d.notification_log));
     ok('без push', !L.posts.some(p => p.body.type === 'push'));
     const tr = mails.filter(m => /Троян/.test(m.body.subject))[0].body.html;
+    const by0 = {}; (dry.planned || []).forEach(p => { by0[p.obekt] = p; });
     const pos = s => tr.indexOf(s);
     ok('подгрупите са в реда: закъснели заявител → изпълнител → до 2 дни заявител → изпълнител',
       pos('Закъснели — като заявител (3)') > 0 && pos('Закъснели — като заявител') < pos('Закъснели — като изпълнител (1)') &&
@@ -472,7 +473,21 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     ok('подредба в писмото по ефективния срок: A17 → A15 → A18', lvh.indexOf('№ A17') > 0 && lvh.indexOf('№ A17') < lvh.indexOf('№ A15') && lvh.indexOf('№ A15') < lvh.indexOf('№ A18'));
     ok('esc: името на клиента и заглавието на задачата', tr.indexOf('Иван &lt;b&gt;И&lt;/b&gt;') > 0 && tr.indexOf('<b>И</b>') < 0 &&
       mails.filter(m => /Ловеч/.test(m.body.subject))[0].body.html.indexOf('Ревизия &lt;група А&gt;') > 0);
-    ok('бутон „Отвори портала"', tr.indexOf('Отвори портала') > 0);
+    ok('v28: бутон „Отвори в портала →" (обвивката на отчетите)', tr.indexOf('Отвори в портала →') > 0);
+    /* v28 — видът (решение на Тенчо 19.11). */
+    ok('v28: пълен HTML документ, сив фон, тъмна глава, долен ред', tr.indexOf('<!DOCTYPE html>') === 0 && tr.indexOf('background:#e8ecf3') > 0 &&
+      tr.indexOf('background:#1E2761;padding:26px 24px;') > 0 && tr.indexOf('Автоматичен репорт · ТеМАХ Портал') > 0);
+    ok('v28: глава „📋 Незавършено за Троян" / „16.11.2026 · какво чака обекта"', tr.indexOf('>📋 Незавършено за Троян</h1>') > 0 && tr.indexOf('>16.11.2026 · какво чака обекта</p>') > 0);
+    const trd = by0[TR] || {};
+    const nz = (trd.zadachi || {}).zadachi, ny = Object.values(trd.zayavki || {}).reduce((a, x) => a + x, 0);
+    ok('v28: обобщението брои като секциите — „Задачи ' + nz + '", „Заявки ' + ny + '", „Разлики 0" (сив)', nz === 1 && ny === 7 &&
+      tr.indexOf('>Задачи 1</span>') > 0 && tr.indexOf('>Заявки 7</span>') > 0 && /color:#9CA3AF;">Разлики 0<\/span>/.test(tr), 'z=' + nz + ' y=' + ny);
+    ok('v28: обобщението е над секциите', tr.indexOf('>Задачи 1</span>') < tr.indexOf('<!--soi-body-->'));
+    ok('v28: секциите — кутии с малко главно заглавие с брой', /text-transform:uppercase;letter-spacing:\.4px;margin-bottom:8px;">⏰ Просрочени задачи от Бюлетина \(1\)<\/div><div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;/.test(tr) &&
+      /uppercase;letter-spacing:\.4px;margin-bottom:8px;">🛒 Клиентски заявки \(7\)<\/div><div style="background:#F9FAFB;/.test(tr));
+    ok('v28: закъснелите — червено, „до 2 работни дни" — оранжево', /color:#b91c1c;[^"]*border-left:3px solid #b91c1c;">Закъснели — като заявител \(3\)/.test(tr) &&
+      /color:#c2410c;[^"]*border-left:3px solid #c2410c;">Срок до 2 работни дни — като заявител \(2\)/.test(tr));
+    ok('v28: тестовата лента е над картата (в <body>, преди бялата карта)', kj.indexOf('ТЕСТОВ РЕЖИМ') > kj.indexOf('<body') && kj.indexOf('ТЕСТОВ РЕЖИМ') < kj.indexOf('max-width:600px;margin:0 auto;background:#fff'));
     ok('last_status е обновен (тестът също)', /^ok: 3 обекта, 3 писма/.test(d.notification_topics[0].last_status || ''), d.notification_topics[0].last_status);
     const by = {}; (dry.planned || []).forEach(p => { by[p.obekt] = p; });
     ok('dry_run броя на Троян: 3 / 1 / 2 / 1', JSON.stringify(by[TR].zayavki) === JSON.stringify({ late_req: 3, late_ful: 1, soon_req: 2, soon_ful: 1 }), JSON.stringify(by[TR].zayavki));
@@ -719,6 +734,17 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     ok('копието дава същото за ' + n + ' комбинации тип × статус', !diffs.length, diffs.slice(0, 4).join(' | '));
     ok('null / undefined ред — false и в двете', !h.w.sdStoreMustAct(null) && !C.sdStoreMustAct(null) && !h.w.sdRowAwaitsMark(null) && !C.sdRowAwaitsMark(null));
     h.close();
+  }
+
+  section('8б. v28 — обвивката е копие на reportEmailShell (send-scheduled-report)');
+  {
+    /* Дословно копие, само името е друго — по модела на другите копия (attachmentsHtml, sd*). */
+    const ssr = fs.readFileSync(path.join(ROOT, 'supabase/functions/send-scheduled-report/index.ts'), 'utf8');
+    const bn = fs.readFileSync(SRC_PATH, 'utf8');
+    const grab = (src, name) => { const m = new RegExp('\\nfunction ' + name + '\\(headerTitle, headerSub, bodyHtml, footerText\\)\\{\\n[\\s\\S]*?\\n\\}\\n').exec(src); return m ? m[0].replace(name + '(', 'SHELL(') : null; };
+    const a = grab(ssr, 'reportEmailShell'), b = grab(bn, 'soiEmailShell');
+    ok('reportEmailShell е намерен в send-scheduled-report', !!a && a.length > 500);
+    ok('soiEmailShell === reportEmailShell (без името)', !!a && a === b, b ? b.slice(0, 120) : 'няма soiEmailShell');
   }
 
   section('8. Темата е регистрирана');

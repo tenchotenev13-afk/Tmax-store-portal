@@ -30,7 +30,9 @@
      Р4 обектите не се сортират: пада 1 и 3;
      Р5 частта е само първата секция (не soiStoreBody): пада 3;
      Р6 без филтъра EXCLUDED_STORES: пада 1;
-     Р7 по писмо на обект вместо на регионален: пада 2.
+     Р7 по писмо на обект вместо на регионален: пада 2;
+     Р8 (v28) без reqScope — заявка между два обекта на регионален и при
+         изпълнителя: пада 3б.
 
    Пускане:  node tests/store-open-items-regional.test.js .
 */
@@ -257,7 +259,8 @@ const mailTo = (L, em) => L.mails().filter(m => [].concat(m.body.to).join(',') =
     await Ls.call({ topic_key: 'store_open_items' });
     const storeMail = s => ((Ls.mails().filter(m => m.body.subject.indexOf('за ' + s + ' ') >= 0)[0]) || { body: { html: '' } }).body.html;
     /* Тялото на писмото на обекта — между подзаглавието и бутона. */
-    const bodyOf = h => { const a = h.indexOf('какво чака обекта.</div>'); const b = h.indexOf('<div style="margin-top:16px;"><a href='); return a > 0 && b > a ? h.slice(a + 'какво чака обекта.</div>'.length, b) : null; };
+    /* v28: секциите на обекта стоят между маркерите на soiStoreBody. */
+    const bodyOf = h => { const a = h.indexOf('<!--soi-body-->'); const b = h.indexOf('<!--/soi-body-->'); return a > 0 && b > a ? h.slice(a, b + '<!--/soi-body-->'.length) : null; };
     for (const s of [TR, LV, SL]) {
       const body = bodyOf(storeMail(s));
       ok('А / ' + s + ': частта съвпада буква по буква с писмото на обекта', !!body && body.length > 50 && regA.indexOf(body) > 0, body ? body.slice(0, 80) : 'няма писмо на обекта');
@@ -266,13 +269,61 @@ const mailTo = (L, em) => L.mails().filter(m => [].concat(m.body.to).join(',') =
     ok('Б / Кърджали: съвпада', !!bodyKJ && regB.indexOf(bodyKJ) > 0);
     ok('А: обектите по ред — Ловеч, Сливен, Троян', regA.indexOf('>' + LV + '</div>') > 0 && regA.indexOf('>' + LV + '</div>') < regA.indexOf('>' + SL + '</div>') &&
       regA.indexOf('>' + SL + '</div>') < regA.indexOf('>' + TR + '</div>'));
-    ok('А: заглавие „Незавършено за вашите обекти", обектите изброени, без склада', regA.indexOf('Незавършено за вашите обекти') > 0 && regA.indexOf('Ловеч, Сливен, Троян') > 0 && regA.indexOf('Логистичен склад') < 0);
+    ok('А: глава „📋 Незавършено за вашите обекти" / „16.11.2026 · Ловеч, Сливен, Троян", без склада', regA.indexOf('>📋 Незавършено за вашите обекти</h1>') > 0 && regA.indexOf('>16.11.2026 · Ловеч, Сливен, Троян</p>') > 0 && regA.indexOf('Логистичен склад') < 0);
+    /* v28: всяка част започва с тъмна лента с името на обекта, точно пред секциите ѝ. */
+    const band = st => '<div style="margin:22px 0 2px;background:#1E2761;color:#ffffff;font-size:15px;font-weight:700;padding:9px 12px;border-radius:7px;">' + st + '</div><!--soi-body-->';
+    ok('v28: лента на обекта пред всяка част (А: 3, Б: 2)', [LV, SL, TR].every(st => regA.indexOf(band(st)) > 0) && [KJ, LV].every(st => regB.indexOf(band(st)) > 0) &&
+      regA.split('<!--soi-body-->').length - 1 === 3 && regB.split('<!--soi-body-->').length - 1 === 2);
+    ok('v28: обвивката на отчетите (сив фон, бутон, долен ред)', regA.indexOf('<!DOCTYPE html>') === 0 && regA.indexOf('background:#e8ecf3') > 0 && regA.indexOf('Отвори в портала →') > 0 && regA.indexOf('Автоматичен репорт · ТеМАХ Портал') > 0);
+    /* v28: обобщението — по ред на обект, числата = бройките на dry_run. */
+    const Ld = load(db(), MON);
+    const dd = (await Ld.call({ topic_key: 'store_open_items_regional', dry_run: true })).result;
+    const pa = dd.planned.filter(p => p.email === 'reg.a@temax.bg')[0];
+    const cnt = (o, k) => k === 'zadachi' ? (o.zadachi || {}).zadachi : Object.values(o[k] || {}).reduce((a, x) => a + x, 0);
+    const rowOk = pa.obekti.every(o => regA.indexOf('>' + o.obekt + '</td>' + ['zadachi', 'zayavki', 'razliki'].map(k => { const n = cnt(o, k); return '<td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #F3F4F6;text-align:center;color:' + (n ? '#1f2937' : '#9CA3AF') + ';">' + n + '</td>'; }).join('') + '</tr>') > 0);
+    ok('v28: таблицата — по ред на обект (Ловеч / Сливен / Троян), числата = секциите', rowOk && regA.indexOf('>Обект</th>') > 0 && regA.indexOf('>Обект</th>') < regA.indexOf('<!--soi-body-->'), JSON.stringify(pa.obekti));
     const tenev = (mailTo(L, 'ten.tenev@temax.bg') || { body: { html: '' } }).body.html;
     ok('Тенчо: само Кърджали, Раднево (без редове) го няма', tenev.indexOf('>' + KJ + '</div>') > 0 && tenev.indexOf(RA) < 0);
     /* Пряко: soiPartsFor е единственият път (същият обект → същото тяло). */
     const loaded = await L.ctx.soiLoadAll(L.ctx.createClient(), L.ctx.bgNow(new L.ctx.Date()));
     const own = L.ctx.soiStoreBody(L.ctx.soiPartsFor(loaded, TR).parts);
     ok('soiStoreBody(soiPartsFor(Троян)) е вътре в писмото на А и на обекта', regA.indexOf(own) > 0 && storeMail(TR).indexOf(own) > 0);
+  }
+
+  section('3б. v28 — заявка между два обекта на един регионален: веднъж, при заявителя');
+  {
+    /* Решение на Тенчо 19.11. A4: заявител Ловеч, изпълнител Троян — и двата са на А
+       → само в частта на Ловеч; при Б (Ловеч, Кърджали) — пак при Ловеч (заявител).
+       A5: заявител Троян, изпълнител Кърджали — Троян НЕ е на Б → при Б остава в
+       частта на Кърджали (изпълнител). Писмата на обектите — непроменени. */
+    const orders = clone(ORDERS).concat([
+      O('A4', { store_name: LV, fulfiller: TR, delivery: '2026-11-13' }),
+      O('A5', { store_name: TR, fulfiller: KJ, delivery: '2026-11-12' }),
+    ]);
+    const L = load(db({ client_orders: clone(orders) }), MON);
+    await L.call({ topic_key: 'store_open_items_regional' });
+    const html = em => (mailTo(L, em) || { body: { html: '' } }).body.html;
+    const band = st => '<div style="margin:22px 0 2px;background:#1E2761;color:#ffffff;font-size:15px;font-weight:700;padding:9px 12px;border-radius:7px;">' + st + '</div><!--soi-body-->';
+    const partOf = (h, st) => { const a = h.indexOf(band(st)); if (a < 0) return ''; const b = h.indexOf('<!--/soi-body-->', a); return h.slice(a, b); };
+    const hA = html('reg.a@temax.bg'), hB = html('reg.b@temax.bg');
+    const times = (h, x) => h.split(x).length - 1;
+    ok('А: № A4 — веднъж в писмото, в частта на Ловеч (заявител)', times(hA, '№ A4 ') === 1 && partOf(hA, LV).indexOf('№ A4 ') > 0 && partOf(hA, TR).indexOf('№ A4 ') < 0,
+      'пъти=' + times(hA, '№ A4 ') + ' ЛВ=' + (partOf(hA, LV).indexOf('№ A4 ') > 0) + ' ТР=' + (partOf(hA, TR).indexOf('№ A4 ') > 0));
+    ok('Б: № A4 — веднъж, при Ловеч', times(hB, '№ A4 ') === 1 && partOf(hB, LV).indexOf('№ A4 ') > 0);
+    ok('Б: № A5 (заявител Троян — не е на Б) — остава при изпълнителя Кърджали', times(hB, '№ A5 ') === 1 && partOf(hB, KJ).indexOf('№ A5 ') > 0 && partOf(hB, KJ).indexOf('Заявил: Троян') > 0);
+    ok('А: № A5 — веднъж, при Троян (заявител; Кърджали не е на А)', times(hA, '№ A5 ') === 1 && partOf(hA, TR).indexOf('№ A5 ') > 0);
+    /* Бройките в dry_run и в таблицата следват същото. */
+    const Ld = load(db({ client_orders: clone(orders) }), MON);
+    const dd = (await Ld.call({ topic_key: 'store_open_items_regional', dry_run: true })).result;
+    const ob = (em, st) => ((dd.planned.filter(p => p.email === em)[0] || { obekti: [] }).obekti.filter(o => o.obekt === st)[0] || {});
+    ok('dry_run А / Троян: late_ful = 0 (A4 е при Ловеч)', (ob('reg.a@temax.bg', TR).zayavki || {}).late_ful === 0, JSON.stringify(ob('reg.a@temax.bg', TR).zayavki));
+    ok('dry_run А / Ловеч: late_req = 1 (A4)', (ob('reg.a@temax.bg', LV).zayavki || {}).late_req === 1, JSON.stringify(ob('reg.a@temax.bg', LV).zayavki));
+    ok('dry_run Б / Кърджали: late_ful = 1 (A5)', (ob('reg.b@temax.bg', KJ).zayavki || {}).late_ful === 1, JSON.stringify(ob('reg.b@temax.bg', KJ).zayavki));
+    /* Писмото на обекта — непроменено: Троян вижда A4 като изпълнител. */
+    const Ls = load(db({ client_orders: clone(orders) }), MON);
+    await Ls.call({ topic_key: 'store_open_items' });
+    const trMail = ((Ls.mails().filter(m => m.body.subject.indexOf('за ' + TR + ' ') >= 0)[0]) || { body: { html: '' } }).body.html;
+    ok('писмото на Троян (обекта) — A4 при изпълнителя, както досега', trMail.indexOf('№ A4 ') > 0 && trMail.indexOf('Заявил: Ловеч') > 0);
   }
 
   section('4. Таван — повторен опит (общият soiSendAll / postSendFn)');

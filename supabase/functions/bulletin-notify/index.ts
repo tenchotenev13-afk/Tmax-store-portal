@@ -14,6 +14,19 @@
 //   store_open_items_regional — Незавършено за вашите обекти: по едно писмо
 //                    на регионален, част на обект (v26)
 //
+// v28 (19.11.2026, след v27 от minusi-open-diff-notify) — store_open_items и
+//   store_open_items_regional изглеждат
+//   като останалите отчети (решение на Тенчо 19.11): обвивка soiEmailShell —
+//   дословно копие на reportEmailShell (send-scheduled-report, сверка в
+//   теста); глава „📋 Незавършено за <обект> | вашите обекти" / „<дата> · …";
+//   обобщение (чипове за обекта, таблица по обект за регионалния); секциите
+//   — кутии като reportPostponedSectionHtml (закъснели червено, до 2 работни
+//   дни оранжево); при регионалния тъмна лента с името на обекта; тестовата
+//   лента — над картата. Правила, бройки, получатели, текстът на редовете и
+//   темата на писмото — непроменени. И: при регионалния заявка между два
+//   негови обекта излиза ВЕДНЪЖ — при заявителя, не и при изпълнителя
+//   (решение 19.11; soiClassify с reqScope). Писмото на обекта — непроменено.
+//
 // v27 (19.11.2026, след v26) — САМО minus_unfilled (сесия minusi-open-diff-notify;
 //   Теодор 18–19.11, стъпка 2 от 3; решения на Тенчо 19.11): към текста за
 //   обекта „· N минус(а) с отворена разлика", N > 0. N = брой УНИКАЛНИ кодове
@@ -3060,12 +3073,18 @@ function soiItemText(o: any): string {
   return items.length > 1 ? first + ' и още ' + (items.length - 1) : first;
 }
 /* Четирите подгрупи за обекта, в реда на писмото. */
-function soiClassify(rows: any[], store: string, todayISO: string, limitISO: string) {
+/* reqScope (v28, само писмото на регионалния): обектите на получателя. Заявка,
+   чийто заявител е сред тях, НЕ се показва при изпълнителя — тя е вече в
+   частта на заявителя (решение на Тенчо 19.11: заявка между два обекта на
+   един регионален излиза веднъж, при заявителя). Без reqScope (писмото на
+   обекта) — както досега. */
+function soiClassify(rows: any[], store: string, todayISO: string, limitISO: string, reqScope?: string[]) {
   const out = { late_req: [] as any[], late_ful: [] as any[], soon_req: [] as any[], soon_ful: [] as any[] };
   const me = soiNorm(store);
+  const scope = (reqScope || []).map(soiNorm);
   for (const o of (rows || [])) {
     const req = soiNorm(o.store_name) === me;
-    const ful = !req && soiNorm(o.fulfiller) === me;
+    const ful = !req && soiNorm(o.fulfiller) === me && scope.indexOf(soiNorm(o.store_name)) < 0;
     if (!req && !ful) continue;
     if (soiIsLate(o, todayISO)) (req ? out.late_req : out.late_ful).push(o);
     else if (soiIsSoon(o, todayISO, limitISO)) (req ? out.soon_req : out.soon_ful).push(o);
@@ -3107,12 +3126,13 @@ function soiTasksFor(data: any, store: string) {
   const mine = (data.items || []).filter((it: any) => it.store === store)
     .sort((a: any, b: any) => String(a.due).localeCompare(String(b.due)) || String(a.title).localeCompare(String(b.title)));
   if (!mine.length) return { n: 0, counts: { zadachi: 0 }, html: '' };
-  let html = soiH3('Просрочени задачи от Бюлетина (' + mine.length + ')');
+  let html = '';
   for (const it of mine) {
     html += soiRow((it.kind === 'recurring' ? '🔁 ' : '') + esc(it.title),
       'срок ' + esc(bgDate(it.due)));
   }
-  return { n: mine.length, counts: { zadachi: mine.length }, html: html };
+  return { n: mine.length, counts: { zadachi: mine.length },
+    html: soiBox('⏰ Просрочени задачи от Бюлетина (' + mine.length + ')', html, 'red') };
 }
 
 /* ── Секция Б: клиентски заявки ── */
@@ -3133,8 +3153,8 @@ async function soiLoadOrders(supabase: any, bg: ReturnType<typeof bgNow>) {
   }
   return { rows: rows, today: today, limit: limit };
 }
-function soiOrdersFor(data: any, store: string) {
-  const c = soiClassify(data.rows, store, data.today, data.limit);
+function soiOrdersFor(data: any, store: string, scope?: string[]) {
+  const c = soiClassify(data.rows, store, data.today, data.limit, scope);
   const counts = { late_req: c.late_req.length, late_ful: c.late_ful.length, soon_req: c.soon_req.length, soon_ful: c.soon_ful.length };
   const n = counts.late_req + counts.late_ful + counts.soon_req + counts.soon_ful;
   if (!n) return { n: 0, counts: counts, html: '' };
@@ -3170,14 +3190,13 @@ function soiOrdersFor(data: any, store: string) {
     ['Срок до ' + SOI_SOON_WORKDAYS + ' работни дни — като заявител', c.soon_req, true, false],
     ['Срок до ' + SOI_SOON_WORKDAYS + ' работни дни — като изпълнител', c.soon_ful, false, false],
   ];
-  let html = soiH3('Клиентски заявки (' + n + ')');
+  let html = '';
   for (const g of groups) {
     if (!g[1].length) continue;
-    html += '<div style="font-size:13px;font-weight:700;color:' + (g[3] ? '#b91c1c' : '#b45309') + ';margin:10px 0 4px;">'
-      + esc(g[0]) + ' (' + g[1].length + ')</div>';
+    html += soiSub(esc(g[0]) + ' (' + g[1].length + ')', g[3] ? 'red' : 'orange');
     for (const o of g[1]) html += line(o, g[2], g[3]);
   }
-  return { n: n, counts: counts, html: html };
+  return { n: n, counts: counts, html: soiBox('🛒 Клиентски заявки (' + n + ')', html, 'neutral') };
 }
 
 /* ── v24: секция „Разлики — чакат вас" (етап 2, първа секция) ──────────
@@ -3235,16 +3254,16 @@ function soiDiffsFor(data: any, store: string) {
       since ? 'от ' + esc(bgDate(since).slice(0, 5)) + (k > 0 ? ' · ' + k + (k === 1 ? ' работен ден' : ' работни дни') : '') : ''].filter(Boolean).join(' · ');
     return soiRow(main, meta);
   };
-  let html = soiH3('Разлики (' + n + ')');
+  let html = '';
   for (const g of [['За заприхождаване', wi], ['За връщане', rt]] as [string, any[]][]) {
     if (!g[1].length) continue;
-    html += '<div style="font-size:13px;font-weight:700;color:#b45309;margin:10px 0 4px;">' + esc(g[0]) + ' (' + g[1].length + ')</div>';
+    html += soiSub(esc(g[0]) + ' (' + g[1].length + ')', 'amber');
     for (const r of g[1].slice(0, SOI_SD_MAX)) html += line(r);
     if (g[1].length > SOI_SD_MAX) {
-      html += '<div style="font-size:12px;color:#6b7280;padding:5px 0;">и още ' + (g[1].length - SOI_SD_MAX) + ' — вижте таб Разлики</div>';
+      html += '<div style="padding:7px 10px;font-size:12px;color:#6b7280;border-bottom:1px solid #E5E7EB;">и още ' + (g[1].length - SOI_SD_MAX) + ' — вижте таб Разлики</div>';
     }
   }
-  return { n: n, counts: counts, html: html };
+  return { n: n, counts: counts, html: soiBox('⚖️ Разлики (' + n + ')', html, 'amber') };
 }
 
 /* ЕДИНСТВЕНИЯТ списък със секциите на писмото — нова секция е нов ред. */
@@ -3254,23 +3273,83 @@ const SOI_SECTIONS = [
   { key: 'razliki', load: soiLoadDiffs, forStore: soiDiffsFor },
 ];
 
-function soiH3(t: string): string {
-  return '<h3 style="margin:16px 0 6px;font-size:15px;color:#1f2937;border-bottom:1px solid #e5e7eb;padding-bottom:4px;">' + esc(t) + '</h3>';
+/* v28 (19.11.2026, решение на Тенчо): писмата изглеждат като останалите
+   отчети. soiEmailShell — ДОСЛОВНО копие на reportEmailShell от
+   send-scheduled-report (само името е друго; сверката е в
+   tests/store-open-items.test.js). Секциите — кутии в стила на
+   reportPostponedSectionHtml: малко главно заглавие с брой, рамкирана кутия,
+   редове с разделител; закъснелите — червено, „до 2 работни дни" — оранжево.
+   Текстът на редовете, бройките и правилата — непроменени. */
+function soiEmailShell(headerTitle, headerSub, bodyHtml, footerText){
+  return '<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
+    '<body style="margin:0;padding:20px;background:#e8ecf3;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;font-family:-apple-system,\'Segoe UI\',Arial,sans-serif;">' +
+    '<div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 18px rgba(30,39,97,.12);">' +
+      '<div style="background:#1E2761;padding:26px 24px;">' +
+        '<p style="color:#CADCFC;font-size:12px;letter-spacing:1px;text-transform:uppercase;margin:0 0 6px;">ТеМАХ Портал</p>' +
+        '<h1 style="color:#fff;font-size:22px;margin:0 0 4px;font-weight:700;">'+headerTitle+'</h1>' +
+        '<p style="color:#9DB3E8;font-size:13px;margin:0;">'+headerSub+'</p>' +
+      '</div>' +
+      '<div style="padding:20px;">' + bodyHtml + '</div>' +
+      '<div style="padding:20px 24px 26px;text-align:center;">' +
+        '<a href="'+PORTAL_URL+'" style="display:inline-block;background:#1E2761;color:#fff;text-decoration:none;font-size:13px;font-weight:700;padding:11px 26px;border-radius:7px;">Отвори в портала →</a>' +
+        '<div style="font-size:11px;color:#9aa4b2;margin-top:14px;">'+footerText+'</div>' +
+      '</div>' +
+    '</div></body></html>';
+}
+const SOI_TONE: Record<string, { t: string; bg: string; bd: string; sub: string }> = {
+  red:     { t: '#b91c1c', bg: '#FEF2F2', bd: '#FECACA', sub: '#FEE2E2' },
+  orange:  { t: '#c2410c', bg: '#FFF7ED', bd: '#FED7AA', sub: '#FFEDD5' },
+  amber:   { t: '#b45309', bg: '#FFFBEB', bd: '#FDE68A', sub: '#FEF3C7' },
+  neutral: { t: '#1E2761', bg: '#F9FAFB', bd: '#E5E7EB', sub: '#F3F4F6' },
+};
+function soiBox(title: string, inner: string, tone: string): string {
+  const c = SOI_TONE[tone] || SOI_TONE.neutral;
+  return '<div style="margin-top:14px;">' +
+    '<div style="font-size:11px;font-weight:700;color:' + c.t + ';text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">' + esc(title) + '</div>' +
+    '<div style="background:' + c.bg + ';border:1px solid ' + c.bd + ';border-radius:8px;overflow:hidden;">' + inner + '</div>' +
+    '</div>';
+}
+/* Подгрупа вътре в кутията — лента с цвета ѝ (labelHtml е вече екраниран). */
+function soiSub(labelHtml: string, tone: string): string {
+  const c = SOI_TONE[tone] || SOI_TONE.neutral;
+  return '<div style="padding:6px 10px;font-size:12px;font-weight:700;color:' + c.t + ';background:' + c.sub + ';border-bottom:1px solid ' + c.bd + ';border-left:3px solid ' + c.t + ';">' + labelHtml + '</div>';
 }
 function soiRow(mainHtml: string, metaHtml: string): string {
-  return '<div style="padding:5px 0;border-bottom:1px solid #f3f4f6;"><div style="font-size:13.5px;font-weight:600;">' + mainHtml
-    + '</div><div style="font-size:12px;color:#6b7280;line-height:1.5;">' + metaHtml + '</div></div>';
+  return '<div style="padding:8px 10px;border-bottom:1px solid #E5E7EB;background:#ffffff;"><div style="font-size:13px;font-weight:700;color:#1f2937;">' + mainHtml
+    + '</div><div style="font-size:12px;color:#6b7280;line-height:1.5;margin-top:2px;">' + metaHtml + '</div></div>';
 }
+/* Обобщението: етикет на секция по ключ (нова секция без етикет → ключът). */
+const SOI_SUM_LABEL: Record<string, string> = { zadachi: 'Задачи', zayavki: 'Заявки', razliki: 'Разлики' };
+function soiSumLabel(key: string): string { return SOI_SUM_LABEL[key] || key; }
+function soiChip(text: string, on: boolean): string {
+  return '<span style="display:inline-block;margin:0 6px 6px 0;padding:5px 11px;border-radius:14px;font-size:12px;font-weight:700;background:'
+    + (on ? '#EEF2FF' : '#F3F4F6') + ';color:' + (on ? '#1E2761' : '#9CA3AF') + ';">' + text + '</span>';
+}
+/* Обект: „Задачи N · Заявки N · Разлики N" като чипове. */
+function soiSummaryChips(parts: any[]): string {
+  return '<div style="margin-bottom:4px;">' + parts.map((p) => soiChip(esc(soiSumLabel(p.key)) + ' ' + p.n, p.n > 0)).join('') + '</div>';
+}
+/* Регионален: малка таблица — по ред на обект. */
+function soirSummaryTable(blocks: { store: string; parts: any[] }[]): string {
+  if (!blocks.length) return '';
+  const keys = blocks[0].parts.map((p: any) => p.key);
+  const th = 'padding:6px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.3px;border-bottom:1px solid #E5E7EB;';
+  const td = 'padding:6px 8px;font-size:13px;border-bottom:1px solid #F3F4F6;';
+  return '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-bottom:6px;">'
+    + '<tr><th style="' + th + 'text-align:left;">Обект</th>' + keys.map((k: string) => '<th style="' + th + 'text-align:center;">' + esc(soiSumLabel(k)) + '</th>').join('') + '</tr>'
+    + blocks.map((b) => '<tr><td style="' + td + 'font-weight:700;color:#1E2761;">' + esc(b.store) + '</td>'
+      + b.parts.map((p: any) => '<td style="' + td + 'text-align:center;color:' + (p.n ? '#1f2937' : '#9CA3AF') + ';">' + p.n + '</td>').join('') + '</tr>').join('')
+    + '</table>';
+}
+/* Лентата на обекта в писмото на регионалния. */
+function soirStoreBand(store: string): string {
+  return '<div style="margin:22px 0 2px;background:#1E2761;color:#ffffff;font-size:15px;font-weight:700;padding:9px 12px;border-radius:7px;">' + esc(store) + '</div>';
+}
+const SOI_FOOTER = 'Автоматичен репорт · ТеМАХ Портал';
 function soiHtmlFor(store: string, parts: any[], bg: ReturnType<typeof bgNow>): string {
-  return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:640px;">'
-    + '<h2 style="margin:0 0 4px;font-size:19px;color:#b91c1c;">Незавършено за ' + esc(store) + '</h2>'
-    + '<div style="font-size:13px;color:#6b7280;margin-bottom:6px;">Към ' + esc(bgDate(bg.dateStr))
-    + ' сутринта — какво чака обекта.</div>'
-    + soiStoreBody(parts)
-    + '<div style="margin-top:16px;"><a href="' + PORTAL_URL + '" '
-    + 'style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;'
-    + 'font-size:13px;font-weight:600;padding:10px 18px;border-radius:6px;">Отвори портала</a></div>'
-    + '<div style="font-size:11px;color:#9ca3af;margin-top:18px;">ТеМАХ Портал</div></div>';
+  return soiEmailShell('📋 Незавършено за ' + esc(store), esc(bgDate(bg.dateStr)) + ' · какво чака обекта',
+    soiSummaryChips(parts) + soiStoreBody(parts), SOI_FOOTER);
 }
 
 /* v26: секциите — веднъж за пускането (общо за двете теми). */
@@ -3282,17 +3361,24 @@ async function soiLoadAll(supabase: any, bg: any): Promise<Record<string, any>> 
 /* v26: частите на един обект — ЕДИНСТВЕНОТО място, което пита SOI_SECTIONS за
    обект. Писмото на обекта и частта на обекта в писмото на регионалния идват
    оттук; нова секция влиза и в двете сама. */
-function soiPartsFor(loaded: Record<string, any>, store: string) {
-  const parts = SOI_SECTIONS.map((s) => Object.assign({ key: s.key }, s.forStore(loaded[s.key], store)));
+function soiPartsFor(loaded: Record<string, any>, store: string, scope?: string[]) {
+  /* scope — само при регионалния: обектите на получателя (секция, която не го
+     ползва, го пренебрегва; „Заявки“ маха заявка между два негови обекта от
+     частта на изпълнителя). */
+  const parts = SOI_SECTIONS.map((s: any) => Object.assign({ key: s.key }, s.forStore(loaded[s.key], store, scope)));
   return { parts: parts, total: parts.reduce((a, p) => a + p.n, 0) };
 }
 /* Съдържанието на обекта (секциите) — без рамката на писмото. */
 function soiStoreBody(parts: any[]): string {
-  return parts.map((p) => p.html).join('');
+  return '<!--soi-body-->' + parts.map((p) => p.html).join('') + '<!--/soi-body-->';
 }
 function soiTestBanner(text: string): string {
-  return '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за '
+  return '<div style="max-width:600px;margin:0 auto 10px;font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за '
     + text + '</div>';
+}
+function soiWithBanner(html: string, banner: string): string {
+  const m = /<body[^>]*>/.exec(html);
+  return m ? html.slice(0, m.index + m[0].length) + banner + html.slice(m.index + m[0].length) : banner + html;
 }
 
 /* v26: ОБЩОТО пращане на двете теми (store_open_items и
@@ -3319,7 +3405,7 @@ async function soiSendAll(supabase: any, topic: any, items: any[], unit: string)
     let logged = false, okOne = false;
     try {
       if (topic.test_email) {
-        if (await sendEmail(topic.test_email, it.subject, soiTestBanner(it.banner) + it.html)) { sent++; done++; } else { failed++; noMail.push(it.key); }
+        if (await sendEmail(topic.test_email, it.subject, soiWithBanner(it.html, soiTestBanner(it.banner)))) { sent++; done++; } else { failed++; noMail.push(it.key); }
         continue;
       }
       const ins = await supabase.from('notification_log')
@@ -3466,17 +3552,8 @@ async function soirRecipients(supabase: any, topicKey: string) {
   return { list: list, warnings: warnings };
 }
 function soirHtml(name: string, blocks: { store: string; parts: any[] }[], bg: ReturnType<typeof bgNow>): string {
-  return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:640px;">'
-    + '<h2 style="margin:0 0 4px;font-size:19px;color:#b91c1c;">Незавършено за вашите обекти</h2>'
-    + '<div style="font-size:13px;color:#6b7280;margin-bottom:6px;">Към ' + esc(bgDate(bg.dateStr))
-    + ' сутринта — какво чака ' + (blocks.length === 1 ? 'обекта' : 'обектите') + ': ' + blocks.map((b) => esc(b.store)).join(', ') + '.</div>'
-    + blocks.map((b) => '<div style="margin-top:18px;padding-top:6px;border-top:3px solid #b91c1c;">'
-      + '<div style="font-size:17px;font-weight:700;color:#b91c1c;">' + esc(b.store) + '</div>'
-      + soiStoreBody(b.parts) + '</div>').join('')
-    + '<div style="margin-top:16px;"><a href="' + PORTAL_URL + '" '
-    + 'style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;'
-    + 'font-size:13px;font-weight:600;padding:10px 18px;border-radius:6px;">Отвори портала</a></div>'
-    + '<div style="font-size:11px;color:#9ca3af;margin-top:18px;">ТеМАХ Портал</div></div>';
+  return soiEmailShell('📋 Незавършено за вашите обекти', esc(bgDate(bg.dateStr)) + ' · ' + blocks.map((b) => esc(b.store)).join(', '),
+    soirSummaryTable(blocks) + blocks.map((b) => soirStoreBand(b.store) + soiStoreBody(b.parts)).join(''), SOI_FOOTER);
 }
 async function runStoreOpenItemsRegional(supabase: any, topic: any, bg: any, dryRun: boolean) {
   if (!isBgWorkday(bg.dateStr)) {
@@ -3487,15 +3564,13 @@ async function runStoreOpenItemsRegional(supabase: any, topic: any, bg: any, dry
     return { topic: topic.key, skipped: 'Няма регионални с обекти', recipients: 0, warnings: rec.warnings };
   }
   const loaded = await soiLoadAll(supabase, bg);
-  const memo: Record<string, any> = {};
-  const partsOf = (store: string) => memo[store] || (memo[store] = soiPartsFor(loaded, store));
 
   const plan: any[] = [];
   const empty: string[] = [];
   for (const r of rec.list) {
     const blocks: any[] = [];
     for (const store of r.stores) {
-      const pf = partsOf(store);
+      const pf = soiPartsFor(loaded, store, r.stores);
       if (pf.total) blocks.push({ store: store, parts: pf.parts, total: pf.total });
     }
     if (!blocks.length) { empty.push(r.email); continue; }
