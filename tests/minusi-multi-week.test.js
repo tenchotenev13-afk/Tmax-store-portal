@@ -149,8 +149,9 @@ function install(h, db) {
   const db = { settings: [{ key: 'minus_stores', value: STORES.join(',') }], movs: copy(ROWS), log: [] };
   install(h, db);
   const got = await new Promise(res => w.collectMinusMultiReportData(REF, res));
-  const qs = db.log.filter(x => x.tbl === 'minus_movements').map(x => x.q);
-  ok('две заявки към minus_movements', qs.length === 2, qs.length);
+  /* От 19.11.2026 и трета — „Минуси с отворена разлика“ (всички 955, без posting_date). */
+  const qs = db.log.filter(x => x.tbl === 'minus_movements' && /posting_date=/.test(x.q)).map(x => x.q);
+  ok('две заявки към minus_movements (с прозорец)', qs.length === 2, qs.length);
   ok('първата — както досега (955, прозорецът на повтарящите се)', /mvt_type=eq\.955/.test(qs[0]) && /posting_date=lte\.2026-10-25/.test(qs[0]));
   ok('втората — без mvt_type и без горна граница, от 12.10, само обектите', qs[1] && !/mvt_type=/.test(qs[1]) && !/posting_date=lte/.test(qs[1]) && /posting_date=gte\.2026-10-12/.test(qs[1]) && qs[1].indexOf('store_name=in.("Гоце Делчев","Монтана","Петрич","Троян")') >= 0, qs[1]);
   ok('данните носят седмицата: Общо 14 / 12, „Данни до" 26.10', got && got.week && got.week.total.cur === 14 && got.week.total.prev === 12 && got.week.total.lastDate === '2026-10-26', got && JSON.stringify(got.week && got.week.total));

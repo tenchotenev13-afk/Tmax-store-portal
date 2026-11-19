@@ -49,6 +49,7 @@ const ROUTED = path.join(ROOT, 'supabase/functions/send-routed-report/index.ts')
 const SHARED = path.join(ROOT, 'shared.js');
 const BULLETIN = path.join(ROOT, 'bulletin.js');
 const KASA = path.join(ROOT, 'kasa.js');
+const STOCKDIFF = path.join(ROOT, 'stock-differences.js');
 
 /* ── Списъкът е ИЗРИЧЕН, не сканиран ──
    Ако беше сканиран, изтриването на функция от двата файла щеше да мине
@@ -127,6 +128,8 @@ const SHARED_FNS = [
   'reportMinusMultiCommon', 'reportMinusMultiCommonHtml',
   /* клиентските поръчки — отделна секция (11.11.2026) */
   'reportMinusMultiCoIds', 'reportMinusMultiIsCo', 'reportMinusMultiCoGroup', 'reportMinusMultiCoHtml',
+  /* „Минуси с отворена разлика" (v72, 19.11.2026, minusi-open-diff-weekly). */
+  'reportMinusOdTurn', 'reportMinusOdStatus', 'reportMinusOdComments', 'reportMinusOdGroup', 'reportMinusOdHtml', 'collectMinusOdData',
   /* Кой получава дневния / седмичния (v68, 12.11.2026) — ЕДИН избор за крона,
      recipients_only и „Изпрати сега“. Разминае ли се копието, порталът ще
      показва едни получатели, а кронът ще праща на други. */
@@ -158,6 +161,18 @@ const COPIED_HELPERS = [
      огледало на SQL stock_diff_store_done. Разминае ли се копието, писмото
      оценява обектите по друго правило от портала и от отметката. */
   { fn: 'diffLineWaitsStore', from: SHARED },
+  /* „Минуси с отворена разлика" (v72, 19.11.2026): неприключен ред, ходът на
+     обекта (А ∪ Б) и надписът на статуса — правилата на Разлики и на
+     известието bulletin-notify v27. В report.js ги няма: там се викат
+     оригиналите от stock-differences.js / bulletin.js. */
+  { fn: 'sdIsClosed', from: STOCKDIFF },
+  { fn: 'sdIsTaken', from: STOCKDIFF },
+  { fn: 'sdIsCompleted', from: STOCKDIFF },
+  { fn: 'sdRowAwaitsMark', from: STOCKDIFF },
+  { fn: 'sdStoreMustAct', from: STOCKDIFF },
+  { fn: 'sdStatusWords', from: STOCKDIFF },
+  { fn: 'bulDiffLineWaitsStore', from: BULLETIN },
+  { fn: 'bulDiffStoreWaiting', from: BULLETIN },
   /* fmtDate2 — вика го reportSpanPendingHtml; липсата му събори седмичния
      отчет на 04.10.2026 (ReferenceError). */
   { fn: 'fmtDate2', from: BULLETIN },

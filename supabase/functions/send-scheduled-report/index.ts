@@ -1,6 +1,21 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v72 (19.11.2026) — ЕДНО нещо (копие от report.js, сесия
+      minusi-open-diff-weekly; Теодор 18–19.11, стъпка 3 от 3): в писмото
+      minus_multi нова секция „Минуси с отворена разлика" — по обект, ред на
+      код с поне един ред 955 (закрит или не): минус от, и за всяка
+      неприключена разлика (sdIsClosed) дата на бланката, вид, статус (надписът
+      от Разлики), ход (обект = sdStoreMustAct ИЛИ bulDiffStoreWaiting; иначе
+      по sdInterstoreTurn: склад / ЦО / регионален / по размяната / на път;
+      доставчик и грешен прием → офис) и коментарите на реда. Празна → не се
+      показва; грешка → червен ред, писмото тръгва. Регионалният — само
+      своите обекти (reportMinusMultiForStores). Копия от stock-differences.js /
+      bulletin.js — сверени в report-edge-sync. dry_run: od_total / od_error по
+      получател и od_stores (кодове, без текста на коментарите). Получателите,
+      кога се праща (reportMinusMultiShouldSend) и останалите секции —
+      непроменени.
+
    v71 (19.11.2026) — Разлики 6в-3 (копие от report.js): 1) колона „чака ЦО /
       регионалния“ (coSide, reportDiffCOTurn) в „Необработени разлики“;
       2) секция „Разлики — чакат склада“ в type 'warehouse' (reportWhDiffKind);
@@ -5199,6 +5214,195 @@ function reportMinusMultiCommonHtml(c){
   });
   return h + '</table>';
 }
+/* ── Копия от портала за „Минуси с отворена разлика" (v72, 19.11.2026) ──
+   Дословно от stock-differences.js (sdIsClosed, sdIsTaken, sdIsCompleted,
+   sdRowAwaitsMark, sdStoreMustAct, sdStatusWords, SD_CLOSED_STATUSES,
+   SD_STATUS_NEW_LABEL) и bulletin.js (bulDiffLineWaitsStore,
+   bulDiffStoreWaiting). В браузъра report.js вика оригиналите — затова в
+   report.js ги няма. Сверени в tests/report-edge-sync.test.js (функциите) и
+   tests/minusi-open-diff-weekly.test.js (двете константи). */
+var SD_CLOSED_STATUSES = ['received','taken','capitalized','completed'];
+function sdIsClosed(r){ return !!r && SD_CLOSED_STATUSES.indexOf(r.status) >= 0; }
+var SD_STATUS_NEW_LABEL = '🆕 ПОДАДЕНА, НЕПРЕГЛЕДАНА';
+function sdIsTaken(r){ return r.status==='taken' || r.status==='capitalized'; }
+function sdIsCompleted(r){ return !!r && r.status==='completed'; }
+function sdRowAwaitsMark(r){
+  return !!r && !sdIsClosed(r) && r.type !== 'not_invoiced';
+}
+function sdStoreMustAct(r){
+  return !!r && (r.type === 'writein' || r.type === 'return') && sdRowAwaitsMark(r);
+}
+function sdStatusWords(type, direction){
+  if(direction==='wrong_receipt') return {pending:'Неизчистена', taken:'Изчистена', pIcon:'⏳', tIcon:'✅'};
+  if(type==='writein') return {pending:'Незаприходена', taken:'Заприходена', pIcon:'⏳', tIcon:'📥'};
+  /* "Не са фактурирани" е междинно състояние - редът чака крайно решение
+     (заприхождаване или връщане), тоест нито "Невзета", нито "Незаприходена"
+     казва истината. 'taken' е недостижимо по нормалния път; думата стои само
+     за да не излиза "Взета", ако такъв ред все пак се появи. */
+  if(type==='not_invoiced') return {pending:'Чака решение', taken:'Приключена', pIcon:'⏳', tIcon:'🧾'};
+  return {pending:'Невзета', taken:'Взета', pIcon:'⏳', tIcon:'✅'};
+}
+function bulDiffLineWaitsStore(l){
+  return diffLineWaitsStore(l);
+}
+function bulDiffStoreWaiting(lines, swaps, store){
+  /* Ходът е мой: 'linked' и аз съм изпращач, или 'sent' и аз съм получател.
+     Ключът е по РЕД, защото редът трябва да е в МОЯ бланка. */
+  var myMove={};
+  (swaps||[]).forEach(function(x){
+    if(!x) return;
+    if(x.status==='linked' && x.from_store===store) myMove[String(x.from_line_id)]=1;
+    if(x.status==='sent'   && x.to_store===store)   myMove[String(x.to_line_id)]=1;
+  });
+  return (lines||[]).filter(function(l){
+    /* ФИЛТРИТЕ СЕ ПРОВЕРЯВАТ И ТУК, не само в заявката: върне ли тя повече
+       (друг обект, прегледана бланка, доставчикова посока), броят лъже. */
+    var r=l && l.differences_reports;
+    if(!r || r.store_name!==store || r.reviewed || r.direction!=='interstore') return false;
+    if(myMove[String(l.id)]) return true;
+    return bulDiffLineWaitsStore(l);
+  });
+}
+/* ═══════ МИНУСИ С ОТВОРЕНА РАЗЛИКА (minusi-open-diff-weekly, 19.11.2026) ═══
+   Стъпка 3 от 3 по искането на Теодор (18–19.11): в понеделничното писмо —
+   по обект, ред на код (уникален код с поне един ред 955 на обекта, закрит
+   или не — както знакът в таб Минуси): код · описание · минус от (най-ранният
+   955 по кода) · и за всяка НЕприключена разлика по кода (sdIsClosed): дата на
+   бланката · вид · статус с надписа от Разлики · ход · коментарите от реда.
+   Влизат ВСИЧКИ неприключени разлики, не само с ход на обекта.
+   Ход: 'store' = А ∪ Б (sdStoreMustAct ИЛИ bulDiffStoreWaiting — правилото на
+   известието bulletin-notify v27); иначе за междускладов ред — правилото на
+   sdInterstoreTurn (stock-differences.js): насочен (reportDiffIsRouted) → ЦО
+   или регионалния (damaged), отворена размяна → „по размяната", без отговор
+   на склада / „Ще се изпрати" / return + „пуснато в SAP" → склад, sent /
+   sent_sap без отговор → „на път" (стоката е тръгнала; не е ход на обекта по
+   решението от 04.11), return + „няма наличност" → ЦО; всичко останало
+   (доставчик, грешен прием, непознато) → офис. sdIsClosed, sdStoreMustAct,
+   sdStatusWords, bulDiffStoreWaiting и SD_STATUS_NEW_LABEL са в портала
+   глобални (stock-differences.js / bulletin.js), а в send-scheduled-report —
+   копия (tests/report-edge-sync.test.js, tests/minusi-open-diff-weekly.test.js).
+   Коментарите — полетата, които Разлики показва по реда: comment (обектът при
+   подаване), store_response_comment (обектът при отговор), resolution_comment
+   („Коментар контролер" — офисът), warehouse_comment (складът).
+   Грешка при четене → { error: true }: червен ред в писмото, писмото тръгва. */
+var REPORT_MINUS_OD_DIR = { interstore: 'междускладова', supplier: 'доставчик', wrong_receipt: 'грешен прием' };
+var REPORT_MINUS_OD_TURN = { store: 'обект', warehouse: 'склад', co: 'офис', regional: 'регионален', swap: 'по размяната', transit: 'на път' };
+function reportMinusOdTurn(l, swaps, store){
+  if (!l) return 'co';
+  if (sdStoreMustAct(l) || bulDiffStoreWaiting([l], swaps, store).length > 0) return 'store';
+  var rep = l.differences_reports || {};
+  if (rep.direction !== 'interstore') return 'co';
+  if (reportDiffIsRouted(l)) return String(l.difference_category || '') === 'damaged' ? 'regional' : 'co';
+  var open = (Array.isArray(swaps) ? swaps : []).some(function(s){
+    return s && s.status !== 'closed' && (String(s.from_line_id) === String(l.id) || String(s.to_line_id) === String(l.id));
+  });
+  if (open) return 'swap';
+  var w = String(l.warehouse_response || ''), s = String(l.store_response || '');
+  if (!w) return 'warehouse';
+  if (w === 'will_send' && !s) return 'warehouse';
+  if ((w === 'sent' || w === 'sent_sap') && !s) return 'transit';
+  if (w === 'return' && s === 'sap_done') return 'warehouse';
+  return 'co';
+}
+/* Надписът на статуса — като баджа на реда в Разлики (sdRowStatusBadge), без цвят. */
+function reportMinusOdStatus(l, dir){
+  if (!l) return '';
+  if (l.status === 'new') return SD_STATUS_NEW_LABEL;
+  if (l.status === 'received') return '📬 ПРИЕТА';
+  if (sdIsCompleted(l)) return '🏁 ПРИКЛЮЧЕНА';
+  var w = sdStatusWords(l.type, dir);
+  return sdIsTaken(l) ? w.tIcon + ' ' + w.taken.toUpperCase() : w.pIcon + ' ' + w.pending.toUpperCase();
+}
+function reportMinusOdComments(l){
+  var out = [];
+  var add = function(who, v){ var t = String(v == null ? '' : v).trim(); if (t) out.push(who + ': ' + t); };
+  if (!l) return out;
+  add('Обект', l.comment);
+  add('Обект (отговор)', l.store_response_comment);
+  add('Офис', l.resolution_comment);
+  add('Склад', l.warehouse_comment);
+  return out;
+}
+/* Чисто: minusRows — 955 на обектите (всички дати), lines — редове от Разлики с
+   вградената бланка, swaps — stock_diff_swaps. → { stores: [{ store, items }], total } */
+function reportMinusOdGroup(minusRows, lines, swaps, stores){
+  var ms = Array.isArray(stores) ? stores : [];
+  var codes = {};
+  (Array.isArray(minusRows) ? minusRows : []).forEach(function(m){
+    if (!m || String(m.mvt_type) !== '955' || ms.indexOf(m.store_name) < 0) return;
+    var c = String(m.material == null ? '' : m.material).trim();
+    if (!c) return;
+    var by = codes[m.store_name] || (codes[m.store_name] = {});
+    var g = by[c] || (by[c] = { code: c, desc: '', minusFrom: null, diffs: [] });
+    var dt = String(m.posting_date || '').slice(0, 10);
+    if (dt && (!g.minusFrom || dt < g.minusFrom)) g.minusFrom = dt;
+    if (m.material_desc && !g.desc) g.desc = m.material_desc;
+  });
+  (Array.isArray(lines) ? lines : []).forEach(function(l){
+    if (!l || sdIsClosed(l)) return;
+    var g = (codes[l.store_name] || {})[String(l.material_code == null ? '' : l.material_code).trim()];
+    if (!g) return;
+    var rep = l.differences_reports || {};
+    var dir = rep.direction || 'supplier';
+    if (!g.desc && l.material_name) g.desc = l.material_name;
+    g.diffs.push({ id: l.id, date: rep.doc_date ? String(rep.doc_date).slice(0, 10) : (l.created_at ? String(l.created_at).slice(0, 10) : null),
+      dir: dir, status: reportMinusOdStatus(l, dir), turn: reportMinusOdTurn(l, swaps, l.store_name), comments: reportMinusOdComments(l) });
+  });
+  var out = { stores: [], total: 0 };
+  ms.forEach(function(s){
+    var by = codes[s] || {};
+    var items = Object.keys(by).map(function(k){ return by[k]; }).filter(function(g){ return g.diffs.length > 0; });
+    if (!items.length) return;
+    items.forEach(function(g){ g.diffs.sort(function(a, b){ return String(a.date || '').localeCompare(String(b.date || '')) || String(a.id).localeCompare(String(b.id)); }); });
+    items.sort(function(a, b){ return String(a.minusFrom || '').localeCompare(String(b.minusFrom || '')) || a.code.localeCompare(b.code, undefined, { numeric: true }); });
+    out.stores.push({ store: s, items: items });
+    out.total += items.length;
+  });
+  return out;
+}
+function reportMinusOdHtml(od){
+  if (!od) return '';
+  var title = '<div class="mm-od" style="font-size:13px;font-weight:700;color:#1E2761;margin:22px 0 4px;padding-top:12px;border-top:2px solid #e2e8f0;">Минуси с отворена разлика</div>';
+  if (od.error) return title + '<div class="mm-od-err" style="font-size:12px;font-weight:700;color:#C0392B;">⚠️ Разликите не се заредиха</div>';
+  if (!od.total) return '';
+  var th = function(t){ return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:left;border-bottom:2px solid #e2e8f0;">' + t + '</th>'; };
+  var td = function(h, extra){ return '<td style="padding:6px;font-size:12px;color:#1e293b;vertical-align:top;border-bottom:1px solid #eef1f6;' + (extra || '') + '">' + h + '</td>'; };
+  var lines = function(g, f){ return g.diffs.map(f).join('<br>'); };
+  var h = title + '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Артикули с минус и неприключена разлика: <b>' + od.total + '</b></div>';
+  od.stores.forEach(function(s){
+    h += '<div class="mm-od-store" style="font-size:13px;font-weight:700;color:#1E2761;margin:12px 0 4px;">' + esc(s.store) + ' (' + s.items.length + ')</div>';
+    h += '<table style="width:100%;border-collapse:collapse;"><tr>' + th('Код') + th('Описание') + th('Минус от') + th('Разлика от') + th('Вид') + th('Статус') + th('Ход') + th('Коментар') + '</tr>';
+    s.items.forEach(function(g){
+      h += '<tr class="mm-od-item">' + td(esc(g.code), 'white-space:nowrap;') + td(esc(g.desc)) +
+        td(g.minusFrom ? reportMinusMultiDM(g.minusFrom) + '.' + g.minusFrom.slice(0, 4) : '—', 'white-space:nowrap;') +
+        td(lines(g, function(d){ return d.date ? reportMinusMultiDM(d.date) + '.' + d.date.slice(0, 4) : '—'; }), 'white-space:nowrap;') +
+        td(lines(g, function(d){ return esc(REPORT_MINUS_OD_DIR[d.dir] || d.dir); })) +
+        td(lines(g, function(d){ return esc(d.status); })) +
+        td(lines(g, function(d){ return '<span class="mm-od-turn" style="' + (d.turn === 'store' ? 'color:#dc2626;font-weight:700;' : '') + '">' + esc(REPORT_MINUS_OD_TURN[d.turn] || d.turn) + '</span>'; })) +
+        td(lines(g, function(d){ return d.comments.length ? esc(d.comments.join(' · ')) : '<span style="color:#94a3b8;">—</span>'; })) + '</tr>';
+    });
+    h += '</table>';
+  });
+  return h;
+}
+/* Трите четения на секцията — грешка или непълно → { error: true }, не null:
+   писмото тръгва с червен ред. */
+function collectMinusOdData(stores, cb){
+  if (!stores || !stores.length) { cb({ stores: [], total: 0 }); return; }
+  var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
+  var fail = function(){ cb({ error: true }); };
+  reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date&mvt_type=eq.955' + inStores + '&order=id.asc').then(function(mv){
+    if (mv.partial) { fail(); return; }
+    return reportGetAll('stock_differences', 'select=id,store_name,material_code,material_name,type,status,warehouse_response,store_response,difference_category,comment,store_response_comment,resolution_comment,warehouse_comment,created_at,differences_reports(store_name,reviewed,direction,doc_date)' +
+      inStores + '&status=not.in.(' + SD_CLOSED_STATUSES.join(',') + ')&order=id.asc').then(function(ln){
+      if (ln.partial) { fail(); return; }
+      return reportGetAll('stock_diff_swaps', 'select=id,from_line_id,to_line_id,from_store,to_store,status&order=created_at.asc').then(function(sw){
+        if (sw.partial) { fail(); return; }
+        try { cb(reportMinusOdGroup(mv, ln, sw, stores)); } catch (e) { fail(); }
+      });
+    });
+  }).catch(fail);
+}
 function collectMinusMultiReportData(refISO, cb){
   sbGet('app_settings', 'key=in.(minus_stores,minus_multi_count,minus_multi_days)&select=key,value').then(function(set){
     if (!Array.isArray(set)) { cb(null); return; }
@@ -5206,7 +5410,7 @@ function collectMinusMultiReportData(refISO, cb){
     var stores = String(val('minus_stores') || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
     var count = reportMinusMultiPosInt(val('minus_multi_count'), REPORT_MINUS_MULTI_COUNT);
     var days = reportMinusMultiPosInt(val('minus_multi_days'), REPORT_MINUS_MULTI_DAYS);
-    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []), co: reportMinusMultiCoGroup([], [], count, days, refISO, []) })); return; }
+    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []), co: reportMinusMultiCoGroup([], [], count, days, refISO, []), od: { stores: [], total: 0 } })); return; }
     var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
     var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
     return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action,reason_id,note' +
@@ -5221,8 +5425,11 @@ function collectMinusMultiReportData(refISO, cb){
            поръчка (отделна секция, 11.11.2026); непълно → без писмо. */
         return reportGetAll('minus_reasons', 'select=id,label,requires_note&order=id.asc').then(function(rs){
           if (rs.partial) { cb(null); return; }
-          cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO, rs), { week: reportMinusMultiWeek(wk, stores, refISO),
-            common: reportMinusMultiCommon(rows, stores, days, refISO, rs), co: reportMinusMultiCoGroup(rows, stores, count, days, refISO, rs) }));
+          /* „Минуси с отворена разлика" (19.11.2026) — грешка там НЕ спира писмото. */
+          collectMinusOdData(stores, function(od){
+            cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO, rs), { week: reportMinusMultiWeek(wk, stores, refISO),
+              common: reportMinusMultiCommon(rows, stores, days, refISO, rs), co: reportMinusMultiCoGroup(rows, stores, count, days, refISO, rs), od: od }));
+          });
         });
       });
     });
@@ -5254,7 +5461,7 @@ function reportMinusMultiHtml(data){
       body += '</table>';
     });
   }
-  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusMultiCoHtml(d.co) + reportMinusMultiCommonHtml(d.common);
+  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusOdHtml(d.od) + reportMinusMultiCoHtml(d.co) + reportMinusMultiCommonHtml(d.common);
   var sub = d.from && d.ref ? 'Последните ' + d.days + ' дни: ' + reportMinusMultiDM(d.from) + ' – ' + reportMinusMultiDM(d.ref) + '.' + String(d.ref).slice(0, 4) : '';
   return reportEmailShell('➖ Минуси — повтарящи се артикули', sub, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
@@ -5336,6 +5543,14 @@ function reportMinusMultiForStores(data, stores, scoped){
   if (data && data.co) {
     var cs = (data.co.stores || []).filter(function(s){ return stores.indexOf(s.store) >= 0; });
     out.co = { stores: cs, total: cs.reduce(function(a, s){ return a + s.items.length; }, 0) };
+  }
+  /* „Минуси с отворена разлика" — същото срязване; грешката остава грешка. */
+  if (data && data.od) {
+    if (data.od.error) out.od = data.od;
+    else {
+      var os = (data.od.stores || []).filter(function(s){ return stores.indexOf(s.store) >= 0; });
+      out.od = { stores: os, total: os.reduce(function(a, s){ return a + s.items.length; }, 0) };
+    }
   }
   return out;
 }
@@ -5571,8 +5786,12 @@ Deno.serve(async (req: Request) => {
             common: j.sub.common ? { items:j.sub.common.items.length, reasons:j.sub.common.reasons.length,
               reason_labels:j.sub.common.reasons.map(function(r: any){ return r.label; }) } : null,
             co_total: j.sub.co ? j.sub.co.total : null,
+            od_total: j.sub.od && !j.sub.od.error ? j.sub.od.total : null, od_error: !!(j.sub.od && j.sub.od.error),
             send:j.send }; }),
           stores:(mmData.stores || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { material:g.material, n:g.dates.length, dates:g.dates, statement:!!g.action }; }) }; }),
+          od_error: !!(mmData.od && mmData.od.error),
+          od_stores:((mmData.od && !mmData.od.error && mmData.od.stores) || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { code:g.code, minus_from:g.minusFrom,
+            diffs:g.diffs.map(function(d: any){ return { date:d.date, dir:d.dir, status:d.status, turn:d.turn, comments:d.comments.length }; }) }; }) }; }),
           co_stores:((mmData.co && mmData.co.stores) || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { material:g.material, n:g.dates.length, dates:g.dates, notes:g.notes.length }; }) }; }),
           type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }

@@ -222,7 +222,7 @@ function mailChecks(label, F) {
     const grab = name => { const i = src.indexOf('\nfunction ' + name + '('); if (i < 0) throw new Error('няма ' + name); const j = src.indexOf('\n}\n', i); return src.slice(i, j + 3); };
     const names = ['reportMinusMultiAddDays', 'reportMinusMultiDM', 'reportMinusMultiCoIds', 'reportMinusMultiIsCo', 'reportMinusMultiCoGroup', 'reportMinusMultiCoHtml',
       'reportMinusMultiGroup', 'reportMinusMultiPct', 'reportMinusMultiWeekTotal', 'reportMinusMultiWeek', 'reportMinusMultiWeekHtml', 'reportMinusMultiCommon',
-      'reportMinusMultiCommonHtml', 'reportMinusMultiHtml', 'reportMinusMultiForStores'];
+      'reportMinusMultiCommonHtml', 'reportMinusMultiHtml', 'reportMinusMultiForStores', 'reportMinusOdHtml'];
     const ctx = { esc: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
       reportEmailShell: (t, s, b) => '<h1>' + t + '</h1>' + b, REPORT_MINUS_MULTI_COUNT: 3, REPORT_MINUS_MULTI_DAYS: 30 };
     vm.createContext(ctx);
@@ -233,7 +233,8 @@ function mailChecks(label, F) {
     const m = src.match(/if \(type === 'minus_multi'\) \{[\s\S]*?\n    \}\n/);
     ok('dry_run носи co_total и co_stores', !!m && /co_total: j\.sub\.co \? j\.sub\.co\.total : null/.test(m[0]) && /co_stores:/.test(m[0]));
     /* От v68 (12.11.2026) най-отгоре е по-новата бележка — тук се иска само v67 да е в заглавния коментар. */
-    ok('v67 бележка в заглавния коментар', /^\/\*[\s\S]{0,2000}v67 \(11\.11\.2026\)/.test(src));
+    /* От 19.11.2026 (v72) бележката е по-надолу от 2000 знака — проверява се само, че е в заглавния коментар. */
+    ok('v67 бележка в заглавния коментар', src.indexOf('v67 (11.11.2026)') > 0 && src.indexOf('v67 (11.11.2026)') < src.indexOf('*/'));
   }
 
   section('6. Сумите за офиса — „Разлика“ от закръглените');

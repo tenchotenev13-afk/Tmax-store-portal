@@ -179,8 +179,9 @@ function install(h, db) {
   const db = { settings: [{ key: 'minus_stores', value: STORES.join(',') }, { key: 'minus_multi_days', value: '30' }], log: [] };
   install(h, db);
   const got = await new Promise(res => w.collectMinusMultiReportData(REF, res));
-  const mq = db.log.filter(x => x.tbl === 'minus_movements').map(x => x.q);
-  ok('заявките към minus_movements са пак две', mq.length === 2, mq.length);
+  /* От 19.11.2026 има и трета — „Минуси с отворена разлика“ (всички 955, без posting_date); тук се броят двете на повтарящите се. */
+  const mq = db.log.filter(x => x.tbl === 'minus_movements' && /posting_date=/.test(x.q)).map(x => x.q);
+  ok('заявките към minus_movements (с прозорец) са пак две', mq.length === 2, mq.length);
   ok('първата иска и reason_id', /select=[^&]*reason_id/.test(mq[0]), mq[0]);
   ok('една заявка към minus_reasons (id, label)', db.log.filter(x => x.tbl === 'minus_reasons' && /select=id,label/.test(x.q)).length === 1);
   ok('данните носят common: 3 артикула, 3 причини, етикетите от minus_reasons',

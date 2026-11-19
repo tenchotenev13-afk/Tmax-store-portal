@@ -152,7 +152,8 @@ function checkPlan(label, plan, planFn) {
     ok('ръчният списък — същата заявка като досега', /sbGet\('report_recipients', 'active=eq\.true&minus_multi=eq\.true&select=email,name,active,minus_multi,scope_stores'\)/.test(br));
     ok('dry_run носи regional и regional_read', /regional:!!j\.plan\.regional/.test(br) && /regional_read:Array\.isArray\(mmRegRes\)/.test(br));
     /* От 11.11.2026 най-отгоре е v67 — v66 е в същия хедър, по-долу. */
-    ok('v66 бележка в хедъра на файла', /^\/\*[\s\S]{0,3000}v66 \(06\.11\.2026\)/.test(src) && src.indexOf('v66 (06.11.2026)') < src.indexOf('*/'));
+    /* От 19.11.2026 (v72) бележката е по-надолу от 3000 знака — проверява се само, че е в заглавния коментар. */
+    ok('v66 бележка в хедъра на файла', src.indexOf('v66 (06.11.2026)') > 0 && src.indexOf('v66 (06.11.2026)') < src.indexOf('*/'));
   }
 
   section('3. Администрация → Известия → Общи отчети');
