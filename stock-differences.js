@@ -6949,28 +6949,40 @@ function sdPaActiveByCode(code, exceptId){
   if(!c) return null;
   return sdPaActive().filter(function(p){ return sdPaCode(p.material_code) === c && String(p.id) !== String(exceptId || ''); })[0] || null;
 }
-/* Предупреждението за въведен SAP код: {p, as:'code'|'reads'} или null. */
+/* Предупреждението за въведен SAP код: {own, readers} или null.
+   own     — активният запис с този код като material_code (най-много един —
+             уникалният индекс);
+   readers — ВСИЧКИ активни записи с този код като reads_as_code (19.11.2026,
+             проверката на живо: 53597 е „чете се като“ и за 62081, и за
+             53598; 54229 — за трите оградки 54489, 54490, 54492). */
 function sdPaMatch(code){
   var c = sdPaCode(code);
   if(!c) return null;
   var act = sdPaActive();
-  var a = act.filter(function(p){ return sdPaCode(p.material_code) === c; })[0];
-  if(a) return { p: a, as: 'code' };
-  var b = act.filter(function(p){ return sdPaCode(p.reads_as_code) === c; })[0];
-  return b ? { p: b, as: 'reads' } : null;
+  var own = act.filter(function(p){ return sdPaCode(p.material_code) === c; })[0] || null;
+  var readers = act.filter(function(p){ return sdPaCode(p.reads_as_code) === c && p !== own; });
+  return (own || readers.length) ? { own: own, readers: readers } : null;
 }
 function sdPaWarnHtml(code){
   var m = sdPaMatch(code);
   if(!m) return '';
-  var p = m.p, txt;
   var who = function(c, n){ return esc(sdPaCode(c)) + (n ? ' ' + esc(n) : ''); };
-  if(m.as === 'code'){
+  var list = function(arr){ return arr.map(function(p){ return '<b>' + who(p.material_code, p.material_name) + '</b>'; }).join(', '); };
+  var uniq = function(arr){ var out = []; arr.forEach(function(x){ if(x && out.indexOf(x) < 0) out.push(x); }); return out; };
+  var txt, involved = (m.own ? [m.own] : []).concat(m.readers);
+  if(m.own){
+    var p = m.own;
     txt = '⚠️ Проблемен артикул: <b>' + who(p.material_code, p.material_name) + '</b> — ' +
       (p.reads_as_code ? 'баркодът чете като <b>' + who(p.reads_as_code, p.reads_as_name) + '</b>.' : 'баркодът не се чете правилно.');
+    /* Кодът е и „чете се като“ на други записи — в същата кутийка. */
+    if(m.readers.length) txt += ' Този баркод се чете и за ' + list(m.readers) + '.';
   } else {
-    txt = '⚠️ Проблемен артикул: <b>' + who(p.reads_as_code, p.reads_as_name) + '</b> — този баркод се чете и за <b>' + who(p.material_code, p.material_name) + '</b>.';
+    var r0 = m.readers[0];
+    txt = '⚠️ Проблемен артикул: <b>' + who(r0.reads_as_code, r0.reads_as_name) + '</b> — този баркод се чете и за ' + list(m.readers) + '.';
   }
-  txt += ' В обектите: <b>' + esc(p.store_action || '') + '</b>.' + (p.note ? ' <span style="font-weight:400;">(' + esc(p.note) + ')</span>' : '');
+  var acts = uniq(involved.map(function(p){ return String(p.store_action || '').trim(); }));
+  var notes = uniq(involved.map(function(p){ return String(p.note || '').trim(); }));
+  txt += ' В обектите: <b>' + esc(acts.join(' / ')) + '</b>.' + (notes.length ? ' <span style="font-weight:400;">(' + esc(notes.join('; ')) + ')</span>' : '');
   return '<div class="sd-pa-warn" style="background:#fef9c3;border:1px solid #facc15;border-radius:5px;padding:5px 8px;font-size:11.5px;color:#713f12;margin:0 0 6px;">' + txt + '</div>';
 }
 /* Обновява кутийката под реда от въведения SAP код. */
