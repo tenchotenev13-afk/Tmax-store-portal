@@ -100,6 +100,7 @@ const TESTS = [
   'minusi-open-diff.test.js',
   'minusi-open-diff-notify.test.js',
   'minusi-open-diff-weekly.test.js',
+  'minusi-help.test.js',
   'minusi-multi.test.js',
   'minusi-multi-scope.test.js',
   'minusi-multi-regional.test.js',

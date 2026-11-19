@@ -912,8 +912,46 @@ function mnRender(){
   h += '</div>';
   /* Таблиците са в #mn-body — търсенето прерисува само тях, за да не губи
      полето фокуса при всяка буква. */
+  h += mnHelpHtml();
   h += '<div id="mn-body">' + mnBodyHtml(calc) + '</div>';
   el.innerHTML = h;
+}
+/* „💡 Какво да проверим" (Миглена, 13.11.2026 — „За тенчо жокер минуси.xlsx"):
+   помощ за обекта, докато попълва причината. ЕДИН източник — MN_HELP. Само
+   показване: затворен по подразбиране, състоянието е в паметта (не в
+   localStorage), за обекта и за офиса, над таблицата и в двата изгледа. Не е в
+   печата, нито в Excel. Отделно „💡" до менюто с причината НЯМА: менюто е с
+   фиксирана ширина 180px, защото „Запази" излизаше извън картата (21.10.2026). */
+var MN_HELP = {
+  title: 'Какво да проверим, когато имаме недостиг на артикул — маркиран на каса артикул, който няма наличност по система',
+  items: [
+    'Има ли още физически налични',
+    'Етикет на артикула, етикет в търговска зала',
+    'Откъде идва — внос Темакс / логистичен склад или от доставчик',
+    'Има ли неприета входяща доставка, подавана разлика',
+    'Провери последния прием',
+    'Сходен артикул — различен цвят, близък размер, съседният артикул на регала',
+    'Ръчна стокова бележка',
+    'Провери камери в часа на продажбата',
+    'Провери за преоценен артикул',
+    'Провери последна ревизия'
+  ]
+};
+var mnHelpOpen = false;
+function mnHelpHtml(){
+  var h = '<div id="mn-help" class="card" style="padding:8px 12px;">' +
+    '<button id="mn-help-btn" class="filter-btn' + (mnHelpOpen ? ' active' : '') + '" aria-expanded="' + (mnHelpOpen ? 'true' : 'false') + '" onclick="mnHelpToggle()">💡 Какво да проверим ' + (mnHelpOpen ? '▴' : '▾') + '</button>';
+  if(mnHelpOpen){
+    h += '<div id="mn-help-body" style="margin-top:8px;font-size:13px;line-height:1.45;"><div style="font-weight:700;margin-bottom:4px;">' + esc(MN_HELP.title) + '</div><ol style="margin:0;padding-left:22px;">' +
+      MN_HELP.items.map(function(t){ return '<li>' + esc(t) + '</li>'; }).join('') + '</ol></div>';
+  }
+  return h + '</div>';
+}
+/* Само блокът се прерисува — таблицата и незаписаното в нея остават. */
+function mnHelpToggle(){
+  mnHelpOpen = !mnHelpOpen;
+  var el = document.getElementById('mn-help');
+  if(el) el.outerHTML = mnHelpHtml();
 }
 /* Редовете на текущия изглед — с отметките и търсенето. Общо за екрана,
    Excel и печата, за да не се разминат. */
