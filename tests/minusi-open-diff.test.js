@@ -189,6 +189,7 @@ const itemText = it => it.querySelector('.mn-od-chip').textContent + ' | ' + it.
     ok('Заприхождаване (A2): „Решени редове“, „Доставчици“, търсене A2, обект Пирдоп', h.w.sdView === 'rows' && h.w.sdDirTab === 'supplier' && h.w.sdSearch === 'A2' && h.w.sdStoreFilter === PD, J([h.w.sdView, h.w.sdDirTab, h.w.sdSearch, h.w.sdStoreFilter]));
     const rowsTb = h.doc.getElementById('sd-rows');
     ok('Разлики: в таблицата е редът A2 и само той', !!rowsTb && rowsTb.querySelectorAll('tr').length === 1 && /A2/.test(rowsTb.textContent), rowsTb ? rowsTb.textContent.slice(0, 200) : 'няма #sd-rows');
+    ok('Заприхождаване (A2): скролът е до реда sd-line-2', !!h.doc.getElementById('sd-line-2') && h.calls.scrollIntoView.some(s => s.id === 'sd-line-2'), J(h.calls.scrollIntoView));
   }
 
   section('4. Офисът (admin) — вижда същото; скок до бланка горе');
@@ -208,6 +209,8 @@ const itemText = it => it.querySelector('.mn-od-chip').textContent + ' | ' + it.
     await ticks(10);
     const tb = h.doc.getElementById('sd-rows');
     ok('CO, Липса (A4): „Решени редове“ с реда A4', h.w.sdView === 'rows' && !!tb && /A4/.test(tb.textContent) && tb.querySelectorAll('tr').length === 1, tb ? tb.textContent.slice(0, 200) : 'няма');
+    /* 19.11 (minusi-open-diff-push): „Решени редове“ — скрол до реда (#sd-line-<id>), не горе при банерите. */
+    ok('CO, Липса (A4): скролът е до реда sd-line-4', !!h.doc.getElementById('sd-line-4') && h.calls.scrollIntoView.some(s => s.id === 'sd-line-4'), J(h.calls.scrollIntoView));
 
     h.w.showModule('minusi');
     h.w.mnSetStore(h.w.MN_ALL); await ticks(10);

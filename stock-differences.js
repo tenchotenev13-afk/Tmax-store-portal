@@ -46,6 +46,7 @@ function sdJumpToLine(l){
   sdTypeFilter = 'all'; sdFilter = 'all';
   sdView = top ? 'reports' : 'rows'; sdViewSave(sdView);
   sdScrollY = 0; sdScrollAnchor = top && l.report_id != null ? l.report_id : null;
+  sdScrollLine = !top && l.id != null ? l.id : null;
   if(typeof showModule === 'function') showModule('stock-diff');
   return true;
 }
@@ -58,16 +59,18 @@ var sdExpandedResolve = {};
    потребителя най-отгоре при всяко решение по разлика. Пазим или точна
    котва към бланката, по която се работи, или скрол позицията. */
 var sdScrollY = null, sdScrollAnchor = null;
+/* Ред в „Решени редове“ (#sd-line-<id>) — скокът от Минуси (sdJumpToLine). */
+var sdScrollLine = null;
 function sdKeepScroll(anchorReportId){
   if(anchorReportId) sdScrollAnchor = anchorReportId;
   if(sdScrollY == null) sdScrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
 }
 function sdRestoreScroll(){
-  var y = sdScrollY, a = sdScrollAnchor;
-  sdScrollY = null; sdScrollAnchor = null;
-  if(y == null && !a) return;
+  var y = sdScrollY, a = sdScrollAnchor, ln = sdScrollLine;
+  sdScrollY = null; sdScrollAnchor = null; sdScrollLine = null;
+  if(y == null && !a && ln == null) return;
   var apply = function(){
-    var el = a ? document.getElementById('diff-rep-'+a) : null;
+    var el = ln != null ? document.getElementById('sd-line-'+ln) : (a ? document.getElementById('diff-rep-'+a) : null);
     if(el && el.scrollIntoView){ el.scrollIntoView({block:'center'}); }
     else if(y != null){ window.scrollTo(0, y); }
   };
@@ -633,7 +636,7 @@ function renderStockDiff() {
         var MONO = 'font-family:DM Mono,monospace;font-size:11px;';
         var DASH = '<span style="color:#cbd5e1;">—</span>';
         var tcol = TYPE_COLORS[r.type]||'#94a3b8';
-        h += '<tr style="border-bottom:1px solid #f1f5f9;">'+
+        h += '<tr id="sd-line-'+escAttr(String(r.id))+'" style="border-bottom:1px solid #f1f5f9;">'+
           '<td class="sd-c-item" style="padding:7px 10px;">'+
             '<div><span style="background:'+tcol+'1a;color:'+(TYPE_COLORS[r.type]||'#64748b')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(TYPE_LABELS[r.type]||r.type||'—')+'</span></div>'+
             '<div class="sd-name" style="margin-top:3px;word-break:break-word;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+sdReturnMissingMark(r)+'</div>'+
