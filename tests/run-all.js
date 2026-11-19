@@ -97,6 +97,7 @@ const TESTS = [
   'minusi-auto-tick.test.js',
   'minusi-co-link.test.js',
   'minusi-transit-link.test.js',
+  'minusi-open-diff.test.js',
   'minusi-multi.test.js',
   'minusi-multi-scope.test.js',
   'minusi-multi-regional.test.js',

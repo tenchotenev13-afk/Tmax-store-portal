@@ -106,7 +106,7 @@ const priceGets = db => db.log.filter(x => x.m === 'GET' && x.tbl === 'product_c
     const mq = db.log.filter(x => x.tbl === 'minus_movements' && x.m === 'GET').map(x => x.q).join(' ');
     ok('select-ът на обекта е без co_comment', mq.length > 0 && mq.indexOf('co_comment') < 0, mq);
     realClick(h.w, h.doc.getElementById('mn-excel'), 'Excel обект'); await ticks(3);
-    ok('Excel на обекта — без колоните на офиса (последна „Незаприходена?“)', h.cap && h.cap[0][h.cap[0].length - 1] === 'Незаприходена?' && h.cap[0].join('|').indexOf('Стойност') < 0, h.cap && h.cap[0].join('|'));
+    ok('Excel на обекта — без колоните на офиса (последна „Отворена разлика“, 19.11.2026)', h.cap && h.cap[0][h.cap[0].length - 1] === 'Отворена разлика' && h.cap[0].join('|').indexOf('Стойност') < 0, h.cap && h.cap[0].join('|'));
     h.close();
   }
 

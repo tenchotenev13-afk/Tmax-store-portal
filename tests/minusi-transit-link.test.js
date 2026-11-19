@@ -104,11 +104,13 @@ function pgFilter(rows, q) {
   const ins = (q.match(/(?:^|&)store_name=in\.\(([^)]*)\)/) || [])[1];
   const stIn = (q.match(/(?:^|&)status=in\.\(([^)]*)\)/) || [])[1];
   const stNeq = (q.match(/(?:^|&)status=neq\.([^&]+)/) || [])[1];
+  const stNotIn = (q.match(/(?:^|&)status=not\.in\.\(([^)]*)\)/) || [])[1];
   const dir = (q.match(/(?:^|&)differences_reports\.direction=eq\.([^&]+)/) || [])[1];
   return rows.filter(r =>
     (!ins || ins.split(',').map(s => s.replace(/^"|"$/g, '')).indexOf(r.store_name) >= 0) &&
     (!stIn || stIn.split(',').indexOf(r.status) >= 0) &&
     (!stNeq || r.status !== stNeq) &&
+    (!stNotIn || stNotIn.split(',').indexOf(r.status) < 0) &&
     (!dir || (r.differences_reports && r.differences_reports.direction === dir)));
 }
 function install(h, db) {
@@ -134,7 +136,7 @@ function install(h, db) {
   };
 }
 function env(user, db) {
-  const h = boot({ modules: ['client-orders.js', 'revaluation.js', 'revisions.js', 'notifications.js', 'minusi.js'], user, data: {} });
+  const h = boot({ modules: ['client-orders.js', 'stock-differences.js', 'revaluation.js', 'revisions.js', 'notifications.js', 'minusi.js'], user, data: {} });
   install(h, db);
   return h;
 }
@@ -153,7 +155,10 @@ const J = JSON.stringify;
     const gq = db.log.filter(x => x.tbl === 'goods_transit'), dq = db.log.filter(x => x.tbl === 'stock_differences');
     ok('по една заявка към goods_transit и stock_differences', gq.length === 1 && dq.length === 1, gq.length + '/' + dq.length);
     ok('goods_transit: явен select, pending/sent/rejected (без received), само обекта', /^select=id,store_name,material_code,purchase_doc,doc_date,remaining_qty,unit,status,reviewed_at&/.test(gq[0].q) && /status=in\.\(pending,sent,rejected\)/.test(gq[0].q) && /store_name=in\.\("Гоце Делчев"\)/.test(gq[0].q), gq[0].q);
-    ok('stock_differences: вградена бланка, interstore, ≠ received, само обекта', /differences_reports!inner\(direction,doc_date\)/.test(dq[0].q) && /differences_reports\.direction=eq\.interstore/.test(dq[0].q) && /status=neq\.received/.test(dq[0].q) && /store_name=in\.\("Гоце Делчев"\)/.test(dq[0].q), dq[0].q);
+    /* От 19.11.2026 (minusi-open-diff) заявката е ОБЩА с „⚠️ Има отворена разлика“:
+       всички неприключени редове (SD_CLOSED_STATUSES), трите вида; посоката
+       се проверява в mnUrBuild. */
+    ok('stock_differences: вградена бланка, неприключени (not.in), само обекта', /differences_reports\(direction,doc_date,reviewed,email_pending\)/.test(dq[0].q) && /status=not\.in\.\(received,taken,capitalized,completed\)/.test(dq[0].q) && /store_name=in\.\("Гоце Делчев"\)/.test(dq[0].q), dq[0].q);
     ok('на път pending → „🚚 На път: 4600186703 от 27.08 · 36,48 M2“', J(chips(h, 'mv-1')) === J(['🚚 На път: 4600186703 от 27.08 · 36,48 M2']), J(chips(h, 'mv-1')));
     ok('на път sent (код с интервали) → чип', J(chips(h, 'mv-2')) === J(['🚚 На път: 4600190503 от 26.09 · 4,32 M2']), J(chips(h, 'mv-2')));
     ok('на път received → нищо', chips(h, 'mv-3').length === 0 && !warn(h, 'mv-3'));
@@ -180,8 +185,9 @@ const J = JSON.stringify;
     section('2. Excel и печат');
     const aoa = h.w.mnExportAoa();
     const last = aoa[0].length - 1;
-    ok('Excel: последна колона „Незаприходена?“, преди нея „КЗ“', aoa[0][last] === 'Незаприходена?' && aoa[0][last - 1] === 'КЗ', J(aoa[0].slice(-2)));
-    const xv = m => (aoa.filter(r => r[0] === m)[0] || [])[last];
+    const iu = aoa[0].indexOf('Незаприходена?');
+    ok('Excel: „Незаприходена?“ след „КЗ“, после „Отворена разлика“ (последна)', iu === last - 1 && aoa[0][iu - 1] === 'КЗ' && aoa[0][last] === 'Отворена разлика', J(aoa[0].slice(-3)));
+    const xv = m => (aoa.filter(r => r[0] === m)[0] || [])[iu];
     ok('Excel: на път → „на път: 4600186703“', xv('10001') === 'на път: 4600186703', xv('10001'));
     ok('Excel: разлика → „разлика ЛС“', xv('20001') === 'разлика ЛС', xv('20001'));
     ok('Excel: и двете → „на път: 4600144400, 4600144444; разлика ЛС“', xv('40001') === 'на път: 4600144400, 4600144444; разлика ЛС', xv('40001'));
@@ -202,7 +208,8 @@ const J = JSON.stringify;
     ok('търсене по № на документа на път → нищо (търсенето не е пипано)', h.doc.querySelectorAll('#mn-daily tbody tr').length === 0);
     h.w.mnSetSearch('');
     h.w.mnSetView('bymat');
-    ok('по артикул → без чипове и без надпис', h.doc.querySelectorAll('#mod-minusi .mn-ur-warn, #mod-minusi .mn-ur-transit, #mod-minusi .mn-ur-diff').length === 0);
+    /* „⚖️ Разлика ЛС“ от 19.11.2026 е в „⚠️ Има отворена разлика“, а то е и в „По артикул“. */
+    ok('по артикул → без „на път“ и без надпис', h.doc.querySelectorAll('#mod-minusi .mn-ur-warn, #mod-minusi .mn-ur-transit').length === 0);
     h.w.mnSetView('daily');
   }
 

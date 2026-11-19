@@ -109,6 +109,9 @@
    колона „Незаприходена?"; печат — надписът под описанието. Търсенето,
    „📦 По артикул", minus_unfilled, „Днес" и bulletin-notify не знаят за това.
    stock-differences.js и transit.js само се ЧЕТАТ (таблиците), не се пипат.
+   От 19.11.2026 чипът „⚖️ Разлика ЛС" е част от „⚠️ Има отворена разлика"
+   (виж mnOdHtml), а заявката към stock_differences е ЕДНА — всички
+   неприключени редове от трите вида; mnUrBuild си взима междускладовите.
 
    Многократен минус (28.10.2026; Теодор 27.10, решения на Тенчо 27.10):
    обект + материал, 3 или повече реда 955 с дата в последните 30 дни, броено
@@ -158,6 +161,8 @@ var mnUrTransit = {};    /* store_name + \u0001 + код → [goods_transit, н�
 var mnUrDiff = {};       /* store_name + \u0001 + код → [{line, short}] — отворени липси с ЛС */
 var mnUrErr = false;     /* стоката на път / разликите не се заредиха */
 var MN_UR_TRANSIT = ['pending', 'sent', 'rejected'];
+var mnOd = {};           /* store_name + \u0001 + код → [{line, dir, date, short}] — неприключени разлики */
+var mnOdErr = false;     /* разликите не се заредиха */
 
 var MN_STORE_ROLES = ['manager', 'sklad'];
 var MN_CO_ROLES = ['admin', 'accounting', 'controlling'];
@@ -670,23 +675,31 @@ function mnUrStores(){
   mnMovs.forEach(function(m){ if(String(m.mvt_type) === '955' && m.store_name && !seen[m.store_name]){ seen[m.store_name] = 1; out.push(m.store_name); } });
   return out;
 }
-/* Две заявки (стока на път, разлики с ЛС) за показаните обекти — СЛЕД mnRender. */
+/* Две заявки (стока на път, отворени разлики) за показаните обекти — СЛЕД
+   mnRender. Разликите — ВСИЧКИ неприключени редове от трите вида (правилото е
+   в stock-differences.js: SD_CLOSED_STATUSES / sdIsClosed); от тях етап 4б
+   взима междускладовите липси (mnUrBuild), а „⚠️ Има отворена разлика" —
+   всичко (mnOdBuild). Без stock-differences.js → разликите не се теглят и
+   излиза сивият ред (в портала той винаги е зареден преди minusi.js). */
 function mnLoadUr(seq){
   var stores = mnUrStores();
-  if(!stores.length){ mnUrTransit = {}; mnUrDiff = {}; mnUrErr = false; return Promise.resolve(); }
+  if(!stores.length){ mnUrTransit = {}; mnUrDiff = {}; mnUrErr = false; mnOd = {}; mnOdErr = false; return Promise.resolve(); }
   var inS = 'store_name=in.(' + stores.map(function(s){ return '"' + encodeURIComponent(s) + '"'; }).join(',') + ')';
+  var closed = typeof SD_CLOSED_STATUSES !== 'undefined' && typeof sdIsClosed === 'function' ? SD_CLOSED_STATUSES : null;
   return Promise.all([
     sbGetAll('goods_transit', 'select=id,store_name,material_code,purchase_doc,doc_date,remaining_qty,unit,status,reviewed_at&archived_at=is.null&status=in.(' + MN_UR_TRANSIT.join(',') + ')&' + inS + '&order=doc_date.asc,id.asc'),
-    sbGetAll('stock_differences', 'select=id,store_name,material_code,quantity,quantity_received,difference_category,status,created_at,differences_reports!inner(direction,doc_date)' +
-      '&differences_reports.direction=eq.interstore&status=neq.received&' + inS + '&order=created_at.asc,id.asc')
+    closed ? sbGetAll('stock_differences', 'select=id,report_id,store_name,material_code,quantity,quantity_received,difference_category,status,type,created_at,differences_reports(direction,doc_date,reviewed,email_pending)' +
+      '&status=not.in.(' + closed.join(',') + ')&' + inS + '&order=created_at.asc,id.asc') : Promise.resolve(mnPartialEmpty())
   ]).then(function(rs){
     if(seq !== mnLoadSeq) return;
     mnUrErr = !!(rs[0].partial || rs[1].partial);
+    mnOdErr = !!rs[1].partial;
     var b = mnUrBuild(rs[0].partial ? [] : rs[0], rs[1].partial ? [] : rs[1]);
     mnUrTransit = b.transit; mnUrDiff = b.diff;
+    mnOd = mnOdErr ? {} : mnOdBuild(rs[1]);
   }).catch(function(){
     if(seq !== mnLoadSeq) return;
-    mnUrErr = true; mnUrTransit = {}; mnUrDiff = {};
+    mnUrErr = true; mnUrTransit = {}; mnUrDiff = {}; mnOdErr = true; mnOd = {};
   }).then(function(){
     if(seq === mnLoadSeq && document.getElementById('mn-body')) mnRenderBody();
   });
@@ -710,11 +723,73 @@ function mnUrChipsHtml(r){
     h += '<span class="mn-ur-transit' + (und ? ' mn-ur-undelivered' : '') + '" style="' + cs + 'background:#fef3c7;color:#92400e;">' + (und ? '✕ Недоставена' : '🚚 На път') + ': ' + esc(g.purchase_doc || '—') +
       (g.doc_date ? ' от ' + esc(fmtDate(g.doc_date).slice(0, 5)) : '') + ' · ' + esc(mnFmtQty(Number(g.remaining_qty))) + (g.unit ? ' ' + esc(g.unit) : '') + '</span>';
   });
-  m.diff.forEach(function(x){
-    h += '<span class="mn-ur-diff" style="' + cs + 'background:#fee2e2;color:#991b1b;">⚖️ Разлика ЛС' + (x.date ? ' от ' + esc(fmtDate(x.date).slice(0, 5)) : '') + ' · липса ' + esc(mnFmtQty(x.short)) + '</span>';
-  });
+  /* Чипът „⚖️ Разлика ЛС" е слят с „⚠️ Има отворена разлика" (19.11.2026):
+     същият ред от Разлики е там, със статуса и „Отвори в Разлики" — mnOdHtml. */
   return h + '<div class="mn-ur-warn" style="color:#b91c1c;font-weight:600;margin-top:2px;">' + MN_UR_WARN + '</div></div>';
 }
+/* ─── „⚠️ Има отворена разлика" (19.11.2026, Теодор — случай Пирдоп) ───
+   Минус по код, за който СЪЩИЯТ обект има неприключен ред в Разлики — трите
+   вида (interstore, supplier, wrong_receipt), по правилото на Разлики
+   (sdIsClosed в stock-differences.js, не второ правило тук). Всеки ред:
+   вид · дата на бланката · статус с надписа от Разлики · „Отвори в Разлики"
+   (sdJumpToLine). Междускладова липса носи стария текст „⚖️ Разлика ЛС от
+   <дд.мм> · липса N" (клас mn-ur-diff) — чипът от етап 4б е слят тук, а
+   червеното „⚠ вероятно незаприходена стока" остава в mnUrChipsHtml. И в
+   „📋 Дневен", и в „📦 По артикул"; за обекта и за офиса. Днес, Чек лист,
+   bulletin-notify и send-scheduled-report НЕ го знаят (стъпка 1 от 3). */
+function mnPartialEmpty(){ var e = []; e.partial = true; return e; }
+function mnOdBuild(rows){
+  var idx = {};
+  (rows || []).forEach(function(x){
+    if(!x || sdIsClosed(x)) return;
+    var c = mnCoKey(x.material_code);
+    if(!c || !x.store_name) return;
+    var rep = x.differences_reports || {};
+    var dir = rep.direction || 'supplier';
+    var k = x.store_name + '\u0001' + c;
+    (idx[k] = idx[k] || []).push({ line: x, dir: dir, date: rep.doc_date || String(x.created_at || '').slice(0, 10),
+      short: dir === 'interstore' ? mnUrShort(x) : null });
+  });
+  return idx;
+}
+function mnOdMatches(store, material){
+  return (mnOd[store + '\u0001' + mnCoKey(material)] || []).slice().sort(function(a, b){
+    return String(a.date).localeCompare(String(b.date)) || String(a.line.id).localeCompare(String(b.line.id), 'bg', { numeric: true });
+  });
+}
+function mnOdStatusHtml(e){
+  if(e.line.status === 'new') return '<span class="mn-od-status" style="color:#92400e;font-weight:600;">' + esc(SD_STATUS_NEW_LABEL) + '</span>';
+  return '<span class="mn-od-status">' + sdRowStatusBadge(e.line, e.dir) + '</span>';
+}
+function mnOdHtml(store, material){
+  var ms = mnOdMatches(store, material);
+  if(!ms.length) return '';
+  var cs = 'display:inline-block;border-radius:4px;padding:0 4px;margin:1px 2px 0 0;';
+  return '<div class="mn-od" style="margin-top:3px;font-size:11px;"><div class="mn-od-warn" style="color:#b45309;font-weight:700;">⚠️ Има отворена разлика</div>' + ms.map(function(e){
+    var d = e.date ? ' от ' + esc(fmtDate(e.date).slice(0, 5)) : '';
+    var chip = e.short !== null
+      ? '<span class="mn-ur-diff mn-od-chip" style="' + cs + 'background:#fee2e2;color:#991b1b;">⚖️ Разлика ЛС' + d + ' · липса ' + esc(mnFmtQty(e.short)) + '</span>'
+      : '<span class="mn-od-chip" style="' + cs + 'background:#ffedd5;color:#9a3412;">' + esc(diffDirShortLabel(e.dir)) + d + '</span>';
+    return '<div class="mn-od-item" data-sd-id="' + escAttr(String(e.line.id)) + '" style="margin-top:2px;">' + chip + ' ' + mnOdStatusHtml(e) +
+      ' <button class="mn-od-open" data-sd-id="' + escAttr(String(e.line.id)) + '" onclick="mnOpenDiff(this.getAttribute(\'data-sd-id\'))" style="border:1px solid #b45309;background:#fff7ed;color:#b45309;border-radius:5px;padding:1px 8px;font-size:11px;font-weight:600;cursor:pointer;">Отвори в Разлики</button></div>';
+  }).join('') + '</div>';
+}
+function mnOpenDiff(id){
+  var hit = null;
+  Object.keys(mnOd).forEach(function(k){ mnOd[k].forEach(function(e){ if(String(e.line.id) === String(id)) hit = e.line; }); });
+  if(!hit || typeof sdJumpToLine !== 'function'){ toast('Редът от Разлики не е намерен', '#dc2626'); return false; }
+  return sdJumpToLine(hit);
+}
+/* Excel / печат: „отворена разлика: <дата>[, <дата>]" или ''. */
+function mnOdText(store, material){
+  var ms = mnOdMatches(store, material);
+  return ms.length ? 'отворена разлика: ' + ms.map(function(e){ return e.date ? fmtDate(e.date) : '—'; }).join(', ') : '';
+}
+function mnOdPrint(store, material){
+  var t = mnOdText(store, material);
+  return t ? '<br><span class="mn-p-od" style="color:#b45309;">' + mnP('⚠️ ' + t) + '</span>' : '';
+}
+
 /* Excel: '' / „на път: <док>[, <док>]" / „недоставена: <док>" / „разлика ЛС"
    (няколко — през „; "). */
 function mnUrExcel(r){
@@ -861,6 +936,7 @@ function mnViewRows(calc){
 function mnBodyHtml(calc){
   var rows = mnViewRows(calc);
   var h = mnView === 'bymat' ? mnByMatHtml(rows) : mnDailyHtml(rows);
+  if(mnOdErr) h = '<div id="mn-od-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Разликите не се заредиха</div>' + h;
   if(mnView === 'daily' && mnUrErr) h = '<div id="mn-ur-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Стоката на път / разликите не се заредиха</div>' + h;
   if(mnView === 'daily' && mnIsCO() && mnPriceState === 'err') h = '<div id="mn-price-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Цените не се заредиха</div>' + h;
   if(mnView === 'daily' && mnCoErr) h = '<div id="mn-co-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Клиентските заявки не се заредиха</div>' + h;
@@ -910,7 +986,7 @@ function mnDailyHtml(rows){
     var val = function(k){ return d[k] != null ? d[k] : (r[k] == null ? '' : r[k]); };
     /* Закритите и под прага — сив текст; жълтите колони си остават жълти. */
     var gray = r._state === 'open' ? '' : ' style="color:#94a3b8;"';
-    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + mnBadgeHtml(r) + mnCoChipsHtml(r) + mnUrChipsHtml(r) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
+    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + mnBadgeHtml(r) + mnCoChipsHtml(r) + mnUrChipsHtml(r) + mnOdHtml(r.store_name, r.material) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
     /* Мерната единица е в „Количество", „Състояние" се пренася на два реда,
        служител / бележка — 110px: с отделна колона „Мерна ед." таблицата беше
        1342 px срещу карта 1246 и „Запази" излизаше навън (Playwright, 22.10). */
@@ -1119,7 +1195,7 @@ function mnByMatHtml(rows){
   var all = mnIsAll();
   var h = '<div class="card" style="overflow-x:auto;"><table id="mn-bymat"><thead><tr>' + (all ? '<th>Обект</th>' : '') + '<th>Материал</th><th>Описание</th><th>955</th><th>956</th><th>Остатък</th><th>Мерна ед.</th></tr></thead><tbody>';
   rows.forEach(function(r){
-    h += '<tr id="mn-mat-' + escAttr((all ? r.store_name + '-' : '') + r.material) + '">' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.desc) + '</td>';
+    h += '<tr id="mn-mat-' + escAttr((all ? r.store_name + '-' : '') + r.material) + '">' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.desc) + mnOdHtml(r.store_name, r.material) + '</td>';
     h += '<td class="mn-s955" style="text-align:right;">' + esc(mnFmtQty(r.s955)) + '</td><td class="mn-s956" style="text-align:right;">' + esc(mnFmtQty(r.s956)) + '</td>';
     h += '<td class="mn-rest" style="text-align:right;font-weight:600;">' + esc(mnFmtQty(r.rest)) + '</td><td>' + esc(r.uom) + '</td></tr>';
   });
@@ -1436,21 +1512,21 @@ function mnExportAoa(){
   var calc = mnCompute(mnMovs, mnThresholds), rows = mnViewRows(calc), all = mnIsAll();
   var aoa;
   if(mnView === 'bymat'){
-    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', '955', '956', 'Остатък', 'Мерна ед.'])];
+    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', '955', '956', 'Остатък', 'Мерна ед.', 'Отворена разлика'])];
     rows.forEach(function(r){
-      aoa.push((all ? [r.store_name] : []).concat([r.material, r.desc || '', r.s955, r.s956, r.rest, r.uom || '']));
+      aoa.push((all ? [r.store_name] : []).concat([r.material, r.desc || '', r.s955, r.s956, r.rest, r.uom || '', mnOdText(r.store_name, r.material)]));
     });
   } else {
     /* Офисът — и четирите колони на сумите накрая (Минуси, т.3); обектът — непроменено. */
     var co = mnIsCO(), eur = function(n){ return n == null || mnPriceState !== 'ok' ? '' : Math.round(n * 100) / 100; };
-    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие / становище', 'КЗ', 'Незаприходена?'])
+    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие / становище', 'КЗ', 'Незаприходена?', 'Отворена разлика'])
       .concat(co ? ['Стойност минус (€)', 'Стойност заметнат (€)', 'Разлика (€)', 'Коментар (офис)'] : [])];
     rows.forEach(function(r){
       var v = co ? mnValRow(r) : null;
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.material_desc || '', fmtDate(r.posting_date), mnRound(Number(r.qty) || 0), r.uom || '',
         mnStateText(r), r.real_code || '', mnReasonLabel(r.reason_id), r.employee_name || '', r.note || '',
         r._prevDate ? fmtDate(r._prevDate) : '', r._cnt30 || 0, r.action || '',
-        mnCoMatches(r).map(function(o){ return o.in_num || ''; }).join(', '), mnUrExcel(r)])
+        mnCoMatches(r).map(function(o){ return o.in_num || ''; }).join(', '), mnUrExcel(r), mnOdText(r.store_name, r.material)])
         .concat(co ? [eur(v.minus), eur(v.real), eur(v.diff), r.co_comment || ''] : []));
     });
   }
@@ -1493,7 +1569,7 @@ function mnPrint(){
     cols = all ? [24, 18, 78, 16, 16, 20, 18] : [18, 102, 16, 16, 20, 18];
     head = (all ? ['Обект'] : []).concat(['Материал', 'Описание', '955', '956', 'Остатък', 'Мерна ед.']);
     body = rows.map(function(r){
-      return '<tr>' + (all ? '<td>' + mnP(r.store_name) + '</td>' : '') + '<td>' + mnP(r.material) + '</td><td>' + mnP(r.desc) + '</td><td>' + mnP(mnFmtQty(r.s955)) + '</td><td>' + mnP(mnFmtQty(r.s956)) + '</td><td>' + mnP(mnFmtQty(r.rest)) + '</td><td>' + mnP(r.uom) + '</td></tr>';
+      return '<tr>' + (all ? '<td>' + mnP(r.store_name) + '</td>' : '') + '<td>' + mnP(r.material) + '</td><td>' + mnP(r.desc) + mnOdPrint(r.store_name, r.material) + '</td><td>' + mnP(mnFmtQty(r.s955)) + '</td><td>' + mnP(mnFmtQty(r.s956)) + '</td><td>' + mnP(mnFmtQty(r.rest)) + '</td><td>' + mnP(r.uom) + '</td></tr>';
     }).join('');
   } else {
     cols = all ? [18, 16, 34, 16, 16, 18, 16, 22, 18, 16] : [16, 44, 16, 16, 18, 16, 30, 18, 16];
@@ -1504,7 +1580,7 @@ function mnPrint(){
       return '<tr' + (r._state === 'open' ? '' : ' class="mn-p-gray"') + '>' + (all ? '<td>' + mnP(r.store_name) + '</td>' : '') +
         '<td>' + mnP(r.material) + '</td><td>' + mnP(r.material_desc) +
         (r._prevDate ? '<br><span class="mn-p-prev">' + mnP('↻ ' + fmtDate(r._prevDate).slice(0, 5) + (r._multi ? ' 🔁' + r._multiN : r._cnt30 >= 2 ? ' ×' + r._cnt30 : '')) + '</span>' : '') +
-        mnCoPrint(r) + mnUrPrint(r) + '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
+        mnCoPrint(r) + mnUrPrint(r) + mnOdPrint(r.store_name, r.material) + '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
         '<td>' + mnP(mnFmtQty(Number(r.qty)) + (r.uom ? ' ' + r.uom : '')) + '</td><td>' + mnP(mnStateText(r)) + '</td>' +
         '<td>' + mnP(r.real_code) + '</td><td>' + mnP(mnReasonLabel(r.reason_id)) + '</td><td>' + mnP(r.employee_name) + '</td><td>' + mnP(r.note) +
         (r.action ? (r.note ? '<br>' : '') + '<span class="mn-p-action">' + mnP(mnActionLabel(r) + ': ' + r.action) + '</span>' : '') + '</td></tr>';

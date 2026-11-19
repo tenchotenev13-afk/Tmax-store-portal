@@ -673,7 +673,7 @@ function noAmountInDom(name, h) {
     let cap = xl(he.w);
     const ooE = he.doc.getElementById('mn-onlyopen'); ooE.checked = true; fire(he.w, ooE, 'change');
     realClick(he.w, he.doc.getElementById('mn-excel'));
-    ok('Excel (Дневен, само незакрити): заглавията', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|Дата|Количество|Мерна ед.|Състояние|Заметнат код|Причина|Име на служител|Бележка|Предишен минус|Брой за 30 дни|Действие / становище|КЗ|Незаприходена?', cap.aoa && cap.aoa[0].join('|'));
+    ok('Excel (Дневен, само незакрити): заглавията', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|Дата|Количество|Мерна ед.|Състояние|Заметнат код|Причина|Име на служител|Бележка|Предишен минус|Брой за 30 дни|Действие / становище|КЗ|Незаприходена?|Отворена разлика', cap.aoa && cap.aoa[0].join('|'));
     ok('… 3 реда (филтърът е приложен)', cap.aoa && cap.aoa.length === 4, cap.aoa && cap.aoa.length);
     const r98 = cap.aoa && cap.aoa.find(r => r[0] === '98275');
     ok('… количеството е число, мерната единица — отделна колона', r98 && r98[3] === 2.88 && r98[4] === 'M2' && r98[2] === '07.10.2026', JSON.stringify(r98));
@@ -689,7 +689,7 @@ function noAmountInDom(name, h) {
     realClick(he.w, he.doc.getElementById('mn-v-bymat'));
     cap = xl(he.w);
     realClick(he.w, he.doc.getElementById('mn-excel'));
-    ok('Excel (по артикул): заглавията и 3 реда', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|955|956|Остатък|Мерна ед.' && cap.aoa.length === 4, cap.aoa && cap.aoa[0].join('|'));
+    ok('Excel (по артикул): заглавията и 3 реда', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|955|956|Остатък|Мерна ед.|Отворена разлика' && cap.aoa.length === 4, cap.aoa && cap.aoa[0].join('|'));
     ok('… име: Минуси_Гоце Делчев_Незакрити_' + TODAY + '.xlsx', cap.name === 'Минуси_Гоце Делчев_Незакрити_' + TODAY + '.xlsx', cap.name);
     cap = xl(ha.w);
     realClick(ha.w, ha.doc.getElementById('mn-excel'));
@@ -825,7 +825,7 @@ function noAmountInDom(name, h) {
        (09.11.2026, Минуси т.3) след тях са четирите колони на сумите —
        заковани в tests/minusi-co-values.test.js. */
     const ip = cap.aoa ? cap.aoa[0].indexOf('Предишен минус') : -1;
-    ok('Excel: „Предишен минус“, „Брой за 30 дни“, „Действие / становище“, „КЗ“, „Незаприходена?“, после сумите на офиса', cap.aoa && ip >= 0 && cap.aoa[0].slice(ip).join('|') === 'Предишен минус|Брой за 30 дни|Действие / становище|КЗ|Незаприходена?|Стойност минус (€)|Стойност заметнат (€)|Разлика (€)|Коментар (офис)');
+    ok('Excel: „Предишен минус“, „Брой за 30 дни“, „Действие / становище“, „КЗ“, „Незаприходена?“, „Отворена разлика“, после сумите на офиса', cap.aoa && ip >= 0 && cap.aoa[0].slice(ip).join('|') === 'Предишен минус|Брой за 30 дни|Действие / становище|КЗ|Незаприходена?|Отворена разлика|Стойност минус (€)|Стойност заметнат (€)|Разлика (€)|Коментар (офис)');
     ok('Excel 05.10: 01.10.2026 | 2 | действието', xr('r2') && xr('r2').slice(ip, ip + 3).join('|') === '01.10.2026|2|ще преетикираме', xr('r2') && JSON.stringify(xr('r2').slice(ip, ip + 3)));
     ok('Excel 01.10: празно | 1 | празно', xr('r1') && xr('r1')[ip] === '' && xr('r1')[ip + 1] === 1 && xr('r1')[ip + 2] === '', xr('r1') && JSON.stringify(xr('r1').slice(ip, ip + 3)));
     ok('Excel без суми', !/(^|[^\d.])(3\.7|13\.97|-1\.96)([^\d]|$)/.test(JSON.stringify(cap.aoa)));

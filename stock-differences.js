@@ -23,6 +23,32 @@ var sdView = sdViewGet();
 function setSDView(v){ sdView = (v==='rows') ? 'rows' : 'reports'; sdViewSave(sdView); renderStockDiff(); }
 /* Отваря изгледа с бланките, без да рендира (за скокове отвън, преди showModule). */
 function sdOpenReportsView(){ sdView = 'reports'; sdViewSave('reports'); }
+/* Скок отвън до един ред (Минуси, „Отвори в Разлики", 19.11.2026). l носи
+   report_id, store_name, material_code, type, status и бланката (direction,
+   reviewed, email_pending). Ред в бланка горе (непрегледана или чака имейл)
+   → „Бланки за преглед" и котвата diff-rep-<id> (sdRestoreScroll); иначе →
+   „Решени редове", всички типове и статуси. И в двата изгледа: подтабът по
+   посока, чипът по обект и търсене по SAP кода — така редът е видим без нов
+   филтър. Обектът в „Решени редове" вижда само редовете за действие
+   (sdStoreMustAct) — иначе false и обяснение, без да сменя таба. */
+function sdJumpToLine(l){
+  if(!l) return false;
+  var rep = l.differences_reports || {};
+  var top = !rep.reviewed || rep.email_pending === true;
+  if(!top && sdStoreRowsView() && !sdStoreMustAct(l)){
+    toast('Този ред е при офиса — в „Разлики" обектът вижда само редовете, по които действа.', '#d97706');
+    return false;
+  }
+  if(sdDirTabsActive()) sdDirTab = rep.direction || 'supplier';
+  sdOnlyWaiting = false; sdOnlyCOTurn = false; sdWhChip = '';
+  sdStoreFilter = l.store_name || '';
+  sdSearch = String(l.material_code == null ? '' : l.material_code).trim();
+  sdTypeFilter = 'all'; sdFilter = 'all';
+  sdView = top ? 'reports' : 'rows'; sdViewSave(sdView);
+  sdScrollY = 0; sdScrollAnchor = top && l.report_id != null ? l.report_id : null;
+  if(typeof showModule === 'function') showModule('stock-diff');
+  return true;
+}
 /* Кои вече решени редове са с разгънати бутони за смяна на решението.
    По подразбиране решеният ред показва само спокоен чип с избора. */
 var sdExpandedResolve = {};
@@ -828,6 +854,16 @@ function sdIsCompleted(r){ return !!r && r.status==='completed'; }
    (Цвети, 21.10.2026 - само редовете, които тя е маркирала като осчетоводени;
    излизат от „Взета"). Един източник за модала, записа, чиповете и филтъра. */
 function sdTypeHasCompleted(t){ return t==='return' || t==='missing'; }
+/* Приключен ред — ЕДНО правило за трите посоки (Минуси, „⚠️ Има отворена
+   разлика", 19.11.2026): 'received' (край на междускладовия поток и
+   „📬 ПРИЕТА"), 'taken'/'capitalized' (sdIsTaken) и 'completed'
+   (sdIsCompleted) — точно баджовете на sdRowStatusBadge, които не са „чакащ".
+   Всичко друго ('new', 'pending', вкл. „Липса" и „Не са фактурирани") е
+   НЕприключено. Списъкът е и филтърът на заявката в minusi.js (mnLoadUr). */
+var SD_CLOSED_STATUSES = ['received','taken','capitalized','completed'];
+function sdIsClosed(r){ return !!r && SD_CLOSED_STATUSES.indexOf(r.status) >= 0; }
+/* Надписът на 'new' — опцията в модала и статусът в Минуси. */
+var SD_STATUS_NEW_LABEL = '🆕 ПОДАДЕНА, НЕПРЕГЛЕДАНА';
 
 /* ЕДИН критерий за това кои редове влизат в главната таблица. Ползва се и от
    таблицата, и от числата по чиповете - иначе числото обещава едно, а кликът
@@ -955,7 +991,7 @@ function sdTypeChipHidden(t){
 /* Редът още може да бъде отметнат („📥 Заприходена“ / „✅ Върната“ / …) —
    условието на бутона в таблицата. 'capitalized' е 'taken' (sdIsTaken). */
 function sdRowAwaitsMark(r){
-  return !!r && !sdIsTaken(r) && !sdIsCompleted(r) && r.status !== 'received' && r.type !== 'not_invoiced';
+  return !!r && !sdIsClosed(r) && r.type !== 'not_invoiced';
 }
 /* Етап 2 (уточнение на Тенчо, 16.11.2026; среща 12.11.2026): в „Решени
    редове“ обектът вижда САМО редовете, по които трябва да действа —
@@ -1135,7 +1171,9 @@ function sdCounterWords(typeFilter){
   return {pending:'Чакащи', taken:'Приключени', pIcon:'⏳', tIcon:'✅'};
 }
 /* Баджът в реда знае типа на самия ред, затова там думата е точна винаги. */
-function sdRowStatusBadge(r){
+/* dir (по избор) — посоката, когато diffReports не е зареден (Минуси):
+   без нея sdLineDirection пада на 'supplier' и „Изчистена" става „Взета". */
+function sdRowStatusBadge(r, dir){
   function badge(bg,fg,txt){
     return '<span style="background:'+bg+';color:'+fg+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+txt+'</span>';
   }
@@ -1147,7 +1185,7 @@ function sdRowStatusBadge(r){
      печатът. За всяка друга посока sdStatusWords пада на заварените си
      клонове, тоест изходът тук е байт по байт същият. Цветовете не се
      пипат: те следват ТИПА на решението, не посоката. */
-  var w = sdStatusWords(r.type, sdLineDirection(r));
+  var w = sdStatusWords(r.type, dir || sdLineDirection(r));
   if(sdIsTaken(r)){
     if(r.type==='not_invoiced') return badge('#f1f5f9','#475569', w.tIcon+' '+w.taken.toUpperCase());
     return r.type==='writein'
@@ -2691,7 +2729,7 @@ function sdModalHtml() {
   h += '<label class="fl">Статус</label>'+
     '<select class="fi" id="sd-status"'+((sdNoTypeYet||sdCompletedLocked||sdMissingLocked)?' disabled':'')+'>'+
     (sdNoTypeYet||sdStatusIsNew
-      ? '<option value="new"'+(sdStatusIsNew?' selected':'')+'>🆕 ПОДАДЕНА, НЕПРЕГЛЕДАНА</option>'
+      ? '<option value="new"'+(sdStatusIsNew?' selected':'')+'>'+SD_STATUS_NEW_LABEL+'</option>'
       : '')+
     '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>'+sw.pIcon+' '+sw.pending.toUpperCase()+'</option>'+
     '<option value="taken"'+(r.status==='taken'||r.status==='capitalized'?' selected':'')+'>'+sw.tIcon+' '+sw.taken.toUpperCase()+'</option>'+
