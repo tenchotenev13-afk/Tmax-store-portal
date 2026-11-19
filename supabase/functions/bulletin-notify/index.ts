@@ -14,6 +14,19 @@
 //   store_open_items_regional — Незавършено за вашите обекти: по едно писмо
 //                    на регионален, част на обект (v26)
 //
+// v27 (19.11.2026, след v26) — САМО minus_unfilled (сесия minusi-open-diff-notify;
+//   Теодор 18–19.11, стъпка 2 от 3; решения на Тенчо 19.11): към текста за
+//   обекта „· N минус(а) с отворена разлика", N > 0. N = незакрити минуси
+//   (същото FIFO — mnuCountByStore пълни openMats, без второ копие), за чийто
+//   код обектът има НЕприключен ред в Разлики (sdIsClosed) с ХОД НА ОБЕКТА =
+//   sdStoreMustAct (v24, копие) ИЛИ diffLineWaitsStore + размените
+//   (bulDiffStoreWaiting — копие от shared.js / bulletin.js); стоката на път
+//   не се брои. Обект без непопълнени, но с N > 0 → известието пак тръгва,
+//   само с N. notification_log.detail — същият текст. Разликите не се
+//   заредиха → известието тръгва както досега, без N (od_error в отговора и в
+//   last_status). Броят непопълнени (n) и автоматичната отметка — непроменени.
+//   Заковано в tests/minusi-open-diff-notify.test.js.
+//
 // v26 (19.11.2026, след v25 от bulletin-notify-ll; деплойнато като версия 40
 //   ПРЕДИ v25) — нова тема store_open_items_regional „Незавършено за
 //   вашите обекти" (решения на Тенчо 19.11): ЕДНО писмо на регионален, с
@@ -2519,13 +2532,15 @@ function mnuPassThreshold(rest: number, uom: unknown, thr: Record<string, number
 /* По обект → { open, unfilled, over }. needsNote — id-та на причините с
    requires_note. Същото като calc.open.filter(mnUnfilled) в minusi.js.
    multi — { count, days } на многократния минус (липсва → 3 и 30). */
-function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: number, needsNote: string[], multi?: { count: number; days: number }) {
+/* openMats (по избор, v27) — пълни се: обект → код (trim) → брой незакрити
+   минуси. Изходът на функцията НЕ се мени (tests/minusi-notify-sync.test.js). */
+function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: number, needsNote: string[], multi?: { count: number; days: number }, openMats?: Record<string, Record<string, number>>) {
   const MC = multi && multi.count != null ? multi.count : MNU_MULTI_COUNT_DEFAULT;
   const MD = multi && multi.days != null ? multi.days : MNU_MULTI_DAYS_DEFAULT;
   const groups: Record<string, any> = {}, order: string[] = [];
   for (const m of movs || []) {
     const k = m.store_name + '\u0001' + m.material;
-    if (!groups[k]) { groups[k] = { store_name: m.store_name, r955: [], r956: [], s955: 0, s956: 0, uom: '' }; order.push(k); }
+    if (!groups[k]) { groups[k] = { store_name: m.store_name, material: m.material, r955: [], r956: [], s955: 0, s956: 0, uom: '' }; order.push(k); }
     const g = groups[k], q = Number(m.qty) || 0;
     if (String(m.mvt_type) === '955') { g.r955.push(m); g.s955 += q; if (m.uom) g.uom = m.uom; }
     else if (String(m.mvt_type) === '956') { g.r956.push(m); g.s956 += q; if (!g.uom && m.uom) g.uom = m.uom; }
@@ -2551,6 +2566,11 @@ function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: n
       const rest = mnuRound(need);
       if (!(rest > MNU_EPS) || !mnuPassThreshold(rest, r.uom, thr)) return; /* закрит или под прага */
       st.open++;
+      if (openMats) {
+        const om = openMats[g.store_name] || (openMats[g.store_name] = {});
+        const code = String(g.material == null ? '' : g.material).trim();
+        om[code] = (om[code] || 0) + 1;
+      }
       const prev = i > 0 ? s955[i - 1] : null;
       const repeat = !!prev && mnuDays(prev.posting_date, r.posting_date) <= repeatDays;
       const noReason = r.reason_id == null;
@@ -2605,17 +2625,97 @@ async function buildMinusUnfilled(supabase: any, bg: ReturnType<typeof bgNow>) {
 
   const mv = await mnuFetchAll(supabase, stores);
   if ((mv as any).error) return { error: (mv as any).error };
-  const counts = mnuCountByStore((mv as any).rows, thr, repeatDays, needsNote, multi);
+  const openMats: Record<string, Record<string, number>> = {};
+  const counts = mnuCountByStore((mv as any).rows, thr, repeatDays, needsNote, multi, openMats);
 
   const entries = stores.map((store) => {
     const c = counts[store] || { open: 0, unfilled: 0, over: 0 };
     return { store: store, n: c.unfilled, open: c.open, over: c.over, ref_key: 'minus:' + store + ':' + bg.dateStr };
   });
-  return { entries: entries, stores: stores, repeat_days: repeatDays, multi: multi, rows_read: (mv as any).rows.length };
+  return { entries: entries, stores: stores, repeat_days: repeatDays, multi: multi, rows_read: (mv as any).rows.length, open_mats: openMats };
 }
 
-function minusPushText(n: number, store: string): string {
-  return '➖ Минуси: ' + n + ' непопълнени · ' + store;
+function minusPushText(n: number, store: string, od?: number): string {
+  return '➖ Минуси: ' + minusDetail(n, store, od);
+}
+/* Текстът без „➖ Минуси: " — и за notification_log.detail. od (v27) — минуси с
+   отворена разлика с ход на обекта; 0 / липсва → както преди v27. */
+function minusDetail(n: number, store: string, od?: number): string {
+  const p: string[] = [];
+  if (n > 0 || !(od && od > 0)) p.push(n + ' непопълнени');
+  if (od && od > 0) p.push(od + (od === 1 ? ' минус' : ' минуса') + ' с отворена разлика');
+  return p.join(' · ') + ' · ' + store;
+}
+
+/* ── v27: минуси с отворена разлика, ход на обекта ───────────────────
+   Копия под същите имена (сверени в tests/minusi-open-diff-notify.test.js):
+   SD_CLOSED_STATUSES / sdIsClosed — stock-differences.js; diffLineWaitsStore —
+   shared.js; bulDiffStoreWaiting — bulletin.js. sdStoreMustAct е копието от
+   v24 (секцията „Разлики — чакат вас" по-долу). Ходът е на обекта = А ∪ Б
+   (решение на Тенчо 19.11): sdStoreMustAct ИЛИ bulDiffStoreWaiting. */
+const SD_CLOSED_STATUSES = ['received','taken','capitalized','completed'];
+function sdIsClosed(r){ return !!r && SD_CLOSED_STATUSES.indexOf(r.status) >= 0; }
+function diffLineWaitsStore(l){
+  if(!l) return false;
+  if(String(l.status||'')==='received') return false;
+  if(l.store_response) return false;
+  if(String(l.warehouse_response||'')!=='return') return false;
+  var c=String(l.difference_category||'');
+  return c!=='wrong_barcode' && c!=='similar_item';
+}
+function bulDiffStoreWaiting(lines, swaps, store){
+  var myMove={};
+  (swaps||[]).forEach(function(x){
+    if(!x) return;
+    if(x.status==='linked' && x.from_store===store) myMove[String(x.from_line_id)]=1;
+    if(x.status==='sent'   && x.to_store===store)   myMove[String(x.to_line_id)]=1;
+  });
+  return (lines||[]).filter(function(l){
+    var r=l && l.differences_reports;
+    if(!r || r.store_name!==store || r.reviewed || r.direction!=='interstore') return false;
+    if(myMove[String(l.id)]) return true;
+    return diffLineWaitsStore(l);
+  });
+}
+/* Неприключен ред, по който ходът е на обекта store. */
+function mnuDiffStoreTurn(l: any, swaps: any[], store: string): boolean {
+  if (!l || sdIsClosed(l) || l.store_name !== store) return false;
+  return sdStoreMustAct(l) || bulDiffStoreWaiting([l], swaps, store).length > 0;
+}
+/* Чисто: редове + размени → обект → { код: 1 } с ход на обекта. */
+function mnuOdCodes(lines: any[], swaps: any[], stores: string[]): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const l of lines || []) {
+    if (!l || stores.indexOf(l.store_name) < 0) continue;
+    const code = String(l.material_code == null ? '' : l.material_code).trim();
+    if (!code || !mnuDiffStoreTurn(l, swaps, l.store_name)) continue;
+    (out[l.store_name] || (out[l.store_name] = {}))[code] = 1;
+  }
+  return out;
+}
+/* N на обект: незакрити минуси (openMats) по кодовете с такава разлика. */
+function mnuOdCount(openMats: Record<string, Record<string, number>>, codes: Record<string, Record<string, number>>, store: string): number {
+  const om = (openMats || {})[store] || {}, cs = (codes || {})[store] || {};
+  let n = 0;
+  for (const c of Object.keys(cs)) n += om[c] || 0;
+  return n;
+}
+/* Неприключените редове на обектите (страници по 1000) + размените. Грешка →
+   { error } — известието тръгва без N, не с грешно число. */
+async function mnuLoadOd(supabase: any, stores: string[]) {
+  let lines: any[] = [];
+  for (let off = 0; ; off += 1000) {
+    const { data, error } = await supabase.from('stock_differences')
+      .select('id,store_name,material_code,type,status,warehouse_response,store_response,difference_category,differences_reports(store_name,reviewed,direction)')
+      .in('store_name', stores).not('status', 'in', '(' + SD_CLOSED_STATUSES.join(',') + ')')
+      .order('id', { ascending: true }).range(off, off + 999);
+    if (error) return { error: 'stock_differences: ' + (error.message || String(error)) };
+    lines = lines.concat(data || []);
+    if (!data || data.length < 1000) break;
+  }
+  const sw = await supabase.from('stock_diff_swaps').select('from_line_id,to_line_id,from_store,to_store,status');
+  if (sw.error) return { error: 'stock_diff_swaps: ' + (sw.error.message || String(sw.error)) };
+  return { codes: mnuOdCodes(lines, sw.data || [], stores), lines_read: lines.length };
 }
 
 async function runMinusUnfilled(supabase: any, topic: any, bg: any, dryRun: boolean) {
@@ -2631,18 +2731,22 @@ async function runMinusUnfilled(supabase: any, topic: any, bg: any, dryRun: bool
   }
   if ((built as any).skip) return { topic: topic.key, skipped: (built as any).skip, recipients: 0 };
 
-  const all: any[] = (built as any).entries;
-  const todo = all.filter((e) => e.n > 0);
+  /* v27: минуси с отворена разлика (ход на обекта). Грешка → без N. */
+  const od: any = await mnuLoadOd(supabase, (built as any).stores);
+  const odErr: string | null = od.error || null;
+  const all: any[] = (built as any).entries.map((e: any) => Object.assign({}, e, {
+    od: odErr ? 0 : mnuOdCount((built as any).open_mats, od.codes, e.store) }));
+  const todo = all.filter((e) => e.n > 0 || e.od > 0);
   const planned = all.map((e) => ({
-    obekt: e.store, nepopalneni: e.n, nezakriti: e.open, svrahstorno: e.over,
-    ref_key: e.ref_key, text: e.n > 0 ? minusPushText(e.n, e.store) : null,
+    obekt: e.store, nepopalneni: e.n, nezakriti: e.open, svrahstorno: e.over, otvoreni_razliki: e.od,
+    ref_key: e.ref_key, text: e.n > 0 || e.od > 0 ? minusPushText(e.n, e.store, e.od) : null,
   }));
 
   if (dryRun) {
     return {
       topic: topic.key, dry_run: true, stores: (built as any).stores,
       repeat_days: (built as any).repeat_days, multi: (built as any).multi, rows_read: (built as any).rows_read,
-      recipients: todo.length, planned: planned,
+      recipients: todo.length, planned: planned, od_error: odErr,
     };
   }
 
@@ -2650,13 +2754,13 @@ async function runMinusUnfilled(supabase: any, topic: any, bg: any, dryRun: bool
   for (const e of todo) {
     /* Веднъж на ден на обект: редът е заявката за право да се прати. */
     const ins = await supabase.from('notification_log')
-      .insert({ topic_key: topic.key, ref_key: e.ref_key, detail: e.n + ' непопълнени · ' + e.store });
+      .insert({ topic_key: topic.key, ref_key: e.ref_key, detail: minusDetail(e.n, e.store, e.od) });
     if (ins.error) { skipped++; continue; }
     let ok = false;
     if (!topic.test_email) {
       ok = await sendPushFilters(
         [{ field: 'tag', key: 'store_name', relation: '=', value: e.store }],
-        '➖ Минуси', minusPushText(e.n, e.store), PORTAL_URL + '#mn');
+        '➖ Минуси', minusPushText(e.n, e.store, e.od), PORTAL_URL + '#mn');
     }
     if (ok) { pushed++; }
     else {
@@ -2670,10 +2774,11 @@ async function runMinusUnfilled(supabase: any, topic: any, bg: any, dryRun: bool
     last_run_at: new Date().toISOString(),
     last_recipients: pushed,
     last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + pushed + ' обекта, ' + failed + ' неуспешни, '
-      + skipped + ' вече пратени днес' + (topic.test_email ? ' (тестов режим — без push)' : ''),
+      + skipped + ' вече пратени днес' + (topic.test_email ? ' (тестов режим — без push)' : '')
+      + (odErr ? ' · разликите не се заредиха: ' + odErr : ''),
   }).eq('key', topic.key);
 
-  return { topic: topic.key, obekti: pushed, failed: failed, already_sent: skipped, planned: planned };
+  return { topic: topic.key, obekti: pushed, failed: failed, already_sent: skipped, planned: planned, od_error: odErr };
 }
 
 /* ═══ АВТОМАТИЧНА ОТМЕТКА НА „СПРАВКА МИНУСИ" (v16, 29.10.2026) ═══════════

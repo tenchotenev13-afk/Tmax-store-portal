@@ -145,6 +145,8 @@ function fakeSb(data, log) {
         select(c) { q.select = c; return self; },
         eq(c, v) { q.filters.push(['eq', c, v]); return self; },
         in(c, v) { q.filters.push(['in', c, v]); return self; },
+        /* v27 (19.11.2026): .not('status','in','(…)') на отворените разлики — тук без таблица, N = 0. */
+        not(c, op, v) { q.filters.push(['not', c, op, v]); return self; },
         order() { return self; },
         range(a, b) { q.range = [a, b]; return self; },
         insert(row) { q.op = 'insert'; q.row = row; return self; },
