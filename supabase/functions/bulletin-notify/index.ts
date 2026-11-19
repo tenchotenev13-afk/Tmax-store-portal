@@ -11,6 +11,21 @@
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //   store_open_items — Незавършено за обекта: по едно писмо на обект (v19)
+//   store_open_items_regional — Незавършено за вашите обекти: по едно писмо
+//                    на регионален, част на обект (v26)
+//
+// v26 (19.11.2026, след v25 от bulletin-notify-ll; деплойнато като версия 40
+//   ПРЕДИ v25) — нова тема store_open_items_regional „Незавършено за
+//   вашите обекти" (решения на Тенчо 19.11): ЕДНО писмо на регионален, с
+//   част за всеки негов обект (азбучен ред) — същото съдържание като писмото
+//   на обекта (soiPartsFor → soiStoreBody, без копие на логиката); обект без
+//   редове се пропуска, нищо → без писмо. Получатели — users.is_regional +
+//   assigned_stores (без notify_groups 'regional') + app_settings.
+//   soi_regional_extra (JSON [{email, stores}]; същият имейл → обектите се
+//   сливат). Лог „<дата>|regional|<имейл>", dry_run (с as_of),
+//   recipients_only, test_email. Пращането на двете теми е изнесено в
+//   soiSendAll (правилата на v22/v23 — непроменени). Без матрица:
+//   превключвателят е active. store_open_items — непроменено.
 //
 // v25 (19.11.2026, след v24 от sutreshno-obekt-2-razliki) — САМО темата
 //   loading_lists_pending (сесия bulletin-notify-ll; v24 е store_open_items),
@@ -734,7 +749,7 @@ async function reportableStores(supabase: any): Promise<string[]> {
 /* ──────────── v18: САМО ПОЛУЧАТЕЛИТЕ (recipients_only) ──────────── */
 /* Списъкът е същият като IMPLEMENTED_TOPICS (заковано в
    tests/admin-who-gets.test.js); строителят за всяка тема е в RO_BUILDERS. */
-const RO_TOPIC_KEYS = ['overdue_tasks', 'deadline_passed', 'promo_expiring', 'loading_lists_pending', 'today_deadlines', 'minus_unfilled', 'store_open_items'];
+const RO_TOPIC_KEYS = ['overdue_tasks', 'deadline_passed', 'promo_expiring', 'loading_lists_pending', 'today_deadlines', 'minus_unfilled', 'store_open_items', 'store_open_items_regional'];
 
 const roAsP = (r: Recipient) => ({ email: r.email, name: r.name, channel: r.channel, scope: r.scope, stores: r.stores, groups: r.groups });
 const roIsMail = (r: Recipient) => r.channel === 'email' || r.channel === 'both';
@@ -777,6 +792,13 @@ const RO_BUILDERS: Record<string, (supabase: any, topic: any, bg: ReturnType<typ
       }
     }
     return { personal: personal, by_store: rec.on ? rec.byStore : {}, matrix_channel: rec.channel };
+  },
+  /* v26 — правилото на soirRecipients(): регионалните (is_regional +
+     assigned_stores) + app_settings.soi_regional_extra; по един ред на човек. */
+  store_open_items_regional: async (supabase, topic) => {
+    const rec = await soirRecipients(supabase, topic.key);
+    return { personal: rec.list.map((r: any) => ({ email: r.email, name: r.name, channel: 'email', scope: 'own_stores',
+      stores: r.stores, groups: r.sources })), warnings: rec.warnings };
   },
   minus_unfilled: async (supabase) => {
     const { data: ms } = await supabase.from('app_settings').select('key,value').eq('key', 'minus_stores');
@@ -3132,11 +3154,91 @@ function soiHtmlFor(store: string, parts: any[], bg: ReturnType<typeof bgNow>): 
     + '<h2 style="margin:0 0 4px;font-size:19px;color:#b91c1c;">Незавършено за ' + esc(store) + '</h2>'
     + '<div style="font-size:13px;color:#6b7280;margin-bottom:6px;">Към ' + esc(bgDate(bg.dateStr))
     + ' сутринта — какво чака обекта.</div>'
-    + parts.map((p) => p.html).join('')
+    + soiStoreBody(parts)
     + '<div style="margin-top:16px;"><a href="' + PORTAL_URL + '" '
     + 'style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;'
     + 'font-size:13px;font-weight:600;padding:10px 18px;border-radius:6px;">Отвори портала</a></div>'
     + '<div style="font-size:11px;color:#9ca3af;margin-top:18px;">ТеМАХ Портал</div></div>';
+}
+
+/* v26: секциите — веднъж за пускането (общо за двете теми). */
+async function soiLoadAll(supabase: any, bg: any): Promise<Record<string, any>> {
+  const loaded: Record<string, any> = {};
+  for (const s of SOI_SECTIONS) loaded[s.key] = await s.load(supabase, bg);
+  return loaded;
+}
+/* v26: частите на един обект — ЕДИНСТВЕНОТО място, което пита SOI_SECTIONS за
+   обект. Писмото на обекта и частта на обекта в писмото на регионалния идват
+   оттук; нова секция влиза и в двете сама. */
+function soiPartsFor(loaded: Record<string, any>, store: string) {
+  const parts = SOI_SECTIONS.map((s) => Object.assign({ key: s.key }, s.forStore(loaded[s.key], store)));
+  return { parts: parts, total: parts.reduce((a, p) => a + p.n, 0) };
+}
+/* Съдържанието на обекта (секциите) — без рамката на писмото. */
+function soiStoreBody(parts: any[]): string {
+  return parts.map((p) => p.html).join('');
+}
+function soiTestBanner(text: string): string {
+  return '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за '
+    + text + '</div>';
+}
+
+/* v26: ОБЩОТО пращане на двете теми (store_open_items и
+   store_open_items_regional) — изнесено от runStoreOpenItems без промяна на
+   правилата. item: { key (име в „без писмо:"), ref (ref_key в лога), to
+   (масив адреси), banner (текст за тестовия режим, вече екраниран), subject,
+   html, detail (за лога) }.
+   v23: ЕДНО писмо на получателя — to = всичките адреси — вместо по писмо на
+   адрес (таванът е ~30 обаждания на пускане). Изпратено = resend-email върна
+   ok. Неуспех → редът в лога се маха и ключът влиза в „без писмо:".
+   last_run_at НЕ се записва, ако има получател без писмо (извън тестовия
+   режим): isDue пуска темата пак в същия прозорец (+15 мин), а
+   notification_log пази вече пратените от второ писмо. Тестов режим
+   (test_email) — по едно писмо на ключ до тестовия адрес, без лог,
+   last_run_at се записва винаги (иначе второто събуждане би повторило
+   всички тестови писма).
+   v22: грешка при един ключ НЕ спира цикъла — влиза в errs (и в
+   last_status), минава се на следващия. */
+async function soiSendAll(supabase: any, topic: any, items: any[], unit: string) {
+  let sent = 0, failed = 0, already = 0, done = 0;
+  const errs: string[] = [];
+  const noMail: string[] = [];
+  for (const it of items) {
+    let logged = false, okOne = false;
+    try {
+      if (topic.test_email) {
+        if (await sendEmail(topic.test_email, it.subject, soiTestBanner(it.banner) + it.html)) { sent++; done++; } else { failed++; noMail.push(it.key); }
+        continue;
+      }
+      const ins = await supabase.from('notification_log')
+        .insert({ topic_key: topic.key, ref_key: it.ref, detail: it.detail });
+      if (ins.error) { already++; continue; }
+      logged = true;
+      okOne = await sendEmail(it.to, it.subject, it.html);
+      if (okOne) { sent++; } else { failed++; }
+    } catch (e) {
+      const msg = (e as Error).message || String(e);
+      console.error(topic.key + ' ' + it.key + ': ' + msg);
+      errs.push(it.key + ': ' + msg);
+      failed++;
+    }
+    if (okOne) { done++; continue; }
+    if (noMail.indexOf(it.key) < 0) noMail.push(it.key);
+    if (logged) {
+      await supabase.from('notification_log').delete().eq('topic_key', topic.key).eq('ref_key', it.ref);
+    }
+  }
+
+  const upd: Record<string, unknown> = {
+    last_recipients: items.reduce((a, it) => a + it.to.length, 0),
+    last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + done + ' ' + unit + ', ' + sent + ' писма, ' + failed + ' неуспешни, '
+      + already + ' вече пратени' + (topic.test_email ? ' (тест до ' + topic.test_email + ')' : '')
+      + (noMail.length ? ' · без писмо: ' + noMail.join(', ') : '')
+      + (errs.length ? ' · ' + errs.join('; ').slice(0, 300) : ''),
+  };
+  if (!noMail.length || topic.test_email) upd.last_run_at = new Date().toISOString();
+  await supabase.from('notification_topics').update(upd).eq('key', topic.key);
+  return { done: done, sent: sent, failed: failed, already: already, errs: errs, noMail: noMail };
 }
 
 async function runStoreOpenItems(supabase: any, topic: any, bg: any, dryRun: boolean) {
@@ -3147,17 +3249,15 @@ async function runStoreOpenItems(supabase: any, topic: any, bg: any, dryRun: boo
   if (!rec.on) {
     return { topic: topic.key, skipped: 'Матрицата: групата store няма имейл за темата (' + (rec.channel || 'няма ред') + ')', recipients: 0 };
   }
-  const loaded: Record<string, any> = {};
-  for (const s of SOI_SECTIONS) loaded[s.key] = await s.load(supabase, bg);
+  const loaded = await soiLoadAll(supabase, bg);
 
   const subject = (store: string) => 'ТеМАХ — Незавършено за ' + store + ' (' + bgDate(bg.dateStr).slice(0, 5) + ')';
   const plan: any[] = [];
   const empty: string[] = [];
   for (const store of Object.keys(rec.byStore).sort()) {
-    const parts = SOI_SECTIONS.map((s) => Object.assign({ key: s.key }, s.forStore(loaded[s.key], store)));
-    const total = parts.reduce((a, p) => a + p.n, 0);
-    if (!total) { empty.push(store); continue; }
-    plan.push({ store: store, to: rec.byStore[store], parts: parts, total: total });
+    const pf = soiPartsFor(loaded, store);
+    if (!pf.total) { empty.push(store); continue; }
+    plan.push({ store: store, to: rec.byStore[store], parts: pf.parts, total: pf.total });
   }
 
   const planned = plan.map((p) => {
@@ -3172,64 +3272,146 @@ async function runStoreOpenItems(supabase: any, topic: any, bg: any, dryRun: boo
       recipients: plan.reduce((a, p) => a + p.to.length, 0), planned: planned };
   }
 
-  let sent = 0, failed = 0, already = 0, stores = 0;
-  /* v23: ЕДНО писмо на обект — to = всичките адреси на обекта (manager /
-     sklad / info) — вместо по писмо на адрес: 18 обекта са ~18 обаждания към
-     resend-email, не ~32 (таванът е ~30 на пускане). Изпратено = resend-email
-     върна ok. Неуспех → редът в лога за обекта се маха и обектът влиза в
-     „без писмо:" в last_status.
-     last_run_at НЕ се записва, ако има обект без писмо (извън тестовия
-     режим): isDue пуска темата пак в същия прозорец (07:45 → и 08:00), а
-     notification_log пази вече пратените обекти от второ писмо. Тестов
-     режим (test_email) — както досега: по едно писмо на обект до тестовия
-     адрес, без лог, last_run_at се записва винаги (иначе 08:00 би
-     повторило всички тестови писма).
-     v22: грешка при един обект НЕ спира цикъла — влиза в errs (и в
-     last_status), минава се на следващия. */
-  const errs: string[] = [];
-  const noMail: string[] = [];
-  for (const p of plan) {
-    const ref = bg.dateStr + '|' + p.store;
-    let logged = false, okStore = false;
-    try {
-      const html = soiHtmlFor(p.store, p.parts, bg);
-      if (topic.test_email) {
-        const banner = '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за '
-          + esc(p.store) + ': ' + p.to.map((r: any) => esc(r.name) + ' &lt;' + esc(r.email) + '&gt;').join(', ') + '</div>';
-        if (await sendEmail(topic.test_email, subject(p.store), banner + html)) { sent++; stores++; } else { failed++; noMail.push(p.store); }
-        continue;
-      }
-      const ins = await supabase.from('notification_log')
-        .insert({ topic_key: topic.key, ref_key: ref, detail: p.total + ' реда · ' + p.to.length + ' адреса' });
-      if (ins.error) { already++; continue; }
-      logged = true;
-      okStore = await sendEmail(p.to.map((r: any) => r.email), subject(p.store), html);
-      if (okStore) { sent++; } else { failed++; }
-    } catch (e) {
-      const msg = (e as Error).message || String(e);
-      console.error('store_open_items ' + p.store + ': ' + msg);
-      errs.push(p.store + ': ' + msg);
-      failed++;
-    }
-    if (okStore) { stores++; continue; }
-    if (noMail.indexOf(p.store) < 0) noMail.push(p.store);
-    if (logged) {
-      await supabase.from('notification_log').delete().eq('topic_key', topic.key).eq('ref_key', ref);
+  const items = plan.map((p) => ({
+    key: p.store, ref: bg.dateStr + '|' + p.store, to: p.to.map((r: any) => r.email),
+    banner: esc(p.store) + ': ' + p.to.map((r: any) => esc(r.name) + ' &lt;' + esc(r.email) + '&gt;').join(', '),
+    subject: subject(p.store), html: soiHtmlFor(p.store, p.parts, bg),
+    detail: p.total + ' реда · ' + p.to.length + ' адреса',
+  }));
+  const r = await soiSendAll(supabase, topic, items, 'обекта');
+  return { topic: topic.key, obekti: r.done, sent_emails: r.sent, failed_emails: r.failed, already_sent: r.already,
+    bez_redove: empty.length, test_email: topic.test_email || null, errors: r.errs, bez_pismo: r.noMail };
+}
+
+/* ─────── ТЕМА: НЕЗАВЪРШЕНО ЗА ВАШИТЕ ОБЕКТИ (store_open_items_regional, v26) ───
+   Решения на Тенчо (19.11.2026): ПО ЕДНО писмо на регионален, с отделна част
+   за всеки негов обект — същото съдържание като писмото на обекта
+   (soiPartsFor → soiStoreBody, без копие на логиката: всяка бъдеща секция
+   влиза и тук). Отделна тема, делник 08:00 — отделно пускане от 07:45, за да
+   не се съберат двете под тавана на обажданията (~30 на пускане).
+   Регионалните излизат от overdue_tasks (задачите са тук) — с данни, не тук.
+
+   Получатели — soirRecipients():
+     · users: active, is_regional = true, имейл, непразни assigned_stores (без
+       EXCLUDED_STORES). БЕЗ notify_groups 'regional' — групата не решава нищо
+       тук (решение 19.11).
+     · app_settings.soi_regional_extra — JSON масив [{email, stores}]:
+       допълнителни получатели без да се пипа акаунтът (Тенчо за Кърджали и
+       Раднево, решение 19.11 — assigned_stores на admin стеснява списъците му
+       в портала). Същият имейл като регионален → обектите се сливат.
+       Невалиден JSON → без допълнителни, предупреждение в резултата.
+     · notification_overrides 'exclude' за темата се зачита.
+   Матрица не трябва: превключвателят е notification_topics.active.
+
+   Обектите на получателя — по азбучен ред; обект без редове се пропуска;
+   нищо за всички обекти → без писмо. Лог „<дата>|regional|<имейл>".
+   Пращането — soiSendAll (едно писмо на регионален, повторен опит при
+   таван, last_run_at не се записва при неуспешни, test_email). */
+const SOIR_EXTRA_KEY = 'soi_regional_extra';
+function soirStoreList(v: unknown): string[] {
+  const out: string[] = [];
+  for (const s of (Array.isArray(v) ? v : [])) {
+    const n = String(s == null ? '' : s).trim();
+    if (n && EXCLUDED_STORES.indexOf(n) < 0 && out.indexOf(n) < 0) out.push(n);
+  }
+  return out;
+}
+async function soirRecipients(supabase: any, topicKey: string) {
+  const { data: users } = await supabase.from('users').select('email,display_name,is_regional,assigned_stores')
+    .eq('active', true);
+  const { data: st } = await supabase.from('app_settings').select('key,value').eq('key', SOIR_EXTRA_KEY);
+  const { data: ov } = await supabase.from('notification_overrides').select('user_email,mode').eq('topic_key', topicKey);
+  const excluded = (ov || []).filter((o: any) => o.mode === 'exclude').map((o: any) => soiNorm(o.user_email));
+  const byEmail: Record<string, any> = {};
+  const order: string[] = [];
+  const warnings: string[] = [];
+  const add = (email: string, name: string, stores: string[], source: string) => {
+    const k = soiNorm(email);
+    if (!k || !stores.length || excluded.indexOf(k) >= 0) return;
+    const cur = byEmail[k];
+    if (!cur) { byEmail[k] = { email: String(email).trim(), name: name || String(email).trim(), stores: stores.slice(), sources: [source] }; order.push(k); return; }
+    for (const s of stores) if (cur.stores.indexOf(s) < 0) cur.stores.push(s);
+    if (cur.sources.indexOf(source) < 0) cur.sources.push(source);
+  };
+  for (const u of (users || [])) {
+    if (!u || u.is_regional !== true || !u.email) continue;
+    add(u.email, u.display_name, soirStoreList(u.assigned_stores), 'regional');
+  }
+  const raw = ((st || [])[0] || {}).value;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+    let extra: any = null;
+    try { extra = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (_e) { extra = null; }
+    if (!Array.isArray(extra)) warnings.push(SOIR_EXTRA_KEY + ': не е JSON масив — пренебрегнато');
+    else for (const x of extra) {
+      if (!x || !x.email) { warnings.push(SOIR_EXTRA_KEY + ': ред без имейл — пренебрегнат'); continue; }
+      const u = (users || []).find((y: any) => soiNorm(y.email) === soiNorm(x.email));
+      add(x.email, (u && u.display_name) || '', soirStoreList(x.stores), 'extra');
     }
   }
+  const list = order.map((k) => byEmail[k]);
+  for (const r of list) r.stores.sort((a: string, b: string) => a.localeCompare(b, 'bg'));
+  list.sort((a, b) => String(a.name).localeCompare(String(b.name), 'bg'));
+  return { list: list, warnings: warnings };
+}
+function soirHtml(name: string, blocks: { store: string; parts: any[] }[], bg: ReturnType<typeof bgNow>): string {
+  return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:640px;">'
+    + '<h2 style="margin:0 0 4px;font-size:19px;color:#b91c1c;">Незавършено за вашите обекти</h2>'
+    + '<div style="font-size:13px;color:#6b7280;margin-bottom:6px;">Към ' + esc(bgDate(bg.dateStr))
+    + ' сутринта — какво чака ' + (blocks.length === 1 ? 'обекта' : 'обектите') + ': ' + blocks.map((b) => esc(b.store)).join(', ') + '.</div>'
+    + blocks.map((b) => '<div style="margin-top:18px;padding-top:6px;border-top:3px solid #b91c1c;">'
+      + '<div style="font-size:17px;font-weight:700;color:#b91c1c;">' + esc(b.store) + '</div>'
+      + soiStoreBody(b.parts) + '</div>').join('')
+    + '<div style="margin-top:16px;"><a href="' + PORTAL_URL + '" '
+    + 'style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;'
+    + 'font-size:13px;font-weight:600;padding:10px 18px;border-radius:6px;">Отвори портала</a></div>'
+    + '<div style="font-size:11px;color:#9ca3af;margin-top:18px;">ТеМАХ Портал</div></div>';
+}
+async function runStoreOpenItemsRegional(supabase: any, topic: any, bg: any, dryRun: boolean) {
+  if (!isBgWorkday(bg.dateStr)) {
+    return { topic: topic.key, skipped: 'Неработен ден (' + bg.dateStr + ')', recipients: 0 };
+  }
+  const rec = await soirRecipients(supabase, topic.key);
+  if (!rec.list.length) {
+    return { topic: topic.key, skipped: 'Няма регионални с обекти', recipients: 0, warnings: rec.warnings };
+  }
+  const loaded = await soiLoadAll(supabase, bg);
+  const memo: Record<string, any> = {};
+  const partsOf = (store: string) => memo[store] || (memo[store] = soiPartsFor(loaded, store));
 
-  const upd: Record<string, unknown> = {
-    last_recipients: plan.reduce((a, p) => a + p.to.length, 0),
-    last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + stores + ' обекта, ' + sent + ' писма, ' + failed + ' неуспешни, '
-      + already + ' вече пратени' + (topic.test_email ? ' (тест до ' + topic.test_email + ')' : '')
-      + (noMail.length ? ' · без писмо: ' + noMail.join(', ') : '')
-      + (errs.length ? ' · ' + errs.join('; ').slice(0, 300) : ''),
-  };
-  if (!noMail.length || topic.test_email) upd.last_run_at = new Date().toISOString();
-  await supabase.from('notification_topics').update(upd).eq('key', topic.key);
+  const plan: any[] = [];
+  const empty: string[] = [];
+  for (const r of rec.list) {
+    const blocks: any[] = [];
+    for (const store of r.stores) {
+      const pf = partsOf(store);
+      if (pf.total) blocks.push({ store: store, parts: pf.parts, total: pf.total });
+    }
+    if (!blocks.length) { empty.push(r.email); continue; }
+    plan.push({ email: r.email, name: r.name, sources: r.sources, stores: r.stores, blocks: blocks,
+      total: blocks.reduce((a, b) => a + b.total, 0) });
+  }
 
-  return { topic: topic.key, obekti: stores, sent_emails: sent, failed_emails: failed, already_sent: already,
-    bez_redove: empty.length, test_email: topic.test_email || null, errors: errs, bez_pismo: noMail };
+  if (dryRun) {
+    return { topic: topic.key, dry_run: true, regionalni: plan.length, bez_nishto: empty,
+      zadachi_skip: (loaded.zadachi && loaded.zadachi.skip) || null, warnings: rec.warnings,
+      planned: plan.map((p) => ({ email: p.email, name: p.name, source: p.sources.join('+'), obekti_vsichki: p.stores,
+        redove: p.total, obekti: p.blocks.map((b: any) => {
+          const row: any = { obekt: b.store, redove: b.total };
+          for (const part of b.parts) row[part.key] = part.counts;
+          return row;
+        }) })) };
+  }
+
+  const items = plan.map((p) => ({
+    key: p.name, ref: bg.dateStr + '|regional|' + soiNorm(p.email), to: [p.email],
+    banner: esc(p.name) + ' &lt;' + esc(p.email) + '&gt; — обекти: ' + p.blocks.map((b: any) => esc(b.store)).join(', '),
+    subject: 'ТеМАХ — Незавършено за вашите обекти (' + bgDate(bg.dateStr).slice(0, 5) + ')',
+    html: soirHtml(p.name, p.blocks, bg),
+    detail: p.total + ' реда · ' + p.blocks.length + ' обекта',
+  }));
+  const r = await soiSendAll(supabase, topic, items, 'регионални');
+  return { topic: topic.key, regionalni: r.done, sent_emails: r.sent, failed_emails: r.failed, already_sent: r.already,
+    bez_nishto: empty.length, test_email: topic.test_email || null, errors: r.errs, bez_pismo: r.noMail, warnings: rec.warnings };
 }
 
 /* ЕДИНСТВЕНИЯТ списък с темите, които имат строител. notification_topics
@@ -3258,6 +3440,7 @@ const IMPLEMENTED_TOPICS = [
   { key: 'loading_lists_pending', run: runLoadingListsPending },
   { key: 'minus_unfilled', run: runMinusUnfilled },
   { key: 'store_open_items', run: runStoreOpenItems },
+  { key: 'store_open_items_regional', run: runStoreOpenItemsRegional },
 ];
 
 async function runTopic(supabase: any, topic: any, bg: any, dryRun: boolean) {
@@ -3344,7 +3527,7 @@ Deno.serve(async (req) => {
       /* v19: {"as_of":"гггг-мм-дд"} — САМО с dry_run и САМО за
          store_open_items: какво би излязло в 08:00 на тази дата (сверка в
          почивен ден). Без dry_run се пренебрегва. */
-      const runBg = dryRun && topics[0].key === 'store_open_items' && /^\d{4}-\d{2}-\d{2}$/.test(String(body.as_of || ''))
+      const runBg = dryRun && (topics[0].key === 'store_open_items' || topics[0].key === 'store_open_items_regional') && /^\d{4}-\d{2}-\d{2}$/.test(String(body.as_of || ''))
         ? bgNow(new Date(body.as_of + 'T06:00:00Z')) : bg;
       const result = await runTopic(supabase, topics[0], runBg, dryRun);
       return Response.json({ ok: true, mode: 'manual', bg_date: runBg.dateStr, result: result }, { headers: CORS });

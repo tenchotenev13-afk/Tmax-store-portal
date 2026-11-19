@@ -173,6 +173,7 @@ const TESTS = [
   'loading-lists-notify-send.test.js',
   'loading-lists-notify-closed.test.js',
   'store-open-items.test.js',
+  'store-open-items-regional.test.js',
   'loading-done-gate.test.js',
   'loading-lists-notify-live.test.js',
   'loading-lists-products.test.js',

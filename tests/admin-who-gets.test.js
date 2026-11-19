@@ -58,11 +58,13 @@ const clone = x => JSON.parse(JSON.stringify(x));
    send-scheduled-report; 14 → send-oborot-report; 16 → send-routed-report
    weekly_routed; 11 → dynamic-responder → send-routed-report task_report) и от
    notification_topics с имейл (overdue_tasks, deadline_passed, promo_expiring,
-   loading_lists_pending, store_open_items от 15.11.2026; today_deadlines и
+   loading_lists_pending, store_open_items от 15.11.2026, store_open_items_regional
+   от 19.11.2026; today_deadlines и
    minus_unfilled са само push).
    Нов тип с писмо → ред тук И колона в WHO_COLS (admin.js). */
 const EMAIL_KINDS = ['daily', 'weekly', 'pallets', 'warehouse', 'co_overdue', 'minus_multi', 'oborot',
-  'weekly_routed', 'task_report', 'overdue_tasks', 'deadline_passed', 'promo_expiring', 'loading_lists_pending', 'store_open_items'];
+  'weekly_routed', 'task_report', 'overdue_tasks', 'deadline_passed', 'promo_expiring', 'loading_lists_pending', 'store_open_items',
+  'store_open_items_regional'];
 const PUSH_ONLY = ['today_deadlines', 'minus_unfilled'];
 /* Тялото, което таблицата праща (whoLoad): recipients_only + dry_run предпазител. */
 const UI_BODY = { recipients_only: true, dry_run: true };
@@ -366,7 +368,9 @@ const activeUsers = () => USERS.filter(u => u.active);
     today_deadlines: { topic: 'today_deadlines', label: 'Напомняне до обекта', active: true, scheduled_time: '08:00:00', weekdays: [1, 2, 3, 4, 5, 6, 7], personal: [], push: true, push_stores: ['Ловеч', 'Троян'] },
     minus_unfilled: { topic: 'minus_unfilled', label: 'Минуси — непопълнени', active: true, scheduled_time: '10:00:00', weekdays: [1, 2, 3, 4, 5], personal: [], push: true, push_stores: ['Троян'] },
     store_open_items: { topic: 'store_open_items', label: 'Незавършено за обекта', active: false, schedule_type: 'daily', scheduled_time: '07:45:00', weekdays: [1, 2, 3, 4, 5], test_email: 'ten.tenev@temax.bg',
-      personal: [{ email: 'm1@temax.bg', name: 'М1', role: 'manager', channel: 'email', scope: 'own_stores', stores: ['Троян'], groups: ['store'] }], by_store: { 'Троян': [{ email: 'm1@temax.bg', name: 'М1', role: 'manager' }] }, matrix_channel: 'email' }
+      personal: [{ email: 'm1@temax.bg', name: 'М1', role: 'manager', channel: 'email', scope: 'own_stores', stores: ['Троян'], groups: ['store'] }], by_store: { 'Троян': [{ email: 'm1@temax.bg', name: 'М1', role: 'manager' }] }, matrix_channel: 'email' },
+    store_open_items_regional: { topic: 'store_open_items_regional', label: 'Незавършено — регионални', active: false, schedule_type: 'daily', scheduled_time: '08:00:00', weekdays: [1, 2, 3, 4, 5], test_email: 'ten.tenev@temax.bg',
+      personal: [{ email: 'reg1@temax.bg', name: 'Р1', channel: 'email', scope: 'own_stores', stores: ['Ловеч', 'Троян'], groups: ['regional'] }], warnings: [] }
   } };
   const CRON = [{ kind: 'daily', dow: '*', minute: 0, hour_sofia: 21, active: true }, { kind: 'co_overdue', dow: '1-5', minute: 0, hour_sofia: 8, active: true }];
   const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -419,6 +423,7 @@ const activeUsers = () => USERS.filter(u => u.active);
         cell(h, 'm.pavlova@temax.bg', 'weekly_routed') === '3 задачи' && cell(h, 'co@temax.bg', 'task_report') === '1 отчет' && cell(h, 'm.pavlova@temax.bg', 'deadline_passed') === '1 задача');
       ok('Товарни листи: акаунтът на обекта (Ловеч = своят) — „условно · своите“', cell(h, 'm2@temax.bg', 'loading_lists_pending') === 'условно · своите');
       ok('Незавършено за обекта (15.11.2026): управителят на своя обект — „✓ своите“', cell(h, 'm1@temax.bg', 'store_open_items') === '✓ своите', cell(h, 'm1@temax.bg', 'store_open_items'));
+      ok('Незавършено — регионални (19.11.2026): регионалният — „✓ своите“, час пн–пт 08:00', cell(h, 'reg1@temax.bg', 'store_open_items_regional') === '✓ своите', cell(h, 'reg1@temax.bg', 'store_open_items_regional'));
       const th = col => (h.doc.querySelector('#who-table th[data-col="' + col + '"]') || {}).textContent || '';
       ok('часът от report_cron_schedule (Просрочени КЗ „пн–пт 08:00", Дневен „21:00")', /пн–пт 08:00/.test(th('co_overdue')) && /21:00/.test(th('daily')), th('co_overdue'));
       ok('часът на темите от notification_topics (Промоции 08:30, Просрочени задачи пн–пт 08:15)', /08:30/.test(th('promo_expiring')) && /пн–пт 08:15/.test(th('overdue_tasks')));
@@ -507,7 +512,7 @@ const activeUsers = () => USERS.filter(u => u.active);
     const col = re => hdr.findIndex(c => re.test(c));
     ok('Excel: пълният списък, не „✓ своите" (Дневен, Палети, Товарни листи)', !!fr && fr[col(/^Дневен/)] === SORTED.join(', ') && fr[col(/^Палети/)] === SORTED.join(', ') &&
       mr[col(/^Товарни листи/)] === 'условно · Троян' && aoa.every(r => r.indexOf('✓ своите') < 0 && r.indexOf('условно · своите') < 0), JSON.stringify(fr));
-    ok('Excel: колоните са непроменени (няма „Обекти")', hdr.indexOf('Обекти') < 0 && hdr.length === 3 + 14);
+    ok('Excel: колоните са непроменени (няма „Обекти")', hdr.indexOf('Обекти') < 0 && hdr.length === 3 + 15);
     h.close();
   }
   {
