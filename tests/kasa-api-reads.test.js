@@ -177,6 +177,15 @@ function env(user, settings, extra) {
   return h;
 }
 async function settle(n) { for (let i = 0; i < (n || 12); i++) await ticks(); }
+/* Чакане по УСЛОВИЕ с краен срок, не по брой тикове. loadHistory() пуска
+   дневния преглед със setTimeout(…, 200), а един тик (setTimeout 0) на Windows
+   е 1–16 ms според резолюцията на таймера: settle(20) понякога минаваше 200 ms,
+   понякога не — оттам двете „необясними“ червени (20.11.2026). */
+async function until(cond, ms) {
+  const end = Date.now() + (ms || 5000);
+  while (Date.now() < end) { if (cond()) return true; await new Promise(r => setTimeout(r, 20)); }
+  return !!cond();
+}
 const restGets = (h, t) => h.calls.get.filter(u => u.indexOf('/rest/v1/' + t) >= 0);
 const apiActs = (h, a) => h.api.calls.filter(c => c.action === a);
 const normDocs = s => s.replace(/onclick="(kasaOpenDocById|openKasaDoc)\([^"]*\)"/g, 'onclick="DOC"');
@@ -400,7 +409,9 @@ const normDocs = s => s.replace(/onclick="(kasaOpenDocById|openKasaDoc)\([^"]*\)
     const h = env(U.kardzhali, settings);
     h.w.kasaView = 'pos';
     h.w.loadKasa();
-    await settle(20);
+    /* документите идват след setTimeout(initKasaDocsView, 50) в renderKasa */
+    await until(() => h.doc.querySelectorAll('#docs-section-pos button').length === 2);
+    await settle();
     return h;
   }
   const oldK = await kasaScreen(undefined);
@@ -555,7 +566,8 @@ const normDocs = s => s.replace(/onclick="(kasaOpenDocById|openKasaDoc)\([^"]*\)
     ['kasaApi', 'kasaApiOn', 'kasaDayGet', 'kasaRangeGet', 'kasaOpenDocById', 'showLoginBanner', 'runHistorySearch', 'stornoIndicator', 'loadDailyOverview']
       .forEach(f => ok('глобалната ' + f + ' е функция', typeof h.w[f] === 'function'));
     h.w.loadHistory();
-    await settle(20);
+    await until(() => { const c = h.doc.getElementById('daily-overview-content'); return !!c && /Кърджали/.test(c.textContent); });
+    await settle();
     ok('История → дневният преглед (kasa-docs) минава през kasa-api range', apiActs(h, 'range').some(c => c.kinds.join() === 'reports,zoborot,documents' && c.from === c.to));
     const ow = h.doc.getElementById('daily-overview-content');
     ok('дневният преглед е изрисуван (Кърджали в таблицата)', !!ow && /Кърджали/.test(ow.textContent));
