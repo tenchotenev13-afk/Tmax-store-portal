@@ -17,5 +17,7 @@
   { "file": "Клиентски-заявки-снабдяване.pdf", "path": "instrukcii/klientski-snabdyavane.pdf", "title": "Клиентски — снабдяване", "category": "Само за офиса", "description": "Кратка инструкция за Снабдяването" },
   { "file": "Клиентски-заявки-инструкция.pdf", "path": "instrukcii/klientski-palna.pdf", "title": "Клиентски — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
   { "file": "График-ТРЗ.pdf", "path": "instrukcii/grafik-trz.pdf", "title": "График — ТРЗ", "category": "Само за офиса", "description": "Кратка инструкция за ТРЗ" },
-  { "file": "График-инструкция.pdf", "path": "instrukcii/grafik-palna.pdf", "title": "График — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" }
+  { "file": "График-инструкция.pdf", "path": "instrukcii/grafik-palna.pdf", "title": "График — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
+  { "file": "Каса-обекти.pdf", "path": "instrukcii/kasa-obekti.pdf", "title": "Каса — обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
+  { "file": "Каса-инструкция.pdf", "path": "instrukcii/kasa-palna.pdf", "title": "Каса — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" }
 ]
