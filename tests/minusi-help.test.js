@@ -7,6 +7,8 @@
      H1 отворен по подразбиране (mnHelpOpen = true);
      H2 липсва точка (махната „Ръчна стокова бележка");
      H3 само за офиса (mnHelpHtml връща '' за обекта).
+   20.11.2026 (сесия minusi-help-color): H4 старият сив стил (без style на
+   бутона) → пада.
    Броят паднали — в отчета на сесията. */
 'use strict';
 
@@ -50,6 +52,10 @@ function env(user) {
   };
   return h;
 }
+/* Жълтото на SAP банера (20.11.2026, Миглена: сивият бутон „не се вижда“).
+   Закотвено в style атрибута — и затворен, и отворен (inline бие .filter-btn.active). */
+const YELLOW = /^background:#fffbeb;border:2px solid #fde68a;color:#92400e;font-weight:600;[^"]*max-width:100%;white-space:normal;/;
+const BODY_YELLOW = /^background:#fffbeb;border:2px solid #fde68a;color:#92400e;/;
 const items = h => Array.from(h.doc.querySelectorAll('#mn-help-body ol li')).map(li => li.textContent);
 
 (async function run() {
@@ -61,12 +67,15 @@ const items = h => Array.from(h.doc.querySelectorAll('#mn-help-body ol li')).map
     const btn = () => h.doc.getElementById('mn-help-btn');
     ok(who + ': бутонът „💡 Какво да проверим“ е над таблицата', !!btn() && /💡 Какво да проверим/.test(btn().textContent) &&
       !!(h.doc.getElementById('mn-help').compareDocumentPosition(h.doc.getElementById('mn-body')) & 4));
+    ok(who + ': затворен бутон — жълт (#fffbeb / #fde68a / #92400e, 600), не излиза от картата', YELLOW.test(btn().getAttribute('style') || ''), btn().getAttribute('style'));
     ok(who + ': затворен по подразбиране', !h.doc.getElementById('mn-help-body') && btn().getAttribute('aria-expanded') === 'false');
     h.w.mnDraft = {};
     const sel = h.doc.getElementById('mn-reason-mv-1');
     if (sel) { sel.value = '1'; }
     realClick(h.w, btn());
     ok(who + ': клик → отворен, заглавието', !!h.doc.getElementById('mn-help-body') && h.doc.querySelector('#mn-help-body > div').textContent === TITLE);
+    ok(who + ': отворен бутон — пак жълт', YELLOW.test(btn().getAttribute('style') || ''), btn().getAttribute('style'));
+    ok(who + ': отвореният блок — жълт фон и рамка', BODY_YELLOW.test(h.doc.getElementById('mn-help-body').getAttribute('style') || ''));
     ok(who + ': клик → 10 точки в реда от файла', J(items(h)) === J(ITEMS), J(items(h)));
     ok(who + ': незаписаното в таблицата остава (прерисува се само блокът)', !sel || h.doc.getElementById('mn-reason-mv-1') === sel);
     realClick(h.w, btn());

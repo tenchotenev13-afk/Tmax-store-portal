@@ -961,11 +961,15 @@ var MN_HELP = {
   ]
 };
 var mnHelpOpen = false;
+/* Жълтото на SAP банера в Клиентски заявки (renderCoSapBanner) — Миглена,
+   20.11.2026: сивият бутон „не се вижда, ще го пропускат“. Inline стилът бие
+   .filter-btn и .filter-btn.active, затова и отвореният бутон остава жълт. */
+var MN_HELP_YELLOW = 'background:#fffbeb;border:2px solid #fde68a;color:#92400e;';
 function mnHelpHtml(){
   var h = '<div id="mn-help" class="card" style="padding:8px 12px;">' +
-    '<button id="mn-help-btn" class="filter-btn' + (mnHelpOpen ? ' active' : '') + '" aria-expanded="' + (mnHelpOpen ? 'true' : 'false') + '" onclick="mnHelpToggle()">💡 Какво да проверим ' + (mnHelpOpen ? '▴' : '▾') + '</button>';
+    '<button id="mn-help-btn" class="filter-btn' + (mnHelpOpen ? ' active' : '') + '" style="' + MN_HELP_YELLOW + 'font-weight:600;font-size:13px;max-width:100%;white-space:normal;text-align:left;" aria-expanded="' + (mnHelpOpen ? 'true' : 'false') + '" onclick="mnHelpToggle()">💡 Какво да проверим ' + (mnHelpOpen ? '▴' : '▾') + '</button>';
   if(mnHelpOpen){
-    h += '<div id="mn-help-body" style="margin-top:8px;font-size:13px;line-height:1.45;"><div style="font-weight:700;margin-bottom:4px;">' + esc(MN_HELP.title) + '</div><ol style="margin:0;padding-left:22px;">' +
+    h += '<div id="mn-help-body" style="' + MN_HELP_YELLOW + 'border-radius:8px;padding:8px 12px;margin-top:8px;font-size:13px;line-height:1.45;overflow-wrap:anywhere;"><div style="font-weight:700;margin-bottom:4px;">' + esc(MN_HELP.title) + '</div><ol style="margin:0;padding-left:22px;">' +
       MN_HELP.items.map(function(t){ return '<li>' + esc(t) + '</li>'; }).join('') + '</ol></div>';
   }
   return h + '</div>';
