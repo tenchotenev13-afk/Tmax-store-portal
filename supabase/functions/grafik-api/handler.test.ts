@@ -114,7 +114,7 @@ class MemRepo implements Repo {
     }
   }
   async listStaff(store: string) { return this.staff.filter((s) => s.store_name === store); }
-  async staffCounts(stores: string[] | null) { const o: Record<string, number> = {}; this.staff.forEach((s) => { if (!stores || stores.indexOf(s.store_name) >= 0) o[s.store_name] = (o[s.store_name] || 0) + 1; }); return o; }
+  async staffDates(stores: string[] | null) { return this.staff.filter((s) => !stores || stores.indexOf(s.store_name) >= 0).map((s) => ({ store_name: s.store_name, hired_on: (s.hired_on as string) || null, left_on: (s.left_on as string) || null })); }
   async getStaff(ids: string[]) { return this.staff.filter((s) => ids.indexOf(s.id) >= 0); }
   async insertStaff(f: Record<string, unknown>) { const s = { id: nid(), ...f } as Staff; this.staff.push(s); return s; }
   async updateStaff(id: string, f: Record<string, unknown>) { const s = this.staff.filter((x) => x.id === id)[0]; if (!s) return null; Object.assign(s, f); return s; }
@@ -369,8 +369,8 @@ Deno.test("submit: извън нормата → 409 off_norm със списъ�
   const x = await sub(r, s);
   eq([x.status, x.body.reason], [409, "off_norm"], "отказ");
   eq(x.body.issues, [nm(r, ids[0]) + ": 40 ч. вместо 168 ч."], "кой и с колко");
-  eq(x.body.hint, "Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — махни го от месеца.", "подсказката");
-  assert(String(x.body.message).indexOf(nm(r, ids[0]) + ": 40 ч. вместо 168 ч.") >= 0 && String(x.body.message).indexOf("махни го от месеца") >= 0, "съобщението носи и двете");
+  eq(x.body.hint, "Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — сложи му „Назначен на“ / „Напуснал на“ в 👥 Персонал.", "подсказката");
+  assert(String(x.body.message).indexOf(nm(r, ids[0]) + ": 40 ч. вместо 168 ч.") >= 0 && String(x.body.message).indexOf("„Назначен на“ / „Напуснал на“ в 👥 Персонал") >= 0, "съобщението носи и двете");
   eq([r.months[0].status, r.months[0].snapshot, r.audits.length], ["draft", null, 0], "месецът остава чернова");
   Object.assign(s.rows[0], { official: 168.5, diff: 0.5 });
   eq((await sub(r, s)).body.issues, [nm(r, ids[0]) + ": 168,5 ч. вместо 168 ч."], "и над нормата, с десетична запетая");
@@ -455,7 +455,10 @@ Deno.test("reopen: admin и регионалният — да, ръководи�
   await call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: snap(ids) });
   eq((await call(r, U.mgrK, { action: "reopen", store: "Кърджали", month: "2026-11" })).body.reason, "forbidden", "manager");
   const x = await call(r, U.admin, { action: "reopen", store: "Кърджали", month: "2026-11" });
-  eq([x.body.status, r.months[0].status, r.months[0].snapshot], ["draft", "draft", null], "admin връща, снимката се маха");
+  eq([x.body.status, r.months[0].status, r.months[0].submitted_by], ["draft", "draft", null], "admin връща");
+  // От 20.11.2026 снимката остава (за ТРЗ) — с reopened и буквите към момента на връщането.
+  const rs = r.months[0].snapshot as Record<string, Record<string, unknown>>;
+  eq([rs.reopened.by, rs.reopened.submitted_by, Object.keys(rs.letters).length], ["ten.tenev@temax.bg", "tencho.tenev13@gmail.com", ids.length], "пазено подаване");
   eq((await call(r, U.admin, { action: "reopen", store: "Кърджали", month: "2026-11" })).body.reason, "not_submitted", "вече е чернова");
   const sh = await filled(r, "Шумен", U.regSh);
   await call(r, U.regSh, { action: "submit", store: "Шумен", month: "2026-11", snapshot: snap(sh) });
@@ -902,4 +905,79 @@ Deno.test("load_month v11: заявките към базата — най-мн�
   eq(res.status, 200, "зарежда");
   assert(depth <= 3, "нива: " + depth + " (" + seen.join(", ") + ")");
   assert(seen.indexOf("getUser@1") >= 0 && seen.indexOf("listAccess@1") >= 0, "потребителят и списъците — едновременно: " + seen.join(", "));
+});
+
+// ── Поправки 20.11.2026 (решения на Тенчо) ───────────────────────────────
+// 5: „↩ Върни в чернова“ — ТРЗ виждат последното подаване и промените му; отметките остават; новото подаване го заменя.
+Deno.test("reopen 20.11: ТРЗ виждат последното подаване, обектът — черновата", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const a = await chg(r, U.mgrK, { staff_id: ids[0], day: 3, actual: "Б", reason: "болничен 1" });
+  eq((await call(r, U.trz, { action: "changes_trz", store: "Кърджали", month: "2026-11", id: a.body.row.id, done: true })).status, 200, "отметка преди връщане");
+  eq((await call(r, U.admin, { action: "reopen", store: "Кърджали", month: "2026-11" })).status, 200, "върнат");
+  // Обектът поправя черновата — ТРЗ не бива да го виждат: буквите и персонала.
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30(["ЗД", "ЗД"]) }] });
+  await call(r, U.mgrK, { action: "staff_save", store: "Кърджали", id: ids[0], fields: { hours_per_day: 4 } });
+  await call(r, U.mgrK, { action: "staff_save", store: "Кърджали", fields: { short_name: "НОВ", full_name: "Нов Човек", hired_on: "2026-12-01" } });   // от декември — не пречи на новото подаване за ноември
+  const t = (await call(r, U.trz, { action: "load_month", store: "Кърджали", month: "2026-11", prev: true })).body;
+  const t0 = t.rows.filter((x: RowRec) => x.staff_id === ids[0])[0];
+  eq([t.status, t.month_row.status, t.month_row.submitted_by_name, t.reopened && t.reopened.by_name, t.can_edit], ["submitted", "submitted", "Управител Кърджали", "Тенчо Тенев", false], "ТРЗ: подаден, с етикета");
+  eq(t0.letters.slice(0, 3), ["", "П", "П"], "буквите — подадените, не новата чернова");
+  assert(!("letters" in t.month_row.snapshot) && !("staff" in t.month_row.snapshot) && Array.isArray(t.month_row.snapshot.rows), "снимката е без letters и staff, с rows");
+  const ts0 = t.staff.filter((x: Staff) => x.id === ids[0])[0];
+  eq([t.staff.length, ts0.hours_per_day === 4, t.staff.some((x: Staff) => x.short_name === "НОВ")], [ids.length, false, false], "ТРЗ: персоналът към връщането — без новия и без новия договор");
+  const m = (await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  const m0 = m.rows.filter((x: RowRec) => x.staff_id === ids[0])[0];
+  eq([m.status, m.month_row.snapshot, m.reopened && m.reopened.by_name, m0.letters.slice(0, 2), m.can_edit], ["draft", null, "Тенчо Тенев", ["ЗД", "ЗД"], true], "обектът: чернова, без пазената снимка");
+  eq([m.staff.length, m.staff.some((x: Staff) => x.short_name === "НОВ")], [ids.length + 1, true], "обектът: текущият персонал");
+  // Промените на върнатия месец: ТРЗ ги четат и отмятат; обектът не пише.
+  const tl = (await call(r, U.trz, { action: "changes_list", store: "Кърджали", month: "2026-11" })).body;
+  eq([tl.rows.length, tl.rows[0].trz_done], [1, true], "ТРЗ: промяната и отметката остават");
+  eq((await call(r, U.trz, { action: "changes_trz", store: "Кърджали", month: "2026-11", id: a.body.row.id, done: false })).status, 200, "ТРЗ махат отметката и в чернова");
+  eq((await chg(r, U.mgrK, { staff_id: ids[0], day: 4, actual: "О", reason: "x" })).body.reason, "not_submitted", "обектът не пише промени в чернова");
+  // Обзор: ТРЗ — подаден с етикета; admin — чернова с етикета.
+  const ot = (await call(r, U.trz, { action: "overview", month: "2026-11" })).body.stores.filter((x: { store: string }) => x.store === "Кърджали")[0];
+  eq([ot.status, ot.submitted_by_name, ot.reopened.by_name, ot.changes], ["submitted", "Управител Кърджали", "Тенчо Тенев", 1], "обзор ТРЗ");
+  const oa = (await call(r, U.admin, { action: "overview", month: "2026-11" })).body.stores.filter((x: { store: string }) => x.store === "Кърджали")[0];
+  eq([oa.status, oa.reopened.by_name, oa.off_norm, oa.changes], ["draft", "Тенчо Тенев", null, null], "обзор admin");
+  // Новото подаване заменя пазената версия.
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30(["П"]) }] });
+  eq((await call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: snap(ids) })).status, 200, "ново подаване");
+  const t2 = (await call(r, U.trz, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  eq([t2.status, t2.reopened, (r.months[0].snapshot as Record<string, unknown>).reopened], ["submitted", null, undefined], "след подаване — без reopened");
+});
+
+Deno.test("reopen 20.11: черновата без подаване остава скрита за ТРЗ", async () => {
+  const r = new MemRepo();
+  await filled(r);
+  eq((await call(r, U.trz, { action: "load_month", store: "Кърджали", month: "2026-11" })).body.reason, "not_submitted", "чернова — не");
+  eq((await call(r, U.trz, { action: "overview", month: "2026-11" })).body.stores.length, 0, "в обзора — не");
+  eq((await call(r, U.trz, { action: "changes_list", store: "Кърджали", month: "2026-11" })).body.reason, "not_submitted", "промени — не");
+});
+
+// 8: „Въведено от“ — с име.
+Deno.test("changes_list 20.11: имената на въвелите и отметналите", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const a = await chg(r, U.mgrK, { staff_id: ids[0], day: 3, actual: "Б", reason: "болничен" });
+  await call(r, U.trz, { action: "changes_trz", store: "Кърджали", month: "2026-11", id: a.body.row.id, done: true });
+  r.changes.push({ ...r.changes[0], id: nid(), day: 5, created_by: "nqma@temax.bg", updated_by: null, trz_done: false });
+  const l = (await call(r, U.mgrK, { action: "changes_list", store: "Кърджали", month: "2026-11" })).body;
+  eq([l.names["tencho.tenev13@gmail.com"], l.names["trz@temax.bg"], l.names["nqma@temax.bg"]], ["Управител Кърджали", "ТРЗ", undefined], "имена; непознат имейл — без име");
+});
+
+// 9: „Служители“ в Обекти — активните в месеца.
+Deno.test("overview 20.11: служителите — назначени и ненапуснали спрямо месеца", async () => {
+  const r = new MemRepo();
+  await filled(r);
+  const k = kStaff(r);
+  r.staff.push({ id: nid(), store_name: "Кърджали", short_name: "НАПУСНАЛ ОКТ", full_name: "x", sort_order: 0, left_on: "2026-10-31" });
+  r.staff.push({ id: nid(), store_name: "Кърджали", short_name: "НАПУСКА 15.11", full_name: "x", sort_order: 0, left_on: "2026-11-15" });
+  r.staff.push({ id: nid(), store_name: "Кърджали", short_name: "ОТ ДЕКЕМВРИ", full_name: "x", sort_order: 0, left_on: null, hired_on: "2026-12-01" });
+  r.staff.push({ id: nid(), store_name: "Кърджали", short_name: "ОТ 30.11", full_name: "x", sort_order: 0, left_on: null, hired_on: "2026-11-30" });
+  r.staff.push({ id: nid(), store_name: "Кърджали", short_name: "ОТ ЯНУАРИ", full_name: "x", sort_order: 0, left_on: null, hired_on: "2027-01-04" });
+  const n = (mo: string) => (async () => (await call(r, U.admin, { action: "overview", month: mo })).body.stores.filter((x: { store: string }) => x.store === "Кърджали")[0].staff)();
+  eq(await n("2026-11"), k.length + 2, "ноември: + напуска 15.11 и от 30.11; без напуснал октомври, от декември и от януари");
+  eq(await n("2026-12"), k.length + 2, "декември: + от декември и от 30.11; без двамата напуснали и от януари");
+  eq(await n("2027-01"), k.length + 3, "януари: + от декември, от 30.11 и от януари");
 });

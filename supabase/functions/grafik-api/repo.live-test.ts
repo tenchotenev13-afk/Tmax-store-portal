@@ -108,7 +108,7 @@ try {
   const lm = await repo.listMonths(MONTH, [STORE, "Гоце Делчев"]);
   check(lm.length === 1 && lm[0].store_name === STORE && "snapshot" in lm[0], "listMonths с in() по кирилски имена (носи snapshot)", lm.length);
   check((await repo.listMonths(MONTH, [])).length === 0, "listMonths с празен списък → нищо");
-  check((await repo.staffCounts([STORE, "Гоце Делчев"]))[STORE] >= 2, "staffCounts с in()");
+  check((await repo.staffDates([STORE, "Гоце Делчев"])).filter((s) => s.store_name === STORE).length >= 2, "staffDates с in()");
 
   const ok1 = await repo.updateMonth(m1.id, { status: "submitted", submitted_by: "repo.live-test", snapshot: { rows: [] } }, "draft");
   const ok2 = await repo.updateMonth(m1.id, { status: "submitted" }, "draft");

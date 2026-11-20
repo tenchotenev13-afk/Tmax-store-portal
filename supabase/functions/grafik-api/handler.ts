@@ -80,7 +80,8 @@ export interface Repo {
   listRows(monthId: string): Promise<RowRec[]>;
   upsertRows(rows: RowRec[]): Promise<void>;
   listStaff(store: string): Promise<Staff[]>;
-  staffCounts(stores: string[] | null): Promise<Record<string, number>>;
+  // Датите на назначаване / напускане по обект — броят в месеца се смята тук (staffInMonth).
+  staffDates(stores: string[] | null): Promise<{ store_name: string; hired_on: string | null; left_on: string | null }[]>;
   getStaff(ids: string[]): Promise<Staff[]>;
   insertStaff(fields: Record<string, unknown>): Promise<Staff>;
   updateStaff(id: string, fields: Record<string, unknown>): Promise<Staff | null>;
@@ -271,7 +272,7 @@ export function checkSnapshot(s: unknown, days: number, staffIds: string[]): str
 //   - свободни часове 1–12 в клетка — по grafik_rows;
 //   - извън нормата — по diff от снимката (целта е сметната в браузъра: празниците и нормата
 //     още не са на сървъра — общото ядро е отворена точка).
-export const SUBMIT_HINT = "Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — махни го от месеца.";
+export const SUBMIT_HINT = "Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — сложи му „Назначен на“ / „Напуснал на“ в 👥 Персонал.";
 function hrs(n: number): string { return String(Math.round(n * 10) / 10).replace(".", ","); }
 function p2(n: number): string { return (n < 10 ? "0" : "") + n; }
 // От 05.11.2026 и ЛД в неделя (бланката: червено + ПРОВЕРКА „ЛД в неделя“) — по grafik_rows и датата.
@@ -309,11 +310,41 @@ export function sameAsPlanned(actual: string, plannedLetter: string): boolean {
 function addDay(start: string, day: number): string {
   const d = new Date(start + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + day - 1); return d.toISOString().slice(0, 10);
 }
+// „↩ Върни в чернова“ (решение на Тенчо 20.11.2026): последното подаване не се губи — снимката
+// остава в чернова с reopened (кой и кога е върнал, кой и кога беше подал) и letters (буквите
+// и заключените кодове към момента на връщането — тогава редовете са точно подадените, защото
+// save_rows отказва при подаден месец) и staff (персоналът на обекта към този момент — договор,
+// дати, сектор; иначе мрежата на ТРЗ би се смятала по персонала, сменен в черновата). ТРЗ продължават да виждат тази версия и промените ѝ
+// („върнат за корекция от … на …“), отметките „Отразено в ТРЗ“ остават. Новото подаване я заменя.
+export type Reopened = { at: string; by: string; by_name: string; submitted_at: string | null; submitted_by: string | null; submitted_by_name: string | null };
+export function reopenedOf(month: MonthRow | null | undefined): Reopened | null {
+  if (!month || month.status !== "draft" || !isObj(month.snapshot) || !isObj(month.snapshot.reopened)) return null;
+  return month.snapshot.reopened as Reopened;
+}
+// Подаден или върнат с пазено подаване — това виждат ТРЗ.
+export function hasSubmission(month: MonthRow | null | undefined): boolean { return !!month && (month.status === "submitted" || !!reopenedOf(month)); }
+// Върнатият месец, както изглеждаше подаден: статус, кой и кога, снимката (без letters / staff),
+// редовете от letters и персоналът към връщането (null — няма го в снимката).
+export function lastSubmittedView(month: MonthRow): { month_row: MonthRow; rows: RowRec[]; staff: Staff[] | null } | null {
+  const r = reopenedOf(month);
+  if (!r) return null;
+  const snap = { ...(month.snapshot as Record<string, unknown>) };
+  const letters = isObj(snap.letters) ? snap.letters as Record<string, { letters?: unknown; locked?: unknown }> : {};
+  const staff = Array.isArray(snap.staff) ? (snap.staff as Staff[]).map((x) => ({ ...x })) : null;
+  delete snap.letters; delete snap.staff;
+  const rows: RowRec[] = Object.keys(letters).map((sid) => ({
+    month_id: month.id, staff_id: sid,
+    letters: Array.isArray(letters[sid].letters) ? (letters[sid].letters as string[]).slice() : [],
+    locked: isObj(letters[sid].locked) ? { ...(letters[sid].locked as Record<string, string>) } : {},
+  }));
+  return { month_row: { ...month, status: "submitted", submitted_at: r.submitted_at, submitted_by: r.submitted_by, submitted_by_name: r.submitted_by_name, snapshot: snap }, rows, staff };
+}
 // Подаденият месец на обекта — иначе 409 (промените се въвеждат само след подаване).
-async function submittedMonth(repo: Repo, store: string, ym: unknown) {
+// allowReopened — четене и „Отразено в ТРЗ“ върху пазеното подаване на върнат месец.
+async function submittedMonth(repo: Repo, store: string, ym: unknown, allowReopened = false) {
   const m = needMonth(ym);
   const month = await repo.getMonth(store, m.start);
-  if (!month || month.status !== "submitted") throw new HttpError(409, "not_submitted", "Промените се въвеждат след подаване на графика.");
+  if (!month || !(month.status === "submitted" || (allowReopened && reopenedOf(month)))) throw new HttpError(409, "not_submitted", "Промените се въвеждат след подаване на графика.");
   return { m, month };
 }
 // Всички проверки на един ред „Промени“ → „по график“ (буква и официален код).
@@ -481,24 +512,32 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const store = await storeP;                   // правата / обектът — първи, данните вече текат
       const [month, staff, raw, pm] = await dataP;
       // ТРЗ виждат само подадени месеци — черновата за тях не съществува (и за предишния).
-      if (acc.kind === "trz" && (!month || month.status !== "submitted")) {
+      // Върнат в чернова → последното подаване (lastSubmittedView), не текущата чернова.
+      if (acc.kind === "trz" && !hasSubmission(month)) {
         throw new HttpError(404, "not_submitted", "Графикът за този месец още не е подаден.");
       }
-      const pmSeen = !!pm && (acc.kind !== "trz" || pm.status === "submitted");
+      const pmSeen = !!pm && (acc.kind !== "trz" || hasSubmission(pm));
+      const view = acc.kind === "trz" && month ? lastSubmittedView(month) : null;
+      const pView = acc.kind === "trz" && pmSeen ? lastSubmittedView(pm!) : null;
+      const reo = reopenedOf(month);
       const [rows, pRows] = await Promise.all([
-        month ? repo.listRows(month.id) : Promise.resolve([] as RowRec[]),
-        pmSeen ? repo.listRows(pm!.id) : Promise.resolve([] as RowRec[]),
+        view ? Promise.resolve(view.rows) : month ? repo.listRows(month.id) : Promise.resolve([] as RowRec[]),
+        pView ? Promise.resolve(pView.rows) : pmSeen ? repo.listRows(pm!.id) : Promise.resolve([] as RowRec[]),
       ]);
+      // Пазената снимка на върнатия месец е само за ТРЗ — останалите виждат черновата както досега.
+      const monthRow = view ? view.month_row : (reo ? { ...month!, snapshot: null } : month);
+      const pmRow = pView ? pView.month_row : (pm && reopenedOf(pm) ? { ...pm, snapshot: null } : pm);
       const setup = resolveSetup(raw, m.start, m.end);
       return {
         store, month: m.start, days: m.days, can_edit: canEdit(acc, store) && (!month || month.status === "draft"),
         can_reopen: acc.canReopen && canEdit(acc, store) && !!month && month.status === "submitted",
-        status: month ? month.status : "draft", month_row: month, staff, rows, setup,
+        status: view ? "submitted" : month ? month.status : "draft", month_row: monthRow, staff: view && view.staff ? view.staff : staff, rows, setup,
+        reopened: reo ? { at: reo.at, by_name: reo.by_name } : null,
         // Ритъмът от предходния месец — както досега: само за тези, които редактират (не ТРЗ).
         prev_rows: wantPrev && acc.kind !== "trz" ? pRows : [],
         // Предишният месец за ВТР чл. 19 през границата (първата седмица) — вместо втора заявка
         // load_month от браузъра. null — няма го или (ТРЗ) не е подаден.
-        ...(wantPrev ? { prev_month: pmSeen ? { month_row: pm, rows: pRows, setup: resolveSetup(raw, pmP.start, pmP.end) } : null } : {}),
+        ...(wantPrev ? { prev_month: pmSeen ? { month_row: pmRow, rows: pRows, setup: resolveSetup(raw, pmP.start, pmP.end) } : null } : {}),
       };
     }
 
@@ -639,8 +678,15 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const m = needMonth(b.month);
       const month = await repo.getMonth(store, m.start);
       if (!month || month.status !== "submitted") throw new HttpError(409, "not_submitted", "Графикът не е подаден.");
+      // Последното подаване се пази в снимката (reopenedOf / lastSubmittedView) — за ТРЗ.
+      const at = new Date().toISOString();
+      const letters: Record<string, { letters: string[]; locked: Record<string, string> }> = {};
+      (await repo.listRows(month.id)).forEach((r) => { letters[r.staff_id] = { letters: r.letters || [], locked: r.locked || {} }; });
+      const keptStaff = JSON.parse(JSON.stringify(await repo.listStaff(store))) as Staff[];   // копие — както в jsonb
+      const reopened: Reopened = { at, by: acc.email, by_name: acc.name, submitted_at: month.submitted_at, submitted_by: month.submitted_by, submitted_by_name: month.submitted_by_name };
       const ok = await repo.updateMonth(month.id, {
-        status: "draft", submitted_at: null, submitted_by: null, submitted_by_name: null, snapshot: null, updated_at: new Date().toISOString(),
+        status: "draft", submitted_at: null, submitted_by: null, submitted_by_name: null,
+        snapshot: { ...(isObj(month.snapshot) ? month.snapshot : {}), letters, staff: keptStaff, reopened }, updated_at: at,
       }, "submitted");
       if (!ok) throw new HttpError(409, "not_submitted", "Графикът не е подаден.");
       // Решение а: промените остават за новото подаване; броят им — за предупреждението в екрана.
@@ -652,8 +698,11 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
     // ── „Промени“ ──────────────────────────────────────────────────────────
     case "changes_list": {
       const store = await needStore(repo, acc, b.store, "read");
-      const { month } = await submittedMonth(repo, store, b.month);
-      return { rows: (await repo.listChanges(month.id)).sort((a, c) => a.day - c.day) };
+      const { month } = await submittedMonth(repo, store, b.month, true);
+      const rows = (await repo.listChanges(month.id)).sort((a, c) => a.day - c.day);
+      // „Въведено от“ / „отметнато от“ — с име (users.display_name); имейл само ако няма име.
+      const emails = Array.from(new Set(rows.flatMap((c) => [c.created_by, c.updated_by, c.trz_done_by]).filter((e): e is string => typeof e === "string" && !!e).map((e) => e.toLowerCase())));
+      return { rows, names: await repo.userNames(emails) };
     }
 
     case "changes_save": {
@@ -692,7 +741,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       // „Отразено в ТРЗ“ — само ТРЗ и admin; останалите полета не се пипат.
       if (acc.kind !== "trz" && !acc.canAdmin) throw new HttpError(403, "forbidden", "„Отразено в ТРЗ“ отмятат ТРЗ.");
       const store = await needStore(repo, acc, b.store, "read");
-      const { m, month } = await submittedMonth(repo, store, b.month);
+      const { m, month } = await submittedMonth(repo, store, b.month, true);
       const id = uuid(b.id, "id");
       if (typeof b.done !== "boolean") throw new HttpError(400, "bad_request", "done е true или false.");
       const cur = (await repo.listChanges(month.id)).filter((c) => c.id === id)[0];
@@ -728,19 +777,25 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const sc = await scopeStores(repo, names, m.start);
       const visible = (acc.readAll ? names : names.filter((n) => acc.read.indexOf(n) >= 0)).filter((n) => !!sc.company[n]);
       const months = (await repo.listMonths(m.start, visible))
-        .filter((r) => acc.kind !== "trz" || r.status === "submitted");
+        .filter((r) => acc.kind !== "trz" || hasSubmission(r));
+      // ТРЗ: върнатият месец е „подаден“ с последното подаване; за останалите е чернова (с бележка „върнат“).
+      const asSub = (r: MonthRow) => r.status === "submitted" || (acc.kind === "trz" && !!reopenedOf(r));
       const stats = await repo.rowStats(months.map((r) => r.id));
-      const chs = await repo.changeStats(months.filter((r) => r.status === "submitted").map((r) => r.id));   // П3: „промени / неотразени“
-      const staffN = acc.kind === "trz" ? {} : await repo.staffCounts(visible);
+      const chs = await repo.changeStats(months.filter(asSub).map((r) => r.id));   // П3: „промени / неотразени“
+      // „Служители“ — активните в месеца (назначен до края му, не напуснал преди началото му; 20.11.2026).
+      const staffN: Record<string, number> = {};
+      if (acc.kind !== "trz") (await repo.staffDates(visible)).filter((s) => staffInMonth(s, m.start, m.end)).forEach((s) => { staffN[s.store_name] = (staffN[s.store_name] || 0) + 1; });
       const byStore: Record<string, MonthRow> = {};
       months.forEach((r) => { byStore[r.store_name] = r; });
       const who = await repo.userNames(Array.from(new Set(Object.values(stats).map((s) => (s.last_by || "").toLowerCase()).filter(Boolean))));
       const list = (acc.kind === "trz" ? visible.filter((n) => !!byStore[n]) : visible).map((n) => {
-        const r = byStore[n], st = r ? stats[r.id] : null, sub = !!r && r.status === "submitted";
+        const r = byStore[n], st = r ? stats[r.id] : null, sub = !!r && asSub(r), reo = reopenedOf(r), trzReo = sub && !!reo;
         const lastBy = st && st.last_by ? st.last_by.toLowerCase() : null;
         return {
-          store: n, company: sc.company[n], status: r ? r.status : null, submitted_at: r ? r.submitted_at : null,
-          submitted_by_name: r ? r.submitted_by_name : null, rows: st ? st.rows : 0,
+          store: n, company: sc.company[n], status: r ? (trzReo ? "submitted" : r.status) : null,
+          submitted_at: r ? (trzReo ? reo!.submitted_at : r.submitted_at) : null,
+          submitted_by_name: r ? (trzReo ? reo!.submitted_by_name : r.submitted_by_name) : null, rows: st ? st.rows : 0,
+          reopened: reo ? { at: reo.at, by_name: reo.by_name } : null,
           staff: (staffN as Record<string, number>)[n] || 0, can_edit: canEdit(acc, n),
           last_at: st ? st.last_at : null, last_by: lastBy ? (who[lastBy] || lastBy) : null,
           off_norm: sub ? snapshotOffNorm(r!.snapshot) : null,

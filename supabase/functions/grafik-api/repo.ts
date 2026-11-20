@@ -75,7 +75,8 @@ export function makeRepo(): Repo {
       return rows.length > 0;
     },
     async listMonths(month, stores) {
-      // snapshot — за „извън нормата“ на подадените в обзора (черновите са с null).
+      // snapshot — за „извън нормата“ на подадените в обзора. Черновата е с null, освен върнатата с
+      // пазено подаване (reopened / letters / staff — само за ТРЗ, handler.ts reopenedOf).
       let q = db.from("grafik_months").select(MONTH_COLS).eq("month", month);
       if (stores) q = q.in("store_name", stores.length ? stores : ["—"]);
       return ok(await q);
@@ -108,13 +109,10 @@ export function makeRepo(): Repo {
     async listStaff(store) {
       return ok<Staff[]>(await db.from("grafik_staff").select("*").eq("store_name", store).order("sort_order").order("short_name"));
     },
-    async staffCounts(stores) {
-      let q = db.from("grafik_staff").select("store_name").is("left_on", null);
+    async staffDates(stores) {
+      let q = db.from("grafik_staff").select("store_name,hired_on,left_on");
       if (stores) q = q.in("store_name", stores.length ? stores : ["—"]);
-      const rows = ok<{ store_name: string }[]>(await q);
-      const out: Record<string, number> = {};
-      rows.forEach((r) => { out[r.store_name] = (out[r.store_name] || 0) + 1; });
-      return out;
+      return ok<{ store_name: string; hired_on: string | null; left_on: string | null }[]>(await q);
     },
     async getStaff(ids) {
       if (!ids.length) return [];

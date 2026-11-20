@@ -74,9 +74,10 @@ function makeServer(opt) {
         // само формата на отговора; логиката е заключена в handler.test.ts.
         const m = b.month + '-01', scope = ['Кърджали', 'Шумен'];
         let list = scope.filter(st => M.kind === 'admin' || M.kind === 'trz' || M.stores.some(s => s.name === st)).map(st => {
-          const mo = S.months[key(st, m)], sub = !!mo && mo.status === 'submitted';
-          return { store: st, company: '"ТЕМАКС ТЪРГОВСКИ ЦЕНТЪР ЗА ДОМА 3" ЕООД', status: mo ? mo.status : null, submitted_at: mo ? mo.submitted_at || null : null,
-            submitted_by_name: mo ? mo.submitted_by_name || null : null, rows: mo ? S.rows.filter(r => r.month_id === mo.id).length : 0,
+          const mo = S.months[key(st, m)], kept = M.kind === 'trz' && !!mo && !!mo.keep, sub = !!mo && (mo.status === 'submitted' || kept);
+          return { store: st, company: '"ТЕМАКС ТЪРГОВСКИ ЦЕНТЪР ЗА ДОМА 3" ЕООД', status: mo ? (kept ? 'submitted' : mo.status) : null,
+            submitted_at: mo ? (kept ? mo.keep.submitted_at : mo.submitted_at || null) : null,
+            submitted_by_name: mo ? (kept ? mo.keep.submitted_by_name : mo.submitted_by_name || null) : null, reopened: mo && mo.reopened ? mo.reopened : null, rows: mo ? S.rows.filter(r => r.month_id === mo.id).length : 0,
             staff: S.staff.filter(s => s.store_name === st && !s.left_on).length, can_edit: canEdit(st),
             last_at: mo ? mo.last_at || null : null, last_by: mo ? mo.last_by || null : null, off_norm: sub ? (mo.off_norm || []) : null,
             changes: sub ? (S.changes || []).filter(c => c.month_id === mo.id).length : null, changes_open: sub ? (S.changes || []).filter(c => c.month_id === mo.id && !c.trz_done).length : null };
@@ -85,13 +86,17 @@ function makeServer(opt) {
         return { status: 200, body: { ok: true, month: m, stores: list, no_company: M.kind === 'admin' ? ['Пазарджик'] : [] } };
       }
       case 'load_month': {
-        const m = b.month + '-01', mo = S.months[key(b.store, m)];
+        const m = b.month + '-01', mo0 = S.months[key(b.store, m)];
+        const kept = M.kind === 'trz' && !!mo0 && mo0.status === 'draft' && !!mo0.keep;
+        const mo = kept ? Object.assign({}, mo0, { status: 'submitted', snapshot: mo0.keep.snapshot, submitted_by_name: mo0.keep.submitted_by_name, submitted_at: mo0.keep.submitted_at }) : mo0;
+        const moRows = kept ? mo0.keep.rows : (mo ? S.rows.filter(r => r.month_id === mo.id) : []);
         if (M.kind === 'trz' && (!mo || mo.status !== 'submitted')) return { status: 404, body: { ok: false, reason: 'not_submitted', message: 'Графикът за този месец още не е подаден.' } };
         const pm = (() => { const y = +b.month.slice(0, 4), mm = +b.month.slice(5); const p = mm === 1 ? (y - 1) + '-12' : y + '-' + String(mm - 1).padStart(2, '0'); return S.months[key(b.store, p + '-01')]; })();
         return { status: 200, body: { ok: true, store: b.store, month: m, can_edit: canEdit(b.store) && (!mo || mo.status === 'draft'),
           // can_reopen — по вида достъп (ТРЗ е admin по роля, но не връща в чернова)
           can_reopen: M.kind === 'admin' && !!mo && mo.status === 'submitted', status: mo ? mo.status : 'draft', month_row: mo || null,
-          staff: S.staff.filter(s => s.store_name === b.store), rows: mo ? S.rows.filter(r => r.month_id === mo.id) : [],
+          reopened: mo0 && mo0.reopened ? mo0.reopened : null,
+          staff: S.staff.filter(s => s.store_name === b.store), rows: moRows,
           prev_rows: pm ? S.rows.filter(r => r.month_id === pm.id) : [],
           // S.v11 — като grafik-api v11: предишният месец в същия отговор (при prev: true). Без него — както v10.
           ...(S.v11 && b.prev === true ? { prev_month: pm && (M.kind !== 'trz' || pm.status === 'submitted') ? { month_row: pm, rows: S.rows.filter(r => r.month_id === pm.id), setup: Object.assign({}, ET.setups['2026-10']) } : null } : {}),
@@ -114,12 +119,14 @@ function makeServer(opt) {
       case 'submit': {
         const mo = S.months[key(b.store, b.month + '-01')];
         if (S.missing.length) return { status: 409, body: { ok: false, reason: 'missing_company', message: 'Липсват данни за дружеството — админ.' } };
-        mo.status = 'submitted'; mo.submitted_by_name = u.display_name; mo.submitted_at = '2026-11-02T10:00:00Z'; mo.snapshot = b.snapshot;
+        mo.status = 'submitted'; mo.submitted_by_name = u.display_name; mo.submitted_at = '2026-11-02T10:00:00Z'; mo.snapshot = b.snapshot; delete mo.keep; delete mo.reopened;
         return { status: 200, body: { ok: true, status: 'submitted' } };
       }
       case 'reopen': {
         const mo = S.months[key(b.store, b.month + '-01')];
-        mo.status = 'draft';
+        mo.keep = { snapshot: mo.snapshot, submitted_by_name: mo.submitted_by_name, submitted_at: mo.submitted_at, rows: JSON.parse(JSON.stringify(S.rows.filter(r => r.month_id === mo.id))) };
+        mo.reopened = { at: '2026-11-06T09:30:00Z', by_name: u.display_name };
+        mo.status = 'draft'; mo.snapshot = null; mo.submitted_by_name = null; mo.submitted_at = null;
         return { status: 200, body: { ok: true, status: 'draft' } };
       }
       case 'sector_save': {
@@ -131,9 +138,13 @@ function makeServer(opt) {
       case 'changes_list': case 'changes_save': case 'changes_delete': case 'changes_trz': {
         // „Промени“ (П1) — правилата са в handler.ts и се проверяват в handler.test.ts; тук — само формата.
         const mo = S.months[key(b.store, b.month + '-01')];
-        if (!mo || mo.status !== 'submitted') return { status: 409, body: { ok: false, reason: 'not_submitted', message: 'Промените се въвеждат след подаване на графика.' } };
+        const keptOk = !!mo && !!mo.keep && (b.action === 'changes_list' || b.action === 'changes_trz');
+        if (!mo || (mo.status !== 'submitted' && !keptOk)) return { status: 409, body: { ok: false, reason: 'not_submitted', message: 'Промените се въвеждат след подаване на графика.' } };
         S.changes = S.changes || [];
-        if (b.action === 'changes_list') return { status: 200, body: { ok: true, rows: S.changes.filter(c => c.month_id === mo.id).map(c => Object.assign({}, c)) } };
+        if (b.action === 'changes_list') {
+          const names = {}; [MGR, SKL, ADM, TRZ, REG].forEach(x => { names[x.email.toLowerCase()] = x.display_name; });
+          return { status: 200, body: { ok: true, rows: S.changes.filter(c => c.month_id === mo.id).map(c => Object.assign({}, c)), names: S.noNames ? undefined : names } };
+        }
         if (b.action === 'changes_trz') {
           if (M.kind !== 'trz' && M.kind !== 'admin') return { status: 403, body: { ok: false, reason: 'forbidden', message: '„Отразено в ТРЗ“ отмятат ТРЗ.' } };
           const c = S.changes.filter(x => x.id === b.id)[0];
@@ -212,6 +223,7 @@ function env(user, opt) {
   return h;
 }
 const mod = h => h.doc.getElementById('mod-grafik');
+let H0 = null; const h0 = () => H0 || (H0 = env(MGR));
 const key = (h, k, extra) => h.w.grKey(Object.assign({ key: k, preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false }, extra || {}));
 const typeIn = (h, s) => { for (const ch of s) key(h, ch); };
 const cellText = (h, r, d) => { const c = h.doc.getElementById('gr-c-' + r + '-' + d); return c ? c.textContent.replace('🔒', '').replace('▾', '').trim() : null; };
@@ -345,7 +357,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     !!h.doc.getElementById('gr-submit-modal') && h.calls.confirm.length === 0 && !h.S.calls.some(c => c.action === 'submit'), bl.join(' | '));
   ok('списъкът казва кой и с колко („Петя Петрова: 4 ч. вместо 84 ч.“, Мария — … вместо 168 ч.)',
     bl.indexOf('Петя Петрова: 4 ч. вместо 84 ч.') >= 0 && bl.some(t => /^Мария Д'Анджело: [\d,]+ ч\. вместо 168 ч\.$/.test(t)), bl.join(' | '));
-  ok('подсказката под списъка', (h.doc.getElementById('gr-submit-hint') || {}).textContent === 'Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — махни го от месеца.');
+  ok('подсказката под списъка', (h.doc.getElementById('gr-submit-hint') || {}).textContent === 'Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — сложи му „Назначен на“ / „Напуснал на“ в 👥 Персонал.');
   realClick(h.w, btn(h.doc.getElementById('gr-submit-modal'), 'Затвори'));
   // Свободни часове в иначе пълен ред също спират.
   h.w.grSelect(0, 0);
@@ -1192,7 +1204,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     // „Върни“ — предупреждение с броя.
     S.changes.push({ id: 'ch-x', month_id: 'm-c', staff_id: 'st-2', day: 10, actual: 'Б', reason: 'x', planned_letter: '', planned_code: '', trz_done: false });
     await load(a);
-    realClick(a.w, btn(mod(a), '📅 График')); await ticks(4);
+    realClick(a.w, btn(mod(a), '📆 График')); await ticks(4);
     a.calls.confirm.length = 0;
     realClick(a.w, btn(mod(a), 'Върни')); await ticks(6);
     ok('„Върни в чернова“ — „Има 1 промяна — остава за новото подаване.“', a.calls.confirm.some(m => /\nИма 1 промяна — остава за новото подаване\.$/.test(m)), a.calls.confirm.join(' | '));
@@ -1229,7 +1241,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     // Печат.
     realClick(x.w, btn(mod(x), '🖨 Присъствена')); await ticks(4);
     const tb = d.getElementById('grq-tbl');
-    ok('печат: „ПРИСЪСТВЕНА ФОРМА“, „Съставил: Управител Кърджали“ (влезлият)', d.getElementById('grq-title').textContent === 'ПРИСЪСТВЕНА ФОРМА' && /^Съставил: Управител Кърджали/.test(d.getElementById('grq-made').textContent));
+    ok('печат: „ПРИСЪСТВЕНА ФОРМА“, „Съставил: Управител Кърджали“ (подалият — тук е и влезлият; разликата е в раздел 25)', d.getElementById('grq-title').textContent === 'ПРИСЪСТВЕНА ФОРМА' && /^Съставил: Управител Кърджали/.test(d.getElementById('grq-made').textContent));
     ok('печат: колоните след дните — дни, часове, О, М, Б, Д, А, С, Н, общо', Array.from(tb.querySelector('thead tr').children).slice(-10).map(t => t.textContent).join('|') === 'дни|часове|О|М|Б|Д|А|С|Н|общо ч. вкл. О/Б/Н');
     const r1 = tb.querySelectorAll('tbody tr')[0];
     ok('печат: денят с промяна е оранжев (grq-chg), стойността — „Б“ / „10,5“', /grq-chg/.test(r1.children[3 + 2].className) && r1.children[3 + 2].textContent === 'Б' && r1.children[3 + 9].textContent === '10,5' && !/grq-chg/.test(r1.children[3 + 1].className));
@@ -1734,6 +1746,111 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('Г: записите — пак save_rows', x.S.calls.some(c => c.action === 'save_rows'));
   }
 
+
+  section('25. Поправки 20.11.2026: часове в предупрежденията, ТРЗ и „📆 График“, върнат за корекция, съставил, въведено от, своят имейл, иконката');
+  {
+    const L = (arr) => { const a = new Array(30).fill(''); arr.forEach((v, i) => { a[i] = v; }); return a; };
+    // 1 — часовете 1–12 и в „⚠ Предупреждения“, със същия текст като при „Подай“.
+    {
+      const S = makeServer();
+      S.months['Кърджали|2026-11-01'] = { id: 'm-h', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+      S.rows.push({ month_id: 'm-h', staff_id: 'st-1', letters: L(['', 'П', '6', 'П']), locked: {} });
+      const x = env(MGR, { server: S }); await load(x);
+      const li = Array.from(x.doc.querySelectorAll('#gr-warnings li.gr-warn-hours')).map(e => e.textContent);
+      ok('1: „ИВАН: 6 свободни ч. на 03.11 — сложи код“ в предупрежденията', li.length === 1 && li[0] === 'ИВАН: 6 свободни ч. на 03.11 — сложи код', JSON.stringify(li));
+      const iss = x.w.grSubmitIssues().filter(t => /свободни ч\./.test(t));
+      ok('1: същият текст при „Подай“ (там с трите имена)', iss.length === 1 && iss[0] === 'Иван Иванов Иванов: 6 свободни ч. на 03.11 — сложи код' && li[0].split(': ')[1] === iss[0].split(': ')[1], JSON.stringify(iss));
+    }
+    // 3 — ТРЗ: „📆 График“ отваря подаден обект, не обекта по подразбиране; няма подаден → съобщение.
+    {
+      const S = makeServer();
+      S.months['Кърджали|2026-11-01'] = { id: 'm-t', store_name: 'Кърджали', month: '2026-11-01', status: 'submitted', submitted_by_name: 'Управител Кърджали', submitted_at: '2026-11-04T10:00:00Z',
+        snapshot: { rows: [{ staff_id: 'st-1', full_name: 'Иван Иванов Иванов', codes: new Array(30).fill('') }], header: {} } };
+      S.rows.push({ month_id: 'm-t', staff_id: 'st-1', letters: L(['', 'П']), locked: {} });
+      const t = env(TRZ, { server: S, beta: BETA_ALL }); await load(t);
+      ok('3: ТРЗ започват от „🏬 Обекти“', !!t.doc.getElementById('gr-overview'));
+      t.w.grStore = 'Шумен';                                        // обект без подаден график (като „Централен офис“)
+      const nLoad = () => t.S.calls.filter(c => c.action === 'load_month');
+      const before = nLoad().length;
+      realClick(t.w, btn(mod(t), '📆 График')); await ticks(8);
+      ok('3: „📆 График“ → първият подаден (Кърджали), без load_month за Шумен и без червена грешка', t.w.grStore === 'Кърджали' && !t.doc.getElementById('gr-error') &&
+        nLoad().slice(before).every(c => c.store === 'Кърджали') && !!t.doc.getElementById('gr-grid'), nLoad().slice(before).map(c => c.store).join());
+      realClick(t.w, btn(mod(t), '▶')); await ticks(8);
+      ok('3: следващ месец без подаден → „Няма подаден график за декември 2026 г. — избери обект от „🏬 Обекти“.“', ((t.doc.getElementById('gr-trz-none') || {}).textContent || '') === 'Няма подаден график за декември 2026 г. — избери обект от „🏬 Обекти“.' && !t.doc.getElementById('gr-error'));
+      ok('3: декември — без load_month (няма какво да се отвори)', !t.S.calls.some(c => c.action === 'load_month' && c.month === '2026-12'));
+      realClick(t.w, btn(mod(t), '◀')); await ticks(8);
+      ok('3: обратно в ноември — Кърджали', t.w.grStore === 'Кърджали' && !!t.doc.getElementById('gr-grid'));
+    }
+    // 5, 6, 8 — върнат за корекция: ТРЗ виждат последното подаване и промените; съставил; въведено от.
+    {
+      const S = makeServer();
+      const wd = h0().w.GrafikEngine.monthInfo('2026-11', []);
+      const work = wd.dow.map(w => (w <= 5 ? 'П' : ''));
+      S.months['Кърджали|2026-11-01'] = { id: 'm-r', store_name: 'Кърджали', month: '2026-11-01', status: 'submitted', submitted_by_name: 'Управител Кърджали', submitted_at: '2026-11-04T10:00:00Z',
+        snapshot: { rows: [{ staff_id: 'st-1', full_name: 'Иван Иванов Иванов', contract_title: 'продавач', hours_per_day: 8, codes: work.map(l => (l ? 'Д1/З' : '')), norm: 168 }],
+          header: { company_name: '"ТЕМАКС ТЦД 3" ЕООД', company_eik: '207322431', company_addr: 'гр. Варна', store_blank_name: '"Темакс" – Кърджали', approver: 'Теодор Тенев', compiled_by: 'Управител Кърджали' } } };
+      S.rows.push({ month_id: 'm-r', staff_id: 'st-1', letters: work.slice(), locked: {} });
+      S.changes = [{ id: 'c1', month_id: 'm-r', staff_id: 'st-1', day: 3, actual: 'Б', reason: 'болничен', planned_letter: 'П', planned_code: 'Д1/З', created_by: MGR.email, created_at: '2026-11-05T10:00:00Z', trz_done: true, trz_done_by: TRZ.email, trz_done_at: '2026-11-05T12:00:00Z' }];
+      // 8 — „Въведено от“ с име (подаден месец, обектът).
+      const m1 = env(MGR, { server: S }); await load(m1);
+      realClick(m1.w, btn(mod(m1), 'Промени')); await ticks(4);
+      const whoCell = m1.doc.querySelector('#gr-ch-c1 td:nth-child(6)');
+      ok('8: „Въведено от“ — „Управител Кърджали · …“, не имейлът', !!whoCell && /^Управител Кърджали · /.test(whoCell.textContent) && whoCell.textContent.indexOf('@') < 0, whoCell && whoCell.textContent);
+      m1.w.grPrintChanges(); await ticks(2);
+      const pr = Array.from(m1.doc.querySelectorAll('#grc-tbl tbody td')).map(td => td.textContent);
+      ok('8: печатът за подпис — също името', pr.indexOf('Управител Кърджали') >= 0 && !pr.some(v => v.indexOf('@') >= 0), JSON.stringify(pr));
+      // Без имената от сървъра (стар grafik-api) — имейлът, не празно.
+      S.noNames = true;
+      const m0 = env(MGR, { server: S }); await load(m0);
+      realClick(m0.w, btn(mod(m0), 'Промени')); await ticks(4);
+      ok('8: без имена — имейлът', /^tencho\.tenev13@gmail\.com · /.test((m0.doc.querySelector('#gr-ch-c1 td:nth-child(6)') || {}).textContent || ''));
+      S.noNames = false;
+      // admin връща в чернова; обектът поправя черновата.
+      const a = env(ADM, { server: S }); await load(a);
+      a.w.grStore = 'Кърджали'; await a.w.grLoadMonth(); await ticks(6);
+      realClick(a.w, btn(mod(a), 'Върни в чернова')); await ticks(8);
+      ok('5: admin — чернова с етикета „↩ върнат за корекция от Тенчо на 06.11.2026 11:30“', ((a.doc.getElementById('gr-status') || {}).textContent || '').indexOf('Чернова') >= 0 &&
+        ((a.doc.getElementById('gr-reopened') || {}).textContent || '') === '↩ върнат за корекция от Тенчо на 06.11.2026 11:30', (a.doc.getElementById('gr-reopened') || {}).textContent);
+      S.rows.filter(r => r.month_id === 'm-r')[0].letters[1] = 'ЗД';     // поправка в черновата
+      const t = env(TRZ, { server: S, beta: BETA_ALL }); await load(t);
+      const ovSt = (t.doc.querySelector('#gr-ov-0') || {}).textContent || '';
+      ok('5: ТРЗ — в Обекти е „✔ Подаден“ с етикета', ovSt.indexOf('✔ Подаден') >= 0 && ovSt.indexOf('↩ върнат за корекция от Тенчо на 06.11.2026 11:30') >= 0, ovSt);
+      realClick(t.w, btn(t.doc.getElementById('gr-ov-0'), 'Отвори')); await ticks(8);
+      ok('5: ТРЗ — „✔ Подаден от Управител Кърджали“ + етикетът', ((t.doc.getElementById('gr-status') || {}).textContent || '').indexOf('✔ Подаден от Управител Кърджали') === 0 && !!t.doc.getElementById('gr-reopened'));
+      ok('5: ТРЗ — буквите на подаденото (2.11 = П), не поправката в черновата (ЗД)', cellText(t, 0, 1) === 'П', cellText(t, 0, 1));
+      realClick(t.w, btn(mod(t), 'Промени')); await ticks(4);
+      const cb = t.doc.querySelector('#gr-ch-c1 input.gr-ch-trz');
+      ok('5: ТРЗ — промяната и отметката „Отразено в ТРЗ“ остават', !!cb && cb.checked === true);
+      ok('5: отметнато от — с име', !!cb && /^отметнато от ТРЗ · /.test(cb.getAttribute('title')), cb && cb.getAttribute('title'));
+      // 6 — „Съставил“ в присъствената = подалият, не влезлият (ТРЗ).
+      t.w.grPrintPresence(); await ticks(2);
+      const made = (t.doc.getElementById('grq-made') || {}).textContent || '';
+      ok('6: присъствената — „Съставил: Управител Кърджали“, не „ТРЗ“', made.indexOf('Съставил: Управител Кърджали') === 0, made);
+      ok('6: Excel моделът — същото', t.w.grPresenceModel().header.compiledBy === 'Управител Кърджали');
+      // Обектът след връщането — чернова с етикета, поправката му е на екрана.
+      const m2 = env(MGR, { server: S }); await load(m2);
+      ok('5: обектът — „✎ Чернова“ + етикетът, своята поправка (ЗД)', ((m2.doc.getElementById('gr-status') || {}).textContent || '').indexOf('Чернова') >= 0 && !!m2.doc.getElementById('gr-reopened') && cellText(m2, 0, 1) === 'ЗД');
+    }
+    // 10 — без „✕ Махни“ на собствения имейл.
+    {
+      const x = boot({ modules: ['grafik-engine.js', 'grafik.js', 'admin.js'], user: ADM, data: {}, confirm: true, globals: { currentSession: 'sess.sig' } });
+      const S = makeServer(); S.beta = ['ten.tenev@temax.bg', 'sklad.k@temax.bg'];
+      x.w.fetch = function (url, init) { const r = S.handle(ADM, JSON.parse(init.body)); return Promise.resolve({ ok: r.status < 400, status: r.status, json: () => Promise.resolve(r.body) }); };
+      await x.w.grAdminLoad(); await ticks(6);
+      const rows = Array.from(x.doc.querySelectorAll('#gr-admin-card tr')).filter(tr => tr.querySelector('td'));
+      const own = rows.filter(tr => tr.cells[0].textContent === 'ten.tenev@temax.bg')[0], other = rows.filter(tr => tr.cells[0].textContent === 'sklad.k@temax.bg')[0];
+      ok('10: своят имейл — без „✕ Махни“', !!own && !btn(own, 'Махни') && own.textContent.indexOf('ти') >= 0);
+      ok('10: чуждият — с „✕ Махни“', !!other && !!btn(other, 'Махни'));
+    }
+    // 11 — една иконка: 📆.
+    {
+      const x = env(MGR); await load(x);
+      const title = (x.doc.querySelector('#mod-grafik .pg-title') || {}).textContent || '';
+      ok('11: заглавието — „📆 Работен график“', title.indexOf('📆 Работен график') === 0, title);
+      ok('11: бутонът — „📆 График“; без 📅 и 🗓️ в модула', !!btn(mod(x), '📆 График') && mod(x).textContent.indexOf('📅') < 0 && mod(x).textContent.indexOf('🗓️') < 0);
+      ok('11: табът в лентата — „📆“', ((x.doc.getElementById('tab-grafik') || {}).textContent || '').indexOf('📆') >= 0);
+    }
+  }
 
   report();
 })();
