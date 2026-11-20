@@ -15,5 +15,7 @@
   { "file": "Клиентски-заявки-обекти.pdf", "path": "instrukcii/klientski-obekti.pdf", "title": "Клиентски — обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
   { "file": "Клиентски-заявки-складове.pdf", "path": "instrukcii/klientski-skladove.pdf", "title": "Клиентски — складове", "category": "Само за офиса", "description": "Кратка инструкция за складове" },
   { "file": "Клиентски-заявки-снабдяване.pdf", "path": "instrukcii/klientski-snabdyavane.pdf", "title": "Клиентски — снабдяване", "category": "Само за офиса", "description": "Кратка инструкция за Снабдяването" },
-  { "file": "Клиентски-заявки-инструкция.pdf", "path": "instrukcii/klientski-palna.pdf", "title": "Клиентски — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" }
+  { "file": "Клиентски-заявки-инструкция.pdf", "path": "instrukcii/klientski-palna.pdf", "title": "Клиентски — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
+  { "file": "График-ТРЗ.pdf", "path": "instrukcii/grafik-trz.pdf", "title": "График — ТРЗ", "category": "Само за офиса", "description": "Кратка инструкция за ТРЗ" },
+  { "file": "График-инструкция.pdf", "path": "instrukcii/grafik-palna.pdf", "title": "График — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" }
 ]
