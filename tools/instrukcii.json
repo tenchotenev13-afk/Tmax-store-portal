@@ -9,5 +9,7 @@
   { "file": "Клиентски-заявки-в-товарния-лист-обекти.pdf", "path": "instrukcii/kz-tovaren-list-obekti.pdf", "title": "Транспорт — Товарни листи — Клиентски заявки: обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
   { "file": "Клиентски-заявки-в-товарния-лист-инструкция.pdf", "path": "instrukcii/kz-tovaren-list-palna.pdf", "title": "Транспорт — Товарни листи — Клиентски заявки: пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
   { "file": "Трансфери-обекти.pdf", "path": "instrukcii/transferi-obekti.pdf", "title": "Транспорт — Трансфери — обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
-  { "file": "Трансфери-инструкция.pdf", "path": "instrukcii/transferi-palna.pdf", "title": "Транспорт — Трансфери — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" }
+  { "file": "Трансфери-инструкция.pdf", "path": "instrukcii/transferi-palna.pdf", "title": "Транспорт — Трансфери — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
+  { "file": "Транспорт-обекти.pdf", "path": "instrukcii/transport-obekti.pdf", "title": "Транспорт — Заявки — обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
+  { "file": "Транспорт-инструкция.pdf", "path": "instrukcii/transport-palna.pdf", "title": "Транспорт — Заявки — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" }
 ]
