@@ -134,6 +134,7 @@ const TESTS = [
   'razliki-etap6v3.test.js',
   'razliki-nalichnost-opravena.test.js',
   'razliki-etap7a.test.js',
+  'razliki-store-delete-report.test.js',
   'razliki-etap7b.test.js',
   'diff-report-no-document.test.js',
   'docs-office-only.test.js',

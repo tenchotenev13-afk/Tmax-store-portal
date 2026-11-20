@@ -2679,6 +2679,110 @@ function sdDeleteReportFiles(reportId, urls){
   });
 }
 
+/* ── ОБЕКТЪТ ТРИЕ ЦЯЛАТА СИ БЛАНКА ── (решение А на Тенчо, 19.11.2026;
+   Кърджали, 13.11: подадена бланка, после намерена входящата). Позволено,
+   докато НИКОЙ не е действал по нея. Без схема — бланката се изтрива, не се
+   маркира. Без известие: по нея никой не е действал. ЕДНО правило за бутона
+   и за свежата проверка точно преди триенето (sdStoreReportDeletable).
+     rep    — бланката; lines — всичките ѝ редове; swaps — размените (масив,
+     филтрират се по редовете); notes — storno_notes с report_id = rep.id. */
+var SD_STORE_DEL_REPORT_MS = 72*3600*1000;
+function sdLineUntouchedForStoreReport(l, swaps){
+  if(!l) return false;
+  if(l.status!=='new' || l.type) return false;
+  if(l.warehouse_response || l.store_response) return false;
+  /* completed_by/_at вървят със status≠'new'; тук — предпазител. */
+  if(l.completed_by || l.completed_at) return false;
+  if(sdLineTouchedByOthers(l)) return false;
+  var id = String(l.id);
+  if((swaps||[]).some(function(s){ return String(s.from_line_id)===id || String(s.to_line_id)===id; })) return false;
+  return true;
+}
+function sdStoreReportDeletable(rep, lines, swaps, notes){
+  if(!rep || !currentUser) return false;
+  if(currentUser.role==='admin') return false; /* admin си има своя бутон */
+  if(!canEditSD() || sdIsCOViewer()) return false;
+  if(isCentralOfficeUser() || isLogisticsWarehouseUser()) return false;
+  if(currentUser.store_name!==rep.store_name) return false;
+  /* Най-много 3 денонощия от подаването (решение на Тенчо 19.11.2026: без
+     срок бутонът излизаше и на стари бланки, които само чакат склада).
+     Точно 72 ч — позволено. Без created_at / невалидна дата — без бутон. */
+  var subMs = rep.created_at ? Date.parse(rep.created_at) : NaN;
+  if(isNaN(subMs) || Date.now() - subMs > SD_STORE_DEL_REPORT_MS) return false;
+  /* Сторното е само за четене за обекта (isWrongReceiptReadOnly). */
+  if(rep.direction==='wrong_receipt') return false;
+  if(rep.reviewed || rep.email_skipped_at) return false;
+  if((rep.direction||'supplier')==='supplier' && rep.email_sent_at) return false;
+  /* Съобщение от счетоводството, свързано с бланката — офисът е действал. */
+  if((notes||[]).some(function(n){ return String(n.report_id)===String(rep.id); })) return false;
+  /* Бланка без редове (Троян, 16.09) — позволено. */
+  return (lines||[]).every(function(l){ return canEditSD(l) && sdLineUntouchedForStoreReport(l, swaps); });
+}
+function sdCanStoreDeleteReport(rep){
+  if(!rep) return false;
+  var lines = (sdData||[]).filter(function(x){ return String(x.report_id)===String(rep.id); });
+  return sdStoreReportDeletable(rep, lines, sdSwaps, sdNotes);
+}
+function sdStoreDeleteReport(reportId){
+  var rep = diffReports.find(function(x){ return String(x.id)===String(reportId); });
+  if(!rep){ toast('Бланката вече я няма — списъкът е опреснен','#64748b'); loadStockDiff(); return; }
+  if(!sdCanStoreDeleteReport(rep)){ toast('Някой вече е действал по бланката — не може да се изтрие','#dc2626'); loadStockDiff(); return; }
+  closeSDStoreDelModal();
+  var h = '<div class="bov open" id="sdsd-ov"><div class="bmod" style="width:460px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">🗑 Изтриване на бланката</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+esc(rep.store_name||'')+' · '+esc(rep.counterpart||'')+
+      (rep.document_number?' · Док. '+esc(rep.document_number):'')+' · '+fmtDate(rep.doc_date)+'</div>'+
+    '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:9px 12px;font-size:12.5px;color:#991b1b;">Бланката и снимките ѝ ще бъдат изтрити окончателно. Ползвайте само ако е подадена по грешка.</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">'+
+    '<button onclick="closeSDStoreDelModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button id="sdsd-go" data-rid="'+rep.id+'" onclick="submitSDStoreDeleteReport(this.dataset.rid)" style="border:none;background:#dc2626;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">🗑 Изтрий</button>'+
+    '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', h);
+}
+function closeSDStoreDelModal(){ var el=document.getElementById('sdsd-ov'); if(el) el.remove(); }
+/* Свежа проверка в базата точно преди триенето: складът/офисът може да е
+   отговорил, докато модалът е бил отворен. Провал при четенето → нищо не се
+   трие. Пътят на самото триене е общият с admin (sdDeleteReportFiles). */
+function submitSDStoreDeleteReport(reportId){
+  var btn = document.getElementById('sdsd-go');
+  if(btn){ if(btn.disabled) return; btn.disabled = true; }
+  var rid = encodeURIComponent(reportId);
+  var fresh = {};
+  return Promise.all([
+    sbGetOk('differences_reports', 'id=eq.'+rid),
+    sbGetOk('stock_differences', 'report_id=eq.'+rid)
+  ]).then(function(res){
+    if(!res[0].ok || !res[1].ok){ return { err: (!res[0].ok ? res[0] : res[1]) }; }
+    fresh.rep = res[0].rows[0] || null;
+    fresh.lines = res[1].rows;
+    if(!fresh.rep) return { gone: true };
+    var ids = fresh.lines.map(function(l){ return l.id; }).join(',');
+    return Promise.all([
+      ids ? sbGetOk('stock_diff_swaps', 'or=(from_line_id.in.('+ids+'),to_line_id.in.('+ids+'))') : Promise.resolve({ ok:true, rows:[] }),
+      sbGetOk('storno_notes', 'select=id,report_id&report_id=eq.'+rid)
+    ]).then(function(r2){
+      if(!r2[0].ok || !r2[1].ok) return { err: (!r2[0].ok ? r2[0] : r2[1]) };
+      fresh.swaps = r2[0].rows; fresh.notes = r2[1].rows;
+      return {};
+    });
+  }).then(function(st){
+    if(st.err){
+      closeSDStoreDelModal();
+      toast('⚠️ Бланката НЕ е изтрита — проверката не се зареди: '+sbErrMsg(st.err),'#dc2626');
+      return;
+    }
+    if(st.gone){ closeSDStoreDelModal(); toast('Бланката вече я няма — списъкът е опреснен','#64748b'); loadStockDiff(); return; }
+    if(!sdStoreReportDeletable(fresh.rep, fresh.lines, fresh.swaps, fresh.notes)){
+      closeSDStoreDelModal();
+      toast('Някой вече е действал по бланката — не може да се изтрие','#dc2626');
+      loadStockDiff();
+      return;
+    }
+    closeSDStoreDelModal();
+    return sdDeleteReportFiles(fresh.rep.id, sdReportFileUrls(fresh.rep, fresh.lines));
+  });
+}
+
 /* ── МОДАЛ ── */
 function sdModalHtml() {
   var r = sdEditId ? (sdData.find(function(x){return x.id===sdEditId;})||{}) : {};
@@ -4268,6 +4372,7 @@ function renderDiffReportsSection(){
        (canSendDiffEmail()&&rep.direction!=='wrong_receipt'?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
        (canSendDiffEmail()&&rep.reviewed&&rep.email_pending?'<button data-rid="'+rep.id+'" onclick="sdSkipDiffEmail(this.dataset.rid)" title="Бланката е решена — слиза долу без имейл" style="border:1px solid #a7f3d0;background:#ecfdf5;color:#047857;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✓ Без имейл</button>':'')+
        (sdCanDeleteReport()?'<button data-rid="'+rep.id+'" onclick="sdDeleteReport(this.dataset.rid)" title="Изтрий ЦЯЛАТА бланка — редове и файлове, необратимо" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Изтрий бланката</button>':'')+
+       (sdCanStoreDeleteReport(rep)?'<button class="sd-store-del-rep" data-rid="'+rep.id+'" onclick="sdStoreDeleteReport(this.dataset.rid)" title="Изтрий бланката — само ако е подадена по грешка" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Изтрий бланката</button>':'')+
        '</div>';
     h+='</div>';
     /* Лента на прогреса - показва се само докато бланката е започната, но
