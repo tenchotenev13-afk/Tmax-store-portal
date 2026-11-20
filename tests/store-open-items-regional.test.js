@@ -34,6 +34,18 @@
      Р8 (v28) без reqScope — заявка между два обекта на регионален и при
          изпълнителя: пада 3б.
 
+   v29 (20.11.2026) — 6: обект БЕЗ незавършено остава в подзаглавието и в
+   таблицата („— няма незавършено", нулите в сиво), без лента и тяло; всички
+   празни → без писмо (bez_nishto); detail „N реда · M обекта" — M само с
+   редове; dry_run obekti_prazni. Мутации (20.11.2026) — всяка СЪБАРЯ теста:
+     Р9  празният обект изпада от таблицата: пада 6;
+     Р10 празният получава лента (без filter в soirHtml): пада 3 и 6;
+     Р11 без „— няма незавършено" (SOIR_EMPTY_NOTE = ''): пада 6;
+     Р12 подзаглавието само с пълните обекти: пада 6;
+     Р13 detail брои всички обекти (p.all.length): пада 6;
+     Р14 писмо и когато всички обекти са празни: пада 1 и 2 (и др.).
+   „чака" в Разлики — tests/store-open-items.test.js, 7г (мутации там).
+
    Пускане:  node tests/store-open-items-regional.test.js .
 */
 'use strict';
@@ -216,8 +228,10 @@ const mailTo = (L, em) => L.mails().filter(m => [].concat(m.body.to).join(',') =
     ok('А: източникът е regional+extra, обектите — Ловеч, Сливен, Троян (без склада)', (by['reg.a@temax.bg'] || {}).source === 'regional+extra' &&
       JSON.stringify((by['reg.a@temax.bg'] || {}).obekti_vsichki) === JSON.stringify([LV, SL, TR]), JSON.stringify(by['reg.a@temax.bg']));
     ok('Б: Кърджали, Ловеч — застъпването в Ловеч е и при двамата', st('reg.b@temax.bg') === [KJ, LV].join(','), st('reg.b@temax.bg'));
-    ok('Тенчо (soi_regional_extra): Кърджали; Раднево без редове — пропуснат', st('ten.tenev@temax.bg') === KJ &&
-      JSON.stringify((by['ten.tenev@temax.bg'] || {}).obekti_vsichki) === JSON.stringify([KJ, RA]), JSON.stringify(by['ten.tenev@temax.bg']));
+    ok('Тенчо (soi_regional_extra): Кърджали; Раднево без редове — не е в obekti, а в obekti_prazni (v29)', st('ten.tenev@temax.bg') === KJ &&
+      JSON.stringify((by['ten.tenev@temax.bg'] || {}).obekti_vsichki) === JSON.stringify([KJ, RA]) &&
+      JSON.stringify((by['ten.tenev@temax.bg'] || {}).obekti_prazni) === JSON.stringify([RA]), JSON.stringify(by['ten.tenev@temax.bg']));
+    ok('А и Б: obekti_prazni = [] (всички с редове)', JSON.stringify((by['reg.a@temax.bg'] || {}).obekti_prazni) === '[]' && JSON.stringify((by['reg.b@temax.bg'] || {}).obekti_prazni) === '[]');
     ok('В (само Монтана, без редове) — без писмо, в bez_nishto', !by['reg.c@temax.bg'] && (d.bez_nishto || []).indexOf('reg.c@temax.bg') >= 0, JSON.stringify(d.bez_nishto));
     ok('неактивна / без обекти / само notify_groups „regional" — вън', !by['reg.off@temax.bg'] && !by['reg.empty@temax.bg'] && !by['grp.only@temax.bg'] &&
       (d.bez_nishto || []).every(e => ['reg.off@temax.bg', 'reg.empty@temax.bg', 'grp.only@temax.bg'].indexOf(e) < 0), JSON.stringify(Object.keys(by)));
@@ -283,7 +297,8 @@ const mailTo = (L, em) => L.mails().filter(m => [].concat(m.body.to).join(',') =
     const rowOk = pa.obekti.every(o => regA.indexOf('>' + o.obekt + '</td>' + ['zadachi', 'zayavki', 'razliki'].map(k => { const n = cnt(o, k); return '<td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #F3F4F6;text-align:center;color:' + (n ? '#1f2937' : '#9CA3AF') + ';">' + n + '</td>'; }).join('') + '</tr>') > 0);
     ok('v28: таблицата — по ред на обект (Ловеч / Сливен / Троян), числата = секциите', rowOk && regA.indexOf('>Обект</th>') > 0 && regA.indexOf('>Обект</th>') < regA.indexOf('<!--soi-body-->'), JSON.stringify(pa.obekti));
     const tenev = (mailTo(L, 'ten.tenev@temax.bg') || { body: { html: '' } }).body.html;
-    ok('Тенчо: само Кърджали, Раднево (без редове) го няма', tenev.indexOf('>' + KJ + '</div>') > 0 && tenev.indexOf(RA) < 0);
+    ok('Тенчо: лента само за Кърджали; Раднево (без редове) — без лента и без тяло (v29)', tenev.indexOf('>' + KJ + '</div><!--soi-body-->') > 0 &&
+      tenev.indexOf('>' + RA + '</div>') < 0 && tenev.split('<!--soi-body-->').length - 1 === 1);
     /* Пряко: soiPartsFor е единственият път (същият обект → същото тяло). */
     const loaded = await L.ctx.soiLoadAll(L.ctx.createClient(), L.ctx.bgNow(new L.ctx.Date()));
     const own = L.ctx.soiStoreBody(L.ctx.soiPartsFor(loaded, TR).parts);
@@ -406,6 +421,49 @@ const mailTo = (L, em) => L.mails().filter(m => [].concat(m.body.to).join(',') =
     const L = load(db({ users: clone(USERS).filter(u => !u.is_regional), app_settings: [] }), MON);
     const r = (await L.call({ topic_key: 'store_open_items_regional' })).result || {};
     ok('без регионални и без допълнителни → skipped, нищо не тръгва', /Няма регионални/.test(r.skipped || '') && L.posts.length === 0, JSON.stringify(r));
+  }
+
+  section('6. v29 — обект без незавършено в писмото на регионалния');
+  {
+    /* Тенчо: Кърджали (с редове) + Раднево (без) — случаят от 20.11.2026. */
+    const d = db();
+    const L = load(d, MON);
+    await L.call({ topic_key: 'store_open_items_regional' });
+    const tMails = L.mails().filter(m => [].concat(m.body.to).join() === 'ten.tenev@temax.bg');
+    const h = (tMails[0] || { body: { html: '' } }).body.html;
+    ok('Тенчо: точно едно писмо', tMails.length === 1, String(tMails.length));
+    ok('подзаглавието изброява и двата: „16.11.2026 · Кърджали, Раднево"', h.indexOf('>16.11.2026 · ' + KJ + ', ' + RA + '</p>') > 0);
+    const tbl = (h.match(/<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-bottom:6px;">[\s\S]*?<\/table>/) || [''])[0];
+    const tdN = n => '<td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #F3F4F6;text-align:center;color:' + (n ? '#1f2937' : '#9CA3AF') + ';">' + n + '</td>';
+    const note = '<span style="font-weight:400;color:#9CA3AF;"> — няма незавършено</span>';
+    ok('таблицата: и двата обекта, Кърджали преди Раднево', tbl.indexOf('>' + KJ + '</td>') > 0 && tbl.indexOf('>' + RA + note + '</td>') > tbl.indexOf('>' + KJ + '</td>'), tbl.slice(0, 200));
+    ok('Раднево: „— няма незавършено" (сиво, нормален шрифт) и три сиви нули', tbl.indexOf('>' + RA + note + '</td>' + tdN(0) + tdN(0) + tdN(0) + '</tr>') > 0);
+    ok('Кърджали: без бележката „няма незавършено"', tbl.indexOf('>' + KJ + note) < 0 && tbl.split('няма незавършено').length - 1 === 1);
+    ok('лента и тяло само за Кърджали; за Раднево — нито лента, нито тяло', h.indexOf('>' + KJ + '</div><!--soi-body-->') > 0 && h.indexOf('>' + RA + '</div>') < 0 &&
+      h.split('<!--soi-body-->').length - 1 === 1);
+    const lg = d.notification_log.filter(x => x.ref_key === '2026-11-16|regional|ten.tenev@temax.bg')[0] || {};
+    ok('detail „… реда · 1 обекта" (само обектите с редове)', / реда · 1 обекта$/.test(lg.detail || ''), lg.detail);
+    /* А — всичките три обекта с редове: без бележка. */
+    const hA = (mailTo(L, 'reg.a@temax.bg') || { body: { html: '' } }).body.html;
+    ok('А (всички с редове): „няма незавършено" го няма', hA.indexOf('няма незавършено') < 0 && hA.length > 1000);
+  }
+  {
+    /* Писмото на обекта — непроменено: празен обект там писмо не получава. */
+    const Ls = load(db(), MON);
+    const rs = (await Ls.call({ topic_key: 'store_open_items' })).result || {};
+    ok('store_open_items: Раднево/Монтана — без писмо, никъде „няма незавършено"', Ls.mails().every(m => m.body.html.indexOf('няма незавършено') < 0) &&
+      Ls.mails().every(m => m.body.subject.indexOf(MO) < 0), JSON.stringify(rs.bez_redove));
+  }
+  {
+    /* Регионален с ДВА обекта, и двата празни → нула писма, bez_nishto = 1. */
+    const users = clone(USERS).filter(u => !u.is_regional).concat([U('reg.z@temax.bg', 'Ж. Празни', 'accounting', 'Централен офис', { is_regional: true, assigned_stores: [MO, RA] })]);
+    const d = db({ users: users, app_settings: [] });
+    const L = load(d, MON);
+    const r = (await L.call({ topic_key: 'store_open_items_regional' })).result || {};
+    ok('всички обекти празни → нула писма, bez_nishto = 1, лог празен', L.mails().length === 0 && r.bez_nishto === 1 && r.sent_emails === 0 && d.notification_log.length === 0, JSON.stringify(r));
+    const Ld = load(db({ users: users, app_settings: [] }), MON);
+    const dd = (await Ld.call({ topic_key: 'store_open_items_regional', dry_run: true })).result || {};
+    ok('dry_run: regionalni 0, bez_nishto = [reg.z]', dd.regionalni === 0 && JSON.stringify(dd.bez_nishto) === '["reg.z@temax.bg"]', JSON.stringify(dd));
   }
 
   report();

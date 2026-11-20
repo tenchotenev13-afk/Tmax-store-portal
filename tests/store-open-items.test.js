@@ -108,6 +108,11 @@
    19.11.2026 — v26: пращането е изнесено в soiSendAll (общо със
    store_open_items_regional, tests/store-open-items-regional.test.js);
    М17, М19, М22 пуснати отново върху него — събарят този тест.
+   v29 (20.11.2026) — 7г: възрастта в Разлики „от дд.мм · чака N работни дни"
+   („чака 1 работен ден"; при 0 — само „от дд.мм"), пряко през soiDiffsFor.
+   Мутации (20.11.2026) — всяка СЪБАРЯ теста:
+     М25 без „чака": пада 7б и 7г;
+     М26 „чака 0 работни дни" при k = 0: пада 7г.
 
    Пускане:  node tests/store-open-items.test.js .
 */
@@ -698,7 +703,7 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     ok('Троян: taken / capitalized / completed / received / not_invoiced / Липса / без тип — не', ['D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'].every(x => tr.indexOf('Артикул ' + x + '<') < 0 && tr.indexOf('Артикул ' + x + ' ') < 0));
     ok('Троян: ред на друг обект (Ловеч, E1) — не', tr.indexOf('Артикул E1') < 0);
     ok('най-старите първи: D10 (05.11) преди D1 (10.11)', tr.indexOf('Артикул D10') > 0 && tr.indexOf('Артикул D10') < tr.indexOf('Артикул D1 '));
-    ok('ред: SAP, доставчик, поръчка, к-во, „от 10.11 · 4 работни дни"', tr.indexOf('Артикул D1 · SAP 1001') > 0 && tr.indexOf('Доставчик: Доставчик D1 · Поръчка: PO-D1 · К-во: 2 бр · от 10.11 · 4 работни дни') > 0);
+    ok('ред: SAP, доставчик, поръчка, к-во, „от 10.11 · чака 4 работни дни" (v29)', tr.indexOf('Артикул D1 · SAP 1001') > 0 && tr.indexOf('Доставчик: Доставчик D1 · Поръчка: PO-D1 · К-во: 2 бр · от 10.11 · чака 4 работни дни') > 0);
     ok('без суми и без бутони за действие', tr.indexOf('лв') < 0 && tr.indexOf('€') < 0 && tr.indexOf('Заприходена') < 0);
     ok('Ловеч: „За връщане (13)", 10 реда и „и още 3 — вижте таб Разлики"', lv.indexOf('За връщане (13)') > 0 && lv.split('Артикул E').length - 1 === 10 && lv.indexOf('и още 3 — вижте таб Разлики') > 0, String(lv.split('Артикул E').length - 1));
     /* E1 е с подразбиращата се дата 12.11 — заедно с E12 и E13 е сред трите най-нови. */
@@ -714,6 +719,22 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
       LR.mails().length + ' ' + JSON.stringify(rr));
     ok('реален режим: адресите по обект (Сливен — само с разлики — едно писмо)', TOS(LR) === 'kardzhali@temax.bg,test.kardzhali@gmail.com | lovech@temax.bg | sliven@temax.bg | troyan@temax.bg,sklad.troyan@temax.bg', TOS(LR));
     ok('реален режим: всички POST-ове са към resend-email (email), без друг път', LR.posts.every(p => p.body.type === 'email') && LR.posts.length === 4, JSON.stringify(LR.posts.map(p => p.body.type)));
+  }
+
+  section('7г. v29 — възрастта на реда в Разлики: „чака N работни дни"');
+  {
+    /* Пряко през soiDiffsFor (общата за двете писма). Днес = петък 20.11.2026;
+       31.08 → 57 работни дни (случаят от писмото на Тенчо за 20.11), 19.11 → 1, 20.11 → 0. */
+    const L = load(db(), MON);
+    const meta = (since, today) => {
+      const h = L.ctx.soiDiffsFor({ today: today, rows: [SD('Z1', { resolved_at: since + 'T08:00:00Z' })] }, TR).html;
+      const m = /<div style="font-size:12px;color:#6b7280;line-height:1\.5;margin-top:2px;">([^<]*)<\/div>/.exec(h);
+      return m ? m[1] : '';
+    };
+    const m57 = meta('2026-08-31', '2026-11-20'), m1 = meta('2026-11-19', '2026-11-20'), m0 = meta('2026-11-20', '2026-11-20');
+    ok('31.08 → „от 31.08 · чака 57 работни дни"', /· от 31\.08 · чака 57 работни дни$/.test(m57), m57);
+    ok('19.11 → „от 19.11 · чака 1 работен ден" (единствено число)', /· от 19\.11 · чака 1 работен ден$/.test(m1) && m1.indexOf('работни') < 0, m1);
+    ok('k = 0 → само „от 20.11", без „чака"', /· от 20\.11$/.test(m0) && m0.indexOf('чака') < 0 && m0.indexOf('работ') < 0, m0);
   }
 
   section('7в. v24 — синхрон на копието с stock-differences.js');

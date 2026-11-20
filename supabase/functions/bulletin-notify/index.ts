@@ -14,6 +14,17 @@
 //   store_open_items_regional — Незавършено за вашите обекти: по едно писмо
 //                    на регионален, част на обект (v26)
 //
+// v29 (20.11.2026, след v28; сесия soi-prazen-obekt) — две неща:
+//   (1) store_open_items_regional: обект на регионалния БЕЗ незавършено вече не
+//   изпада — остава в подзаглавието и в таблицата (soirSummaryTable: нулите в
+//   сиво, „— няма незавършено" след името), без лента и тяло. Писмо пак няма,
+//   ако всички обекти са празни (bez_nishto). detail „N реда · M обекта" — M
+//   е броят обекти С редове (непроменено). dry_run: obekti_prazni по
+//   регионален. Повод: в писмото на Тенчо за 20.11 Кърджали липсваше изцяло.
+//   (2) soiDiffsFor (общ за двете писма): „от 31.08 · чака 57 работни дни" /
+//   „чака 1 работен ден"; при 0 дни — само „от 31.08". Писмото на обекта —
+//   иначе непроменено.
+//
 // v28 (19.11.2026, след v27 от minusi-open-diff-notify) — store_open_items и
 //   store_open_items_regional изглеждат
 //   като останалите отчети (решение на Тенчо 19.11): обвивка soiEmailShell —
@@ -3251,7 +3262,7 @@ function soiDiffsFor(data: any, store: string) {
     const main = esc(r.material_name || '—') + (r.material_code ? ' · SAP ' + esc(r.material_code) : '');
     const meta = [r.supplier ? 'Доставчик: ' + esc(r.supplier) : '', r.order_number ? 'Поръчка: ' + esc(r.order_number) : '',
       qty ? 'К-во: ' + esc(qty) : '',
-      since ? 'от ' + esc(bgDate(since).slice(0, 5)) + (k > 0 ? ' · ' + k + (k === 1 ? ' работен ден' : ' работни дни') : '') : ''].filter(Boolean).join(' · ');
+      since ? 'от ' + esc(bgDate(since).slice(0, 5)) + (k > 0 ? ' · чака ' + k + (k === 1 ? ' работен ден' : ' работни дни') : '') : ''].filter(Boolean).join(' · ');
     return soiRow(main, meta);
   };
   let html = '';
@@ -3330,15 +3341,18 @@ function soiChip(text: string, on: boolean): string {
 function soiSummaryChips(parts: any[]): string {
   return '<div style="margin-bottom:4px;">' + parts.map((p) => soiChip(esc(soiSumLabel(p.key)) + ' ' + p.n, p.n > 0)).join('') + '</div>';
 }
-/* Регионален: малка таблица — по ред на обект. */
-function soirSummaryTable(blocks: { store: string; parts: any[] }[]): string {
+/* Регионален: малка таблица — по ред на обект. v29: ВСИЧКИ обекти на
+   регионалния (blocks идва с празните); празният — нулите в сиво и
+   „— няма незавършено" след името (сиво, нормален шрифт). */
+const SOIR_EMPTY_NOTE = '<span style="font-weight:400;color:#9CA3AF;"> — няма незавършено</span>';
+function soirSummaryTable(blocks: { store: string; parts: any[]; total?: number }[]): string {
   if (!blocks.length) return '';
   const keys = blocks[0].parts.map((p: any) => p.key);
   const th = 'padding:6px 8px;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.3px;border-bottom:1px solid #E5E7EB;';
   const td = 'padding:6px 8px;font-size:13px;border-bottom:1px solid #F3F4F6;';
   return '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-bottom:6px;">'
     + '<tr><th style="' + th + 'text-align:left;">Обект</th>' + keys.map((k: string) => '<th style="' + th + 'text-align:center;">' + esc(soiSumLabel(k)) + '</th>').join('') + '</tr>'
-    + blocks.map((b) => '<tr><td style="' + td + 'font-weight:700;color:#1E2761;">' + esc(b.store) + '</td>'
+    + blocks.map((b) => '<tr><td style="' + td + 'font-weight:700;color:#1E2761;">' + esc(b.store) + (b.total ? '' : SOIR_EMPTY_NOTE) + '</td>'
       + b.parts.map((p: any) => '<td style="' + td + 'text-align:center;color:' + (p.n ? '#1f2937' : '#9CA3AF') + ';">' + p.n + '</td>').join('') + '</tr>').join('')
     + '</table>';
 }
@@ -3501,7 +3515,8 @@ async function runStoreOpenItems(supabase: any, topic: any, bg: any, dryRun: boo
      · notification_overrides 'exclude' за темата се зачита.
    Матрица не трябва: превключвателят е notification_topics.active.
 
-   Обектите на получателя — по азбучен ред; обект без редове се пропуска;
+   Обектите на получателя — по азбучен ред; обект без редове (v29) остава в
+   подзаглавието и в таблицата („— няма незавършено"), но без лента и тяло;
    нищо за всички обекти → без писмо. Лог „<дата>|regional|<имейл>".
    Пращането — soiSendAll (едно писмо на регионален, повторен опит при
    таван, last_run_at не се записва при неуспешни, test_email). */
@@ -3551,9 +3566,12 @@ async function soirRecipients(supabase: any, topicKey: string) {
   list.sort((a, b) => String(a.name).localeCompare(String(b.name), 'bg'));
   return { list: list, warnings: warnings };
 }
-function soirHtml(name: string, blocks: { store: string; parts: any[] }[], bg: ReturnType<typeof bgNow>): string {
+/* v29: blocks — ВСИЧКИ обекти на регионалния (и празните, total 0):
+   подзаглавието и таблицата ги изброяват всички; лента и тяло — само
+   обектите с редове. */
+function soirHtml(name: string, blocks: { store: string; parts: any[]; total: number }[], bg: ReturnType<typeof bgNow>): string {
   return soiEmailShell('📋 Незавършено за вашите обекти', esc(bgDate(bg.dateStr)) + ' · ' + blocks.map((b) => esc(b.store)).join(', '),
-    soirSummaryTable(blocks) + blocks.map((b) => soirStoreBand(b.store) + soiStoreBody(b.parts)).join(''), SOI_FOOTER);
+    soirSummaryTable(blocks) + blocks.filter((b) => b.total > 0).map((b) => soirStoreBand(b.store) + soiStoreBody(b.parts)).join(''), SOI_FOOTER);
 }
 async function runStoreOpenItemsRegional(supabase: any, topic: any, bg: any, dryRun: boolean) {
   if (!isBgWorkday(bg.dateStr)) {
@@ -3568,13 +3586,17 @@ async function runStoreOpenItemsRegional(supabase: any, topic: any, bg: any, dry
   const plan: any[] = [];
   const empty: string[] = [];
   for (const r of rec.list) {
-    const blocks: any[] = [];
+    /* v29: all — всички обекти (за таблицата и подзаглавието); blocks — само
+       с редове (ленти, тела, бройки, detail). */
+    const all: any[] = [];
     for (const store of r.stores) {
       const pf = soiPartsFor(loaded, store, r.stores);
-      if (pf.total) blocks.push({ store: store, parts: pf.parts, total: pf.total });
+      all.push({ store: store, parts: pf.parts, total: pf.total });
     }
+    const blocks = all.filter((b) => b.total > 0);
     if (!blocks.length) { empty.push(r.email); continue; }
-    plan.push({ email: r.email, name: r.name, sources: r.sources, stores: r.stores, blocks: blocks,
+    plan.push({ email: r.email, name: r.name, sources: r.sources, stores: r.stores, blocks: blocks, all: all,
+      prazni: all.filter((b) => !b.total).map((b) => b.store),
       total: blocks.reduce((a, b) => a + b.total, 0) });
   }
 
@@ -3582,7 +3604,7 @@ async function runStoreOpenItemsRegional(supabase: any, topic: any, bg: any, dry
     return { topic: topic.key, dry_run: true, regionalni: plan.length, bez_nishto: empty,
       zadachi_skip: (loaded.zadachi && loaded.zadachi.skip) || null, warnings: rec.warnings,
       planned: plan.map((p) => ({ email: p.email, name: p.name, source: p.sources.join('+'), obekti_vsichki: p.stores,
-        redove: p.total, obekti: p.blocks.map((b: any) => {
+        obekti_prazni: p.prazni, redove: p.total, obekti: p.blocks.map((b: any) => {
           const row: any = { obekt: b.store, redove: b.total };
           for (const part of b.parts) row[part.key] = part.counts;
           return row;
@@ -3593,7 +3615,7 @@ async function runStoreOpenItemsRegional(supabase: any, topic: any, bg: any, dry
     key: p.name, ref: bg.dateStr + '|regional|' + soiNorm(p.email), to: [p.email],
     banner: esc(p.name) + ' &lt;' + esc(p.email) + '&gt; — обекти: ' + p.blocks.map((b: any) => esc(b.store)).join(', '),
     subject: 'ТеМАХ — Незавършено за вашите обекти (' + bgDate(bg.dateStr).slice(0, 5) + ')',
-    html: soirHtml(p.name, p.blocks, bg),
+    html: soirHtml(p.name, p.all, bg),
     detail: p.total + ' реда · ' + p.blocks.length + ' обекта',
   }));
   const r = await soiSendAll(supabase, topic, items, 'регионални');
