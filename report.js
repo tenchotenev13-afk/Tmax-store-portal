@@ -1940,7 +1940,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
     /* Отворените позиции, БЕЗ филтър по created_at - той е датата на SAP
        импорта, не възрастта на позицията (виж пресмятането по-долу). */
-    reportGetAll('goods_transit','status=in.(pending,sent)&archived_at=is.null&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name&order=id.asc'),
+    reportGetAll('goods_transit','status=in.(pending,sent)&archived_at=is.null&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name,reviewed_at,recon_at&order=id.asc'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
     sbGet('users','select=store_name&order=store_name'),
     /* Прагът за „застояла" — една заявка вътре в колектора. Функцията се
@@ -2154,20 +2154,41 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       if (isNaN(d.getTime())) return 0;
       return Math.round((refD - d) / 86400000);
     };
+    /* Застоялите се делят на три по ОТГОВОРА на получателя (решение на Тенчо
+       20.11.2026, езикът на модула — transitRecvStatus / transitAwaitsAnswer в
+       transit.js): reviewed_at или стар status 'rejected' → „недоставена";
+       иначе recon_at → „чака засечка"; иначе → „без отговор". Всеки ред е в
+       ТОЧНО една група (двете отметки → недоставена), тоест сборът на трите е
+       transitStale — то остава същото число като преди. sender_status не се
+       гледа. */
+    var transitAnswer = function(row){
+      if (row.status === 'rejected' || row.reviewed_at) return 'undelivered';
+      if (row.recon_at) return 'recon';
+      return 'noAnswer';
+    };
     var transitStale = 0;
+    var transitSplit = { noAnswer: 0, undelivered: 0, recon: 0 };
     var trMap = {};
     var transitByStore = [];
     transitOpen.forEach(function(x){
       var s = x.store_name || '—';
       var age = transitAge(x);
       var g = trMap[s];
-      if (!g) { g = { store: s, open: 0, stale: 0, oldestDays: 0 }; trMap[s] = g; transitByStore.push(g); }
+      if (!g) { g = { store: s, open: 0, stale: 0, oldestDays: 0, noAnswer: 0, undelivered: 0, recon: 0 }; trMap[s] = g; transitByStore.push(g); }
       g.open++;
-      if (age > TRANSIT_STALE_DAYS) { g.stale++; transitStale++; }
+      if (age > TRANSIT_STALE_DAYS) {
+        g.stale++; transitStale++;
+        var k = transitAnswer(x);
+        if (k === 'undelivered') { g.undelivered++; transitSplit.undelivered++; }
+        else if (k === 'recon') { g.recon++; transitSplit.recon++; }
+        else { g.noAnswer++; transitSplit.noAnswer++; }
+      }
       if (age > g.oldestDays) g.oldestDays = age;
     });
+    /* Обектите с застояли без отговор — най-отгоре; после както досега. */
     transitByStore.sort(function(a,b){
-      return b.stale - a.stale || b.oldestDays - a.oldestDays ||
+      return (b.noAnswer > 0 ? 1 : 0) - (a.noAnswer > 0 ? 1 : 0) ||
+             b.stale - a.stale || b.oldestDays - a.oldestDays ||
              String(a.store).localeCompare(String(b.store));
     });
 
@@ -2413,6 +2434,8 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       lateOrders: lateOrders, lateOrdersByStore: lateOrdersByStore,
       lateTransport: lateTransport,
       transitStale: transitStale, transitByStore: transitByStore,
+      transitNoAnswer: transitSplit.noAnswer, transitUndelivered: transitSplit.undelivered,
+      transitRecon: transitSplit.recon,
       warehousePending: warehousePending,
       warehousePendingByStore: warehousePendingByStore,
       pallets: { missing: palletsMissing, stale: palletsStale, total: storeNames.length },
@@ -2643,11 +2666,15 @@ function reportTransitListHtml(cross, scoped){
   if (!list.length) return '';
   var dayWord = function(d){ return d === 1 ? ' ден' : ' дни'; };
   var openWord = function(n){ return n === 1 ? ' отворена' : ' отворени'; };
+  /* X / Y / Z са застоялите (над прага), разделени по отговора — сборът им е
+     g.stale. Червено само „без отговор" (20.11.2026). */
   var body = list.map(function(g){
+    var na = g.noAnswer || 0, un = g.undelivered || 0, rc = g.recon || 0;
     return '<div style="padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:12px;">' +
       reportStoreLinkHtml(g.store, '#374151') +
       '<span style="color:#4b5563;"> — '+g.open+openWord(g.open)+' · '+
-      '<b style="color:'+(g.stale>0?'#C0392B':'#4b5563')+';">'+g.stale+' над 7 дни</b> · '+
+      '<b style="color:'+(na>0?'#C0392B':'#4b5563')+';">'+na+' без отговор</b> · '+
+      un+' недоставени · '+rc+' засечка · '+
       'най-старата от '+g.oldestDays+dayWord(g.oldestDays)+'</span></div>';
   }).join('');
   return '<div style="margin-top:8px;background:#FFFFFF;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">'+body+'</div>';
@@ -3162,8 +3189,16 @@ function buildCrossModuleSectionHtml(cross, scoped){
     crossMetricCard(cross.zoborot.returned,'върнати за корекция', cross.zoborot.returned>0) +
     crossMetricCard(cross.zoborot.confirmed,'потвърдени'));
 
-  h += crossModuleRow('🚚','Стока на път',
-    crossMetricCard(cross.transitStale,'застояли (>7 дни по документ)', cross.transitStale>0));
+  /* Без застояли — същата една карта като преди. Иначе три карти по отговора
+     на получателя; прагът е в заглавието веднъж. Червена — само „без отговор"
+     (20.11.2026). */
+  h += cross.transitStale > 0
+    ? crossModuleRow('🚚','Стока на път — застояли над 7 дни по документ',
+        crossMetricCard(cross.transitNoAnswer || 0,'без отговор от обекта', (cross.transitNoAnswer || 0) > 0) +
+        crossMetricCard(cross.transitUndelivered || 0,'отбелязани недоставени') +
+        crossMetricCard(cross.transitRecon || 0,'чака засечка'))
+    : crossModuleRow('🚚','Стока на път',
+        crossMetricCard(cross.transitStale,'застояли (>7 дни по документ)', cross.transitStale>0));
   h += reportPartialHtml(cross, ['goods_transit']);
   h += reportTransitListHtml(cross, scoped);
   h += reportTransfersStaleHtml(cross);

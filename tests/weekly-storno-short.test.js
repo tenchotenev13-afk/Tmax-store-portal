@@ -133,6 +133,18 @@ function withoutDiffStale(s) {
   if (j < 0) return null;
   return s.slice(0, i) + s.slice(j + b.length);
 }
+/* От 20.11.2026 (report-transit-split) блокът „🚚 Стока на път“ при застояли е
+   три карти по отговора на получателя, а редът по обект — с трите числа.
+   Блокът (от реда „🚚 Стока на път“ до реда „📦 Палети“) се изрязва от ДВЕТЕ
+   страни точно веднъж; новият вид се пази в report-transit-split.test.js. */
+function withoutTransitBlock(s) {
+  const head = '<div style="margin-top:12px;"><div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">';
+  const a = head + '🚚 Стока на път', b = head + '📦 Палети';
+  if (typeof s !== 'string' || s.split(a).length !== 2 || s.split(b).length !== 2) return null;
+  const i = s.indexOf(a), j = s.indexOf(b);
+  if (j < i) return null;
+  return s.slice(0, i) + s.slice(j);
+}
 function withoutSection(html, sec) {
   const i = html.indexOf(sec);
   if (!sec || i < 0 || html.indexOf(sec, i + 1) >= 0) return null;
@@ -264,8 +276,10 @@ function withoutChecklistTable(newHtml, oldHtml, tbl) {
     let before0 = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
     ok('фикстурата отпреди промяната я има', !!before0);
     [rest0, before0] = withoutChecklistTable(rest0, before0, h.w.reportChecklistSectionHtml(data.cross));
-    const before = withoutDiffStale(before0);
-    const rest = withoutDiffStale(rest0);
+    const before = withoutTransitBlock(withoutDiffStale(before0));
+    const rest = withoutTransitBlock(withoutDiffStale(rest0));
+    ok('блокът „Стока на път“ е новият (три карти) и е изрязан и от двете',
+      html.indexOf('без отговор от обекта') >= 0 && !!before && !!rest);
     ok('таблицата „Необработени разлики" е изрязана и от двете (точно веднъж)', !!before && !!rest);
     if (before && rest) {
       const same = rest === before;
