@@ -46,6 +46,15 @@
      Р14 писмо и когато всички обекти са празни: пада 1 и 2 (и др.).
    „чака" в Разлики — tests/store-open-items.test.js, 7г (мутации там).
 
+   v30 (20.11.2026) — 7: колона „Транспорт" в таблицата (след „Заявки", преди
+   „Разлики"); обект с закъснял транспорт — 1, празният (отложен с минала дата
+   не е закъснял) — 0 в сиво; секцията в частта на обекта; dry_run
+   transport.zakasneli. Правилата на секцията — tests/store-open-items.test.js,
+   7д (мутации М27–М33 там). Мутации (20.11.2026) — всяка СЪБАРЯ теста:
+     Р15 без етикета „Транспорт" в SOI_SUM_LABEL: 1 ❌;
+     Р16 секцията след „Разлики": 3 ❌;
+     Р17 без филтъра по обект: 1 ❌.
+
    Пускане:  node tests/store-open-items-regional.test.js .
 */
 'use strict';
@@ -294,7 +303,7 @@ const mailTo = (L, em) => L.mails().filter(m => [].concat(m.body.to).join(',') =
     const dd = (await Ld.call({ topic_key: 'store_open_items_regional', dry_run: true })).result;
     const pa = dd.planned.filter(p => p.email === 'reg.a@temax.bg')[0];
     const cnt = (o, k) => k === 'zadachi' ? (o.zadachi || {}).zadachi : Object.values(o[k] || {}).reduce((a, x) => a + x, 0);
-    const rowOk = pa.obekti.every(o => regA.indexOf('>' + o.obekt + '</td>' + ['zadachi', 'zayavki', 'razliki'].map(k => { const n = cnt(o, k); return '<td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #F3F4F6;text-align:center;color:' + (n ? '#1f2937' : '#9CA3AF') + ';">' + n + '</td>'; }).join('') + '</tr>') > 0);
+    const rowOk = pa.obekti.every(o => regA.indexOf('>' + o.obekt + '</td>' + ['zadachi', 'zayavki', 'transport', 'razliki'].map(k => { const n = cnt(o, k); return '<td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #F3F4F6;text-align:center;color:' + (n ? '#1f2937' : '#9CA3AF') + ';">' + n + '</td>'; }).join('') + '</tr>') > 0);
     ok('v28: таблицата — по ред на обект (Ловеч / Сливен / Троян), числата = секциите', rowOk && regA.indexOf('>Обект</th>') > 0 && regA.indexOf('>Обект</th>') < regA.indexOf('<!--soi-body-->'), JSON.stringify(pa.obekti));
     const tenev = (mailTo(L, 'ten.tenev@temax.bg') || { body: { html: '' } }).body.html;
     ok('Тенчо: лента само за Кърджали; Раднево (без редове) — без лента и без тяло (v29)', tenev.indexOf('>' + KJ + '</div><!--soi-body-->') > 0 &&
@@ -437,7 +446,7 @@ const mailTo = (L, em) => L.mails().filter(m => [].concat(m.body.to).join(',') =
     const tdN = n => '<td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #F3F4F6;text-align:center;color:' + (n ? '#1f2937' : '#9CA3AF') + ';">' + n + '</td>';
     const note = '<span style="font-weight:400;color:#9CA3AF;"> — няма незавършено</span>';
     ok('таблицата: и двата обекта, Кърджали преди Раднево', tbl.indexOf('>' + KJ + '</td>') > 0 && tbl.indexOf('>' + RA + note + '</td>') > tbl.indexOf('>' + KJ + '</td>'), tbl.slice(0, 200));
-    ok('Раднево: „— няма незавършено" (сиво, нормален шрифт) и три сиви нули', tbl.indexOf('>' + RA + note + '</td>' + tdN(0) + tdN(0) + tdN(0) + '</tr>') > 0);
+    ok('Раднево: „— няма незавършено" (сиво, нормален шрифт) и четири сиви нули (v30: + Транспорт)', tbl.indexOf('>' + RA + note + '</td>' + tdN(0) + tdN(0) + tdN(0) + tdN(0) + '</tr>') > 0);
     ok('Кърджали: без бележката „няма незавършено"', tbl.indexOf('>' + KJ + note) < 0 && tbl.split('няма незавършено').length - 1 === 1);
     ok('лента и тяло само за Кърджали; за Раднево — нито лента, нито тяло', h.indexOf('>' + KJ + '</div><!--soi-body-->') > 0 && h.indexOf('>' + RA + '</div>') < 0 &&
       h.split('<!--soi-body-->').length - 1 === 1);
@@ -464,6 +473,31 @@ const mailTo = (L, em) => L.mails().filter(m => [].concat(m.body.to).join(',') =
     const Ld = load(db({ users: users, app_settings: [] }), MON);
     const dd = (await Ld.call({ topic_key: 'store_open_items_regional', dry_run: true })).result || {};
     ok('dry_run: regionalni 0, bez_nishto = [reg.z]', dd.regionalni === 0 && JSON.stringify(dd.bez_nishto) === '["reg.z@temax.bg"]', JSON.stringify(dd));
+  }
+
+  section('7. v30 — колона „Транспорт" в таблицата на регионалния');
+  {
+    /* Закъснял транспорт на Кърджали (19.11, понеделник 16.11 → петък 13.11) и
+       на Раднево — не: отложен (postponed) с минала дата. */
+    const TO = (id, over) => Object.assign({ id, store_name: KJ, customer_name: 'Клиент ' + id, bon: '00' + id, client_order_num: null,
+      product: 'Продукт ' + id, delivery: '2026-11-13', status: 'pending', awaiting_stock: false, from_store: null }, over || {});
+    const d = db({ transport_orders: [TO('T1'), TO('T2', { store_name: RA, status: 'postponed', delivery: '2026-11-10' })] });
+    const L = load(d, MON);
+    await L.call({ topic_key: 'store_open_items_regional' });
+    const h = (mailTo(L, 'ten.tenev@temax.bg') || { body: { html: '' } }).body.html;
+    const tbl = (h.match(/<table role="presentation"[\s\S]*?<\/table>/) || [''])[0];
+    const th = k => tbl.indexOf('>' + k + '</th>');
+    ok('заглавие „Транспорт" — след „Заявки", преди „Разлики"', th('Транспорт') > 0 && th('Заявки') < th('Транспорт') && th('Транспорт') < th('Разлики'), tbl.slice(0, 600));
+    const tdN = n => '<td style="padding:6px 8px;font-size:13px;border-bottom:1px solid #F3F4F6;text-align:center;color:' + (n ? '#1f2937' : '#9CA3AF') + ';">' + n + '</td>';
+    const note = '<span style="font-weight:400;color:#9CA3AF;"> — няма незавършено</span>';
+    ok('Кърджали: Транспорт 1 (тъмно), на третото място', tbl.indexOf('>' + KJ + '</td>' + tdN(1) + tdN(0) + tdN(1) + tdN(0) + '</tr>') > 0, tbl);
+    ok('Раднево (отложен с минала дата — не е закъснял): празен, Транспорт 0 в сиво', tbl.indexOf('>' + RA + note + '</td>' + tdN(0) + tdN(0) + tdN(0) + tdN(0) + '</tr>') > 0);
+    ok('в частта на Кърджали — секцията „🚚 Транспорт — закъснели (1)" с реда', h.indexOf('🚚 Транспорт — закъснели (1)') > 0 && h.indexOf('Клиент T1 · бон 00T1') > 0 && h.indexOf('Клиент T2') < 0);
+    const Ld = load(db({ transport_orders: [TO('T1'), TO('T2', { store_name: RA, status: 'postponed', delivery: '2026-11-10' })] }), MON);
+    const dd = (await Ld.call({ topic_key: 'store_open_items_regional', dry_run: true })).result || {};
+    const pt = (dd.planned || []).filter(p => p.email === 'ten.tenev@temax.bg')[0] || { obekti: [] };
+    const kj = pt.obekti.filter(o => o.obekt === KJ)[0] || {};
+    ok('dry_run: Кърджали transport = {zakasneli: 1}', JSON.stringify(kj.transport) === '{"zakasneli":1}', JSON.stringify(kj));
   }
 
   report();

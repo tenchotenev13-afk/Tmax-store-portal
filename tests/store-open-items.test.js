@@ -113,6 +113,26 @@
    Мутации (20.11.2026) — всяка СЪБАРЯ теста:
      М25 без „чака": пада 7б и 7г;
      М26 „чака 0 работни дни" при k = 0: пада 7г.
+   v30 (20.11.2026) — 7д: секция „🚚 Транспорт — закъснели" (решение на Тенчо
+   20.11 — само закъснелите): закъснял pending → вътре с „+1 работен ден"
+   (петък → понеделник = 1); днешна / утрешна доставка, postponed с минала
+   дата, awaiting_stock, done / refused / arrived, без delivery → не; най-
+   старата първа; 12 → 10 + „и още 2"; обект само с транспорт → писмо; ред
+   между „Клиентски заявки" и „Разлики", чип „Транспорт N"; ПОНЕ 1 (0 работни
+   дни → +1); грешка при четене → червеният ред, писмото тръгва, dry_run
+   greshka; синхрон soiTrIsLate === isLate (shared.js) за 192 комбинации.
+   Мутации (20.11.2026) — всяка СЪБАРЯ теста (exit 1):
+     М27 без филтъра за awaiting_stock: 5 ❌;
+     М28 postponed влиза (в soiTrIsLate): 1 ❌ — синхронът с isLate; писмото
+         не го вижда, защото заявката към базата отсява статуса (първата
+         защита);
+     М29 днешната дата се брои (<=): 6 ❌;
+     М30 „ПОНЕ 1" махнато: 1 ❌;
+     М31 без отрязването на 10: 2 ❌;
+     М32 грешката се поглъща тихо (без error): 2 ❌;
+     М33 най-новата първа: 1 ❌;
+     Р15–Р17 (етикет „Транспорт", ред на секцията, филтър по обект) — събарят
+     и този, и регионалния тест.
 
    Пускане:  node tests/store-open-items.test.js .
 */
@@ -735,6 +755,96 @@ const ids = arr => (arr || []).map(o => o.in_num).join(',');
     ok('31.08 → „от 31.08 · чака 57 работни дни"', /· от 31\.08 · чака 57 работни дни$/.test(m57), m57);
     ok('19.11 → „от 19.11 · чака 1 работен ден" (единствено число)', /· от 19\.11 · чака 1 работен ден$/.test(m1) && m1.indexOf('работни') < 0, m1);
     ok('k = 0 → само „от 20.11", без „чака"', /· от 20\.11$/.test(m0) && m0.indexOf('чака') < 0 && m0.indexOf('работ') < 0, m0);
+  }
+
+  section('7д. v30 — секция „🚚 Транспорт — закъснели"');
+  {
+    /* Понеделник 16.11.2026. Троян — граничните случаи; Сливен (само info акаунт,
+       без задачи и заявки) — 12 закъснели, само транспорт. */
+    const TO = (id, over) => Object.assign({ id, store_name: TR, customer_name: 'Клиент ' + id, bon: null, client_order_num: null,
+      product: 'Продукт ' + id, delivery: '2026-11-13', status: 'pending', awaiting_stock: false, from_store: null }, over || {});
+    const TRS = [
+      TO('T1', { bon: '0038290' }),                                                  // петък 13.11 → закъснял, +1 работен ден
+      TO('T2', { delivery: '2026-11-16' }),                                          // днес → не
+      TO('T3', { status: 'postponed', delivery: '2026-11-10' }),                     // отложен с минала дата → не
+      TO('T4', { awaiting_stock: true, delivery: '2026-11-10' }),                    // чака стока → не
+      TO('T5', { status: 'done', delivery: '2026-11-10' }),
+      TO('T6', { status: 'refused', delivery: '2026-11-10' }),
+      TO('T7', { status: 'arrived', delivery: '2026-11-10' }),
+      TO('T8', { delivery: null }),                                                  // без доставка → не
+      TO('T9', { delivery: '2026-11-10', client_order_num: 'КЗ-77', product: null, customer_name: 'Иван <b>И</b>' }), // вт 10.11 → +4, пръв
+      TO('T10', { delivery: '2026-11-17' }),                                         // утре (предстояща) → не
+    ];
+    for (let i = 1; i <= 12; i++) TRS.push(TO('S' + i, { store_name: SL, delivery: '2026-11-' + String(i).padStart(2, '0') }));
+    const Ld = load(db({ transport_orders: clone(TRS) }), MON);
+    const dr = (await Ld.call({ topic_key: 'store_open_items', dry_run: true })).result;
+    const by = {}; dr.planned.forEach(p => { by[p.obekt] = p; });
+    ok('dry_run: Троян transport = {zakasneli: 2} (T1, T9)', by[TR] && JSON.stringify(by[TR].transport) === '{"zakasneli":2}', JSON.stringify(by[TR] && by[TR].transport));
+    ok('dry_run: Сливен (само транспорт) има писмо — 12', by[SL] && by[SL].redove === 12 && JSON.stringify(by[SL].transport) === '{"zakasneli":12}' && dr.bez_redove.indexOf(SL) < 0, JSON.stringify(by[SL]));
+    ok('dry_run: Ловеч — transport 0', by[LV] && JSON.stringify(by[LV].transport) === '{"zakasneli":0}', JSON.stringify(by[LV] && by[LV].transport));
+
+    const L = load(db({ transport_orders: clone(TRS), stock_differences: clone(SD_ROWS) }), MON);
+    await L.call({ topic_key: 'store_open_items' });
+    const mail = s => (L.mails().filter(m => m.body.subject.indexOf('за ' + s + ' ') >= 0)[0] || { body: { html: '' } }).body.html;
+    const tr = mail(TR), sl = mail(SL);
+    const plain = h => h.replace(/<[^>]+>/g, ' ').replace(/ +/g, ' ');
+    ok('Троян: „🚚 Транспорт — закъснели (2)"', tr.indexOf('🚚 Транспорт — закъснели (2)') > 0);
+    ok('закъснял pending (T1): „Клиент T1 · бон 0038290" и „Продукт T1 · доставка 13.11 · +1 работен ден" (петък → понеделник = 1)',
+      tr.indexOf('Клиент T1 · бон 0038290') > 0 && plain(tr).indexOf('Продукт T1 · доставка 13.11 · +1 работен ден') > 0 && tr.indexOf('+1 работни дни') < 0);
+    ok('+N е червено (като при заявките)', tr.indexOf('<b style="color:#b91c1c;">+1 работен ден</b>') > 0);
+    ok('T9: № КЗ, без продукт, „доставка 10.11 · +4 работни дни", esc', tr.indexOf('Иван &lt;b&gt;И&lt;/b&gt; · № КЗ-77') > 0 && plain(tr).indexOf('доставка 10.11 · +4 работни дни') > 0 && tr.indexOf('<b>И</b>') < 0);
+    ok('най-старата доставка първа: T9 (10.11) преди T1 (13.11)', tr.indexOf('Клиент T1') > tr.indexOf('Иван &lt;b&gt;'));
+    ok('днешна (T2), утрешна (T10), отложена (T3), чака стока (T4), done / refused / arrived (T5–T7), без доставка (T8) — не',
+      ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T10'].every(x => tr.indexOf('Клиент ' + x + ' ') < 0 && tr.indexOf('Клиент ' + x + '<') < 0));
+    ok('ред: секцията е след „Клиентски заявки" и преди „Разлики"', tr.indexOf('🛒 Клиентски заявки') > 0 && tr.indexOf('🛒 Клиентски заявки') < tr.indexOf('🚚 Транспорт') && tr.indexOf('🚚 Транспорт') < tr.indexOf('⚖️ Разлики'));
+    ok('обобщението: чип „Транспорт 2", между „Заявки" и „Разлики"', tr.indexOf('>Транспорт 2</span>') > tr.indexOf('>Заявки 7</span>') && tr.indexOf('>Транспорт 2</span>') < tr.indexOf('>Разлики 3</span>'));
+    ok('Сливен (само транспорт): писмо с „(12)", 10 реда и „и още 2 — вижте таб Транспорт"', sl.indexOf('🚚 Транспорт — закъснели (12)') > 0 &&
+      sl.split('Клиент S').length - 1 === 10 && sl.indexOf('и още 2 — вижте таб Транспорт') > 0, String(sl.split('Клиент S').length - 1));
+    ok('Сливен: най-старите вътре (S1, S10), най-новите отрязани (S11, S12)', sl.indexOf('Клиент S1<') > 0 && sl.indexOf('Клиент S10') > 0 && sl.indexOf('Клиент S11') < 0 && sl.indexOf('Клиент S12') < 0);
+    const kj = mail(KJ);
+    ok('обект без транспорт (Кърджали): без секцията, чип „Транспорт 0" сив', kj.indexOf('🚚 Транспорт') < 0 && /color:#9CA3AF;">Транспорт 0<\/span>/.test(kj));
+  }
+  {
+    /* ПОНЕ 1: опорен ден в неделя (22.11), доставка събота 21.11 → 0 работни дни → „+1". */
+    const C = load(db(), MON).ctx;
+    const h = C.soiTransportFor({ today: '2026-11-22', rows: [{ id: 'X', store_name: TR, customer_name: 'К', delivery: '2026-11-21', status: 'pending' }] }, TR).html;
+    ok('0 работни дни → пак „+1 работен ден" (поне 1)', h.indexOf('+1 работен ден') > 0 && h.indexOf('+0') < 0, h.slice(-300));
+    ok('soiTrIsLate: днешната дата не е закъсняла, вчерашната — да', !C.soiTrIsLate({ delivery: '2026-11-16', status: 'pending' }, '2026-11-16') && C.soiTrIsLate({ delivery: '2026-11-15', status: 'pending' }, '2026-11-16'));
+  }
+  {
+    /* Грешка при четене → червен ред, писмото тръгва. */
+    const d = db({ transport_orders: [] });
+    d.__throw = (table) => table === 'transport_orders';
+    const L = load(d, MON);
+    const raw = await L.callRaw({ topic_key: 'store_open_items' });
+    const r = (await raw.json()).result || {};
+    const tr = (L.mails().filter(m => /Троян/.test(m.body.subject))[0] || { body: { html: '' } }).body.html;
+    ok('грешка при четене: 200 и трите писма тръгват', raw.status === 200 && L.mails().length === 3 && r.sent_emails === 3, raw.status + ' ' + JSON.stringify(r));
+    ok('грешка при четене: червен ред „⚠️ Транспортът не се зареди" в секцията', /color:#b91c1c;[^"]*">⚠️ Транспортът не се зареди<\/div>/.test(tr) && tr.indexOf('🚚 Транспорт — закъснели') > 0);
+    ok('грешка при четене: останалите секции — на място', tr.indexOf('🛒 Клиентски заявки (7)') > 0 && tr.indexOf('Снимки на витрината') > 0);
+    ok('грешка при четене: console.error с текста', L.errors.some(e => /store_open_items transport: boom transport_orders/.test(e)), JSON.stringify(L.errors));
+    const Ld = load(Object.assign(db({ transport_orders: [] }), { __throw: (t) => t === 'transport_orders' }), MON);
+    const dr = (await Ld.call({ topic_key: 'store_open_items', dry_run: true })).result;
+    const trd = dr.planned.filter(p => p.obekt === TR)[0] || {};
+    ok('грешка при четене: dry_run носи greshka', trd.transport && /boom transport_orders/.test(trd.transport.greshka || ''), JSON.stringify(trd.transport));
+  }
+  {
+    /* Синхрон с isLate() от shared.js (оригиналът) — опорният ден е TODAY на прозореца. */
+    const h = boot({ modules: [], user: { email: 'a@temax.bg', display_name: 'А', role: 'admin', store_name: 'Централен офис' }, data: {} });
+    const C = load(db(), MON).ctx;
+    const T = h.w.TODAY;
+    const iso = n => { const x = new Date(T.getFullYear(), T.getMonth(), T.getDate() + n); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
+    const todayISO = iso(0);
+    let n = 0; const diffs = [];
+    for (const st of ['pending', 'approved', 'sent', 'done', 'refused', 'postponed', 'arrived', null])
+      for (const dl of [null, '', iso(-30), iso(-1), iso(0), iso(1)])
+        for (const aw of [true, false, null, undefined]) {
+          const o = { status: st, delivery: dl, awaiting_stock: aw };
+          n++;
+          if (!!h.w.isLate(o) !== !!C.soiTrIsLate(o, todayISO)) diffs.push(JSON.stringify(o));
+        }
+    ok('soiTrIsLate === isLate (shared.js) за ' + n + ' комбинации статус × доставка × awaiting_stock', !diffs.length, diffs.slice(0, 3).join(' | '));
+    h.close();
   }
 
   section('7в. v24 — синхрон на копието с stock-differences.js');

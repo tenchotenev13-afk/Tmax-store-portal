@@ -14,6 +14,21 @@
 //   store_open_items_regional — Незавършено за вашите обекти: по едно писмо
 //                    на регионален, част на обект (v26)
 //
+// v30 (20.11.2026, след v29; сесия soi-transport) — ЕДНО нещо: нова секция
+//   „🚚 Транспорт — закъснели" в двете сутрешни писма (store_open_items и
+//   store_open_items_regional; решение на Тенчо 20.11 — САМО закъснелите,
+//   предстоящите не). Правилото — копие на isLate() от shared.js
+//   (soiTrIsLate): transport_orders извън done / refused / postponed /
+//   arrived, delivery попълнена и преди днес (bg.dateStr), awaiting_stock не
+//   е true; отложен с минала дата не е закъснял. Обектът — store_name. Ред:
+//   клиент · бон · № КЗ; продукт · „доставка дд.мм" · „+N работни дни"
+//   (червено, поне 1). Най-старата доставка първа, до 10 + „и още N".
+//   Секцията е след „Клиентски заявки", преди „Разлики"; „Транспорт" в
+//   обобщението и в таблицата на регионалния. Обект само с транспорт получава
+//   писмо. Грешка при четене → червен ред „⚠️ Транспортът не се зареди",
+//   писмото тръгва. dry_run: transport.zakasneli по обект. Седмичният
+//   „закъснял транспорт" в send-scheduled-report — непипнат.
+//
 // v29 (20.11.2026, след v28; сесия soi-prazen-obekt) — две неща:
 //   (1) store_open_items_regional: обект на регионалния БЕЗ незавършено вече не
 //   изпада — остава в подзаглавието и в таблицата (soirSummaryTable: нулите в
@@ -3277,10 +3292,79 @@ function soiDiffsFor(data: any, store: string) {
   return { n: n, counts: counts, html: soiBox('⚖️ Разлики (' + n + ')', html, 'amber') };
 }
 
+/* ── v30: секция „Транспорт — закъснели" (решение на Тенчо 20.11.2026) ──
+   САМО закъснелите; предстоящите доставки не влизат. Правилото е isLate() от
+   shared.js (модул, „Днес", отчети) — копие под името soiTrIsLate, сверено с
+   оригинала в tests/store-open-items.test.js („синхрон с isLate"):
+     · няма delivery → не;
+     · done / refused / postponed / arrived → не (отложен с минала дата НЕ е
+       закъснял — по решение);
+     · awaiting_stock → не (срокът се води по клиентската заявка);
+     · иначе — delivery ПРЕДИ днешната дата (bg.dateStr).
+   Клонът coWaitingSupplier() на isLate (processed + co_eta) е за клиентски
+   заявки — transport_orders няма co_eta, затова тук не е пренесен.
+   Обектът е store_name (from_store е празна навсякъде). Всеки транспорт е на
+   един обект — при регионалния дедупликация не трябва (scope не се ползва).
+   Грешка при четене → червен ред в секцията и писмото тръгва (n = 0). */
+const SOI_TR_COLS = 'id,store_name,customer_name,bon,client_order_num,product,delivery,status,awaiting_stock';
+const SOI_TR_MAX = 10;
+function soiTrIsLate(o: any, todayISO: string): boolean {
+  if (!o || !o.delivery) return false;
+  if (['done', 'refused', 'postponed', 'arrived'].indexOf(o.status) >= 0) return false;
+  if (o.awaiting_stock) return false;
+  return String(o.delivery).slice(0, 10) < todayISO;
+}
+async function soiLoadTransport(supabase: any, bg: ReturnType<typeof bgNow>) {
+  const today = bg.dateStr;
+  let rows: any[] = [];
+  try {
+    /* Страници по 1000 — таванът на PostgREST. Статусът се отсява в базата,
+       останалото — от soiTrIsLate. */
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await supabase.from('transport_orders').select(SOI_TR_COLS)
+        .not('status', 'in', '(done,refused,postponed,arrived)')
+        .order('id', { ascending: true }).range(off, off + 999);
+      if (error) throw new Error('transport_orders: ' + (error.message || String(error)));
+      rows = rows.concat(data || []);
+      if (!data || data.length < 1000) break;
+    }
+  } catch (e) {
+    const msg = (e as Error).message || String(e);
+    console.error('store_open_items transport: ' + msg);
+    return { rows: [], today: today, error: msg };
+  }
+  return { rows: rows.filter((o: any) => soiTrIsLate(o, today)), today: today };
+}
+function soiTransportFor(data: any, store: string) {
+  if (data.error) {
+    return { n: 0, counts: { zakasneli: 0, greshka: data.error },
+      html: soiBox('🚚 Транспорт — закъснели', '<div style="padding:8px 10px;font-size:13px;font-weight:700;color:#b91c1c;background:#ffffff;">⚠️ Транспортът не се зареди</div>', 'red') };
+  }
+  const mine = (data.rows || []).filter((o: any) => o.store_name === store)
+    .sort((a: any, b: any) => String(a.delivery).localeCompare(String(b.delivery)) || String(a.customer_name || '').localeCompare(String(b.customer_name || '')));
+  const n = mine.length;
+  if (!n) return { n: 0, counts: { zakasneli: 0 }, html: '' };
+  const line = (o: any) => {
+    const d = String(o.delivery).slice(0, 10);
+    const k = Math.max(1, reportWorkdaysBetween(soiDay(d), soiDay(data.today)));
+    const main = esc(o.customer_name || '—') + (o.bon ? ' · бон ' + esc(o.bon) : '') + (o.client_order_num ? ' · № ' + esc(o.client_order_num) : '');
+    const meta = [o.product ? esc(o.product) : '', 'доставка ' + esc(bgDate(d).slice(0, 5)),
+      '<b style="color:#b91c1c;">+' + k + (k === 1 ? ' работен ден' : ' работни дни') + '</b>'].filter(Boolean).join(' · ');
+    return soiRow(main, meta);
+  };
+  let html = '';
+  for (const o of mine.slice(0, SOI_TR_MAX)) html += line(o);
+  if (n > SOI_TR_MAX) {
+    html += '<div style="padding:7px 10px;font-size:12px;color:#6b7280;border-bottom:1px solid #E5E7EB;">и още ' + (n - SOI_TR_MAX) + ' — вижте таб Транспорт</div>';
+  }
+  return { n: n, counts: { zakasneli: n }, html: soiBox('🚚 Транспорт — закъснели (' + n + ')', html, 'red') };
+}
+
 /* ЕДИНСТВЕНИЯТ списък със секциите на писмото — нова секция е нов ред. */
 const SOI_SECTIONS = [
   { key: 'zadachi', load: soiLoadTasks, forStore: soiTasksFor },
   { key: 'zayavki', load: soiLoadOrders, forStore: soiOrdersFor },
+  { key: 'transport', load: soiLoadTransport, forStore: soiTransportFor },
   { key: 'razliki', load: soiLoadDiffs, forStore: soiDiffsFor },
 ];
 
@@ -3331,7 +3415,7 @@ function soiRow(mainHtml: string, metaHtml: string): string {
     + '</div><div style="font-size:12px;color:#6b7280;line-height:1.5;margin-top:2px;">' + metaHtml + '</div></div>';
 }
 /* Обобщението: етикет на секция по ключ (нова секция без етикет → ключът). */
-const SOI_SUM_LABEL: Record<string, string> = { zadachi: 'Задачи', zayavki: 'Заявки', razliki: 'Разлики' };
+const SOI_SUM_LABEL: Record<string, string> = { zadachi: 'Задачи', zayavki: 'Заявки', transport: 'Транспорт', razliki: 'Разлики' };
 function soiSumLabel(key: string): string { return SOI_SUM_LABEL[key] || key; }
 function soiChip(text: string, on: boolean): string {
   return '<span style="display:inline-block;margin:0 6px 6px 0;padding:5px 11px;border-radius:14px;font-size:12px;font-weight:700;background:'
