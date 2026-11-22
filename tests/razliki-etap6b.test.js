@@ -136,7 +136,10 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   {
     const h = env(U.wh);
     await render(h);
-    Object.keys(L).forEach(id => ok('ред ' + id + ' е в картата', !!row(h, id)));
+    /* pm е насочен по 5а — складът не го вижда (решение на Тенчо 22.11.2026,
+       razliki-co-findings т.2). */
+    Object.keys(L).filter(id => id !== 'pm').forEach(id => ok('ред ' + id + ' е в картата', !!row(h, id)));
+    ok('насоченият pm НЕ е в картата на склада', !row(h, 'pm'));
     h.close();
   }
 
@@ -177,7 +180,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     ok('„Ход: ЦО“ липса (un) → 0 бутона на склада', same(whBtns(h, 'un'), []));
     ok('ред с отговор на обекта sap_done → бутоните на склада са там (ходът е негов)', same(whBtns(h, 'ed'), ['✓ 📝 Пуснете заявка ZSTR тип 4', '📄 Изписано по система']));
     ok('… и „📬 Прието обратно“', /📬 Прието обратно/.test(cellText(h, 'ed')));
-    ok('насочен по 5а (pack_mismatch) → 0 бутона на склада', same(whBtns(h, 'pm'), []));
+    ok('насочен по 5а (pack_mismatch) → редът не е на екрана на склада', row(h, 'pm') === null);
     h.close();
   }
 

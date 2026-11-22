@@ -416,7 +416,7 @@ function loadStockDiff() {
     diffReports = Array.isArray(res[1]) ? res[1] : [];
     /* Размените и връзките към „За връщане" зависят от вече заредените
        редове - затова след Promise.all, не в него. */
-    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks(), sdLoadStornoNotes(sq), sdLoadMe(), sdLoadProblemArticles()]);
+    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks(), sdLoadStornoNotes(sq), sdLoadMe(), sdLoadProblemArticles(), sdLoadStoreSubmitters()]);
   }).then(function(){
     renderStockDiff();
   }).catch(function(err) {
@@ -1123,6 +1123,7 @@ function sdTableRows(over){
     if (isLogisticsWarehouseUser()) {
       var parentRep = diffReports.find(function(x){return x.id===r.report_id;});
       if (!parentRep || parentRep.counterpart !== currentUser.store_name) return false;
+      if (sdWhHidesLine(r, parentRep)) return false;
     } else {
       /* За всички останали - подтабовете "Доставчици"/"Междускладови" разделят
          главната таблица, за по-ясно разграничение (най-вече за Цвети, която
@@ -1222,7 +1223,7 @@ function sdDirTabsActive(){ return !isLogisticsWarehouseUser(); }
 function sdVisibleUnreviewedReports(){
   var list = diffReports.filter(function(r){ return !r.reviewed; });
   if(isLogisticsWarehouseUser()){
-    list = list.filter(function(r){ return r.counterpart === currentUser.store_name; });
+    list = list.filter(function(r){ return r.counterpart === currentUser.store_name && !sdWhHidesReport(r); });
   }
   return list;
 }
@@ -1234,7 +1235,7 @@ function sdVisibleUnreviewedReports(){
 function sdVisibleEmailPendingReports(){
   var list = diffReports.filter(function(r){ return !!r.reviewed && r.email_pending === true; });
   if(isLogisticsWarehouseUser()){
-    list = list.filter(function(r){ return r.counterpart === currentUser.store_name; });
+    list = list.filter(function(r){ return r.counterpart === currentUser.store_name && !sdWhHidesReport(r); });
   }
   return list;
 }
@@ -1632,6 +1633,25 @@ function sdLineRoute(line, rep){
    и минават по новия път сами. */
 function sdLineRoutedHere(line, rep){
   return sdLineRoute(line, rep) !== 'warehouse' && !line.warehouse_response && !line.store_response;
+}
+/* Логистичният склад НЕ вижда насочените редове (решение на Тенчо 22.11.2026,
+   писмо на Миглена 20.11): редът не се рисува, а бланка, на която ВСИЧКИ
+   редове са насочени, не се показва на склада изобщо — нито в бланките, нито
+   в „Приети редове“, броячите, търсенето, Excel, печата и „Действия на
+   магазините“. Само за изгледа: sdData не се реже — затварянето на бланката
+   по „всички редове приключени“ трябва да вижда и насочените. Обектът, офисът
+   и ЦО — без промяна. */
+function sdWhHidesLine(l, rep){
+  return !!l && !!rep && isLogisticsWarehouseUser() && sdLineRoutedHere(l, rep);
+}
+function sdWhHidesReport(rep){
+  if(!rep || !isLogisticsWarehouseUser()) return false;
+  var lines = (sdData||[]).filter(function(x){ return x.report_id === rep.id; });
+  return lines.length > 0 && lines.every(function(l){ return sdLineRoutedHere(l, rep); });
+}
+/* Редовете на бланката, които ТОЗИ потребител вижда. */
+function sdReportLinesShown(rep){
+  return (sdData||[]).filter(function(x){ return x.report_id === rep.id && !sdWhHidesLine(x, rep); });
 }
 function sdRouteToText(route){
   if(route === 'regional') return 'регионалния на обекта';
@@ -2521,9 +2541,41 @@ function sdLineTouchedByOthers(l){
   if(l.swap_id) return true;
   return false;
 }
+/* Подателите от ОБЕКТА (решение на Тенчо 22.11.2026, писмо на Миглена 20.11 —
+   Управител Петрич виждаше 🗑 на бланка, подадена от ЦО): обектът трие само
+   бланка / ред, подадени от потребител на същия обект. submitted_by /
+   created_by е display_name (или имейл, ако няма име) — sdActor. Списъкът
+   се чете веднъж при зареждане, само за потребител на обект, по store_name
+   (вкл. неактивните — подател, който вече го няма, пак е от обекта).
+   Непрочетен списък → без бутон. */
+var sdStoreSubmitters = { store: null, names: null };
+function sdLoadStoreSubmitters(){
+  var st = currentUser && currentUser.store_name;
+  if(!st || isGlobal() || isLogisticsWarehouseUser() || isCentralOfficeUser() || sdIsCOViewer()){
+    sdStoreSubmitters = { store: null, names: null };
+    return Promise.resolve();
+  }
+  return sbGetOk('users', 'select=display_name,email,store_name&store_name=eq.' + encodeURIComponent(st)).then(function(res){
+    if(!res.ok){ sdStoreSubmitters = { store: st, names: null }; return; }
+    var names = {};
+    res.rows.forEach(function(u){
+      if(!u || u.store_name !== st) return;
+      if(u.display_name) names[String(u.display_name)] = 1;
+      if(u.email) names[String(u.email)] = 1;
+    });
+    sdStoreSubmitters = { store: st, names: names };
+  }).catch(function(){ sdStoreSubmitters = { store: st, names: null }; });
+}
+function sdIsStoreSubmitter(name, store){
+  var s = sdStoreSubmitters;
+  if(!s || !s.names || !store || s.store !== store) return false;
+  var n = String(name == null ? '' : name).trim();
+  return !!n && s.names[n] === 1;
+}
 function sdCanStoreDeleteLine(l, rep){
   if(!l || !rep || !currentUser) return false;
   if(!(canEditSD(l) && !l.type && currentUser.store_name===rep.store_name)) return false;
+  if(!sdIsStoreSubmitter(l.created_by, rep.store_name)) return false;
   if(l.warehouse_response || l.store_response || l.status!=='new') return false;
   if(sdLineTouchedByOthers(l)) return false;
   if(sdSwapsForLine(l).length) return false;
@@ -2704,6 +2756,9 @@ function sdStoreReportDeletable(rep, lines, swaps, notes){
   if(!canEditSD() || sdIsCOViewer()) return false;
   if(isCentralOfficeUser() || isLogisticsWarehouseUser()) return false;
   if(currentUser.store_name!==rep.store_name) return false;
+  /* Подадена от потребител на същия обект (sdIsStoreSubmitter, 22.11.2026) —
+     бланка от ЦО / офис / склад обектът не трие. */
+  if(!sdIsStoreSubmitter(rep.submitted_by, rep.store_name)) return false;
   /* Най-много 3 денонощия от подаването (решение на Тенчо 19.11.2026: без
      срок бутонът излизаше и на стари бланки, които само чакат склада).
      Точно 72 ч — позволено. Без created_at / невалидна дата — без бутон. */
@@ -4169,7 +4224,7 @@ function sdCollectActions(){
   var SR = {accepted:'✅ ПРИЕТО', sap_accepted:'📄 Прието в SAP', sap_done:'📄 Пуснато в SAP', no_stock:'⛔ Няма наличност в логистика'};
   sdData.forEach(function(l){
     var rp = repOf(l.report_id);
-    if(!mineRep(rp)) return;
+    if(!mineRep(rp) || sdWhHidesLine(l, rp)) return;
     var art = l.material_name || l.material_code || '';
     if(l.store_response && l.store_response_at){
       add(l.store_response_at, l.report_id, rp.store_name,
@@ -4270,7 +4325,7 @@ function sdFilteredReports(){
   if(sdSearch){
     var qRep = sdSearch.toLowerCase();
     unreviewed = unreviewed.filter(function(r){
-      var lines = sdData.filter(function(x){return x.report_id===r.id;});
+      var lines = sdReportLinesShown(r);
       var hay = [r.store_name,r.counterpart,r.document_number,r.general_comment,r.submitted_by]
         .concat(lines.map(function(l){ return [l.material_code,l.material_name,l.comment,l.resolution_comment].join(' '); }))
         .join(' ').toLowerCase();
@@ -4330,7 +4385,7 @@ function renderDiffReportsSection(){
   h+='<div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:10px;">🆕 Нови подадени бланки — чакат преглед ('+unreviewed.length+(unreviewed.length!==allVisible.length?' от '+allVisible.length:'')+')'+
      (sdDirTabsActive()?' <span style="font-weight:500;color:#7c3aed;">· '+diffDirShortLabel(sdDirTab)+'</span>':'')+'</div>';
   unreviewed.forEach(function(rep){
-    var lines = sdData.filter(function(x){return x.report_id===rep.id;});
+    var lines = sdReportLinesShown(rep);
     var wasCorrected = lines.some(function(l){return !!l.store_corrected_at;});
     /* Прогрес по бланката - колко реда вече са решени от Цвети. Без това
        трябваше да се изчете всеки ред, за да се разбере докъде е стигнала. */
@@ -5946,6 +6001,36 @@ function sdRouteRecipients(users, route, store){
 function sdRouteWho(route, store){
   return route === 'regional' ? 'регионалния на ' + store : 'група „' + SD_ROUTE_GROUP_LABEL[SD_ROUTE_GROUP[route]] + '"';
 }
+/* Ред в имейла и в push-а при насочване. Без количество (null / празно) —
+   без частта „ — N мярка“: иначе излизаше „— — бр.“ (писмо на Миглена
+   20.11.2026, решение на Тенчо 22.11). */
+function sdRouteItemText(l){
+  var q = (l.quantity == null) ? '' : String(l.quantity).trim();
+  return (l.material_code ? l.material_code + ' ' : '') + (l.material_name || '') +
+    (q ? ' — ' + q + (l.unit ? ' ' + l.unit : '') : '');
+}
+/* Съобщението след подаване — към кого отива бланката (решение на Тенчо
+   22.11.2026). Доставчик и сторна — Цветелина. Междускладова — по редовете,
+   по ЕДНОТО правило sdLineRoute: складът (counterpart) / Централен офис
+   (co и co_barcode) / регионалният мениджър; смесени — изредени в едно
+   изречение в този ред. Без редове → като към склада. */
+function sdSubmitToastText(direction, counterpart, lines){
+  var base = '✅ Бланката е подадена! ';
+  if(direction !== 'interstore') return base + 'Цветелина ще я прегледа.';
+  var has = { warehouse: false, co: false, regional: false };
+  (lines || []).forEach(function(l){
+    var rt = sdLineRoute(l, { direction: 'interstore' });
+    has[(rt === 'co' || rt === 'co_barcode') ? 'co' : (rt === 'regional' ? 'regional' : 'warehouse')] = true;
+  });
+  var parts = [];
+  if(has.warehouse) parts.push('склада');
+  if(has.co) parts.push('Централен офис');
+  if(has.regional) parts.push('регионалния мениджър');
+  if(!parts.length || (parts.length === 1 && has.warehouse)) return base + (counterpart || 'Складът') + ' ще отговори.';
+  if(parts.length === 1) return base + 'Отива към ' + parts[0] + '.';
+  var last = parts.pop();
+  return base + 'Отива към ' + parts.join(', към ') + ' и към ' + last + '.';
+}
 function sdRouteNotify(info){
   var byRoute = {}, order = [];
   (info.lines || []).forEach(function(l){
@@ -5967,7 +6052,7 @@ function sdRouteNotify(info){
       byRoute[rt].forEach(function(l){ var c = diffCategoryLabel(l.difference_category); if(cats.indexOf(c) < 0) cats.push(c); });
       var text = 'Разлики · ' + info.store + ' · ' + cats.join(', ') + ' (' + byRoute[rt].length + ' арт.)';
       var items = byRoute[rt].map(function(l){
-        return (l.material_code ? l.material_code + ' ' : '') + (l.material_name || '') + ' — ' + (l.quantity != null ? l.quantity : '—') + (l.unit ? ' ' + l.unit : '');
+        return sdRouteItemText(l);
       });
       var html = '<p>' + esc(text) + '</p><p>Склад: ' + esc(info.counterpart || '—') + '<br>Подаде: ' + esc(by) + '</p>' +
         '<ul>' + items.map(function(s){ return '<li>' + esc(s) + '</li>'; }).join('') + '</ul>' +
@@ -6167,7 +6252,7 @@ function submitDiffReport(){
         var stornoNoteId=sdStornoNoteFor;
         closeDiffSubmitModal();
         if(stornoNoteId){ sdNoteMarkStorno(stornoNoteId, report.id); return; }
-        toast('✅ Бланката е подадена! Цветелина ще я прегледа.');
+        toast(sdSubmitToastText(direction, counterpart, lines));
         loadStockDiff();
         /* Етап 4: известие до групата „Разлики" - след успешния запис,
            fire-and-forget (провалът дава жълт toast, бланката остава). */
@@ -6600,7 +6685,7 @@ function loadDiffPrint(reportId){
 function renderDiffPrint(rep){
   var wrap = document.getElementById('mod-print');
   if(!wrap) return;
-  var lines = sdData.filter(function(x){ return x.report_id===rep.id; });
+  var lines = sdReportLinesShown(rep);
   var si = getStoreInfo(rep.store_name) || {};
   var pQty = diffQtyLabels(rep.direction);
   /* Количеството по стоковата разписка на доставчика има смисъл САМО при

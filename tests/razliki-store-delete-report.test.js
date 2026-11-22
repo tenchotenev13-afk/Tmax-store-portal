@@ -79,6 +79,9 @@ function env(who, R, LINES, opts) {
   h.w.sdData = JSON.parse(JSON.stringify(LINES));
   h.w.diffReports = JSON.parse(JSON.stringify([R]));
   h.w.sdSwaps = JSON.parse(JSON.stringify(opts.swaps || []));
+  /* 22.11.2026 (razliki-co-findings т.3): подателят трябва да е потребител на
+     обекта — както ги чете sdLoadStoreSubmitters. Бланката е от „Склад Кърджали“. */
+  h.w.sdStoreSubmitters = { store: 'Кърджали', names: { 'Склад Кърджали': 1 } };
   h.w.transportOrders = [];
   h.w.sdView = 'reports';
   h.w.sdFilter = 'all';

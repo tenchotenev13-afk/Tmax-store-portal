@@ -130,18 +130,18 @@ const toasts = h => h.calls.toast.join(' | ');
     h.close();
   }
 
-  section('2. Склад: насочените — само за четене, не чакат склада');
+  section('2. Склад: насочените не се рисуват, не чакат склада');
   {
     const h = env(U.wh);
     await render(h);
+    /* До 22.11.2026 складът ги виждаше само за четене („➡️ …“). Решение на
+       Тенчо 22.11 (razliki-co-findings т.2): насоченият ред не се рисува на
+       склада изобщо. Надписът „➡️ …“ — за обекта и офиса (раздел 3 и 6а). */
     ['d1', 'p1', 'b1', 's1'].forEach(id => {
-      const r = row(h, id);
-      ok(id + ': бутони на склада — 0', whBtns(h, id) === 0);
+      ok(id + ': редът не е на екрана на склада', !row(h, id));
       ok(id + ': без „Приключи“', !closeBtn(h, id));
-      ok(id + ': надпис', !!r && /➡️ (Към ЦО — не касае склада|При регионалния — увредена стока)/.test(r.textContent), r && r.textContent);
     });
-    ok('damaged: „➡️ При регионалния — увредена стока“', row(h, 'd1').textContent.indexOf('➡️ При регионалния — увредена стока') >= 0);
-    ok('pack_mismatch: „➡️ Към ЦО — не касае склада“', row(h, 'p1').textContent.indexOf('➡️ Към ЦО — не касае склада') >= 0);
+    ok('без надпис „➡️ …“ в картата на склада', !/➡️ (Към ЦО|При регионалния)/.test(h.doc.getElementById('diff-rep-r1').textContent));
     /* Етап 6б (18.11.2026): u1 е „липса“ → складът вижда 3 бутона, не 4. */
     ok('обикновеният ред в същата бланка — 3 бутона на склада (липса, 6б)', whBtns(h, 'u1') === 3, String(whBtns(h, 'u1')));
     /* „чака склада“: бланка само с насочени → 0; + обикновен без отговор → 1;
@@ -256,8 +256,9 @@ const toasts = h => h.calls.toast.join(' | ');
     ok('последен отворен → бланката се затваря (PATCH differences_reports)', h.calls.patch.some(x => x.table === 'differences_reports' && /id=eq\.r1/.test(x.url)));
     ok('модалът е затворен', !h.doc.getElementById('sdroute-ov'));
     h.close();
-    /* Приключеният ред — за всички. */
-    const h2 = env(U.wh);
+    /* Приключеният ред — за обекта и офиса (складът не вижда насочените,
+       решение на Тенчо 22.11.2026, razliki-co-findings т.2). */
+    const h2 = env(U.store);
     await render(h2, [line('d1', 'damaged', { status: 'received', completed_by: 'П. Георгиева', completed_at: '2026-11-17T09:30:00Z', resolution_comment: 'Изпратено за ремонт' }), line('u1', 'undelivered')]);
     h2.w.sdShowDone = { r1: true }; h2.w.renderStockDiff();
     const d = row(h2, 'd1');

@@ -155,8 +155,11 @@ const mnPa = (h, id) => { const r = mnRow(h, id); const b = r ? r.querySelector(
     const h = env(u);
     await open(h);
     if (u === U.wh) {
-      /* Складът вижда само междускладовата бланка (r1). */
-      ok(name + ': w1 — надпис „🏷️ В регистъра“', !!label(h, 'w1') && label(h, 'w1').textContent.trim() === '🏷️ В регистъра');
+      /* Складът вижда само междускладовата бланка (r1). До 22.11.2026 — w1 с
+         надписа „🏷️ В регистъра“; от решението на Тенчо 22.11
+         (razliki-co-findings т.2) w1 (грешен баркод, насочен към ЦО) не се
+         рисува на склада изобщо. */
+      ok(name + ': w1 (насочен) — не е на екрана, без надпис', !label(h, 'w1') && h.doc.getElementById('mod-stock-diff').textContent.indexOf('62081') < 0);
       ok(name + ': 0 бутона „➕ В регистъра“', anyAdd(h).length === 0, String(anyAdd(h).length));
       h.close(); continue;
     }

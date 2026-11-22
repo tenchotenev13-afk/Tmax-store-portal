@@ -52,6 +52,9 @@ const OTHER = { email: 'montana@temax.bg', display_name: 'Управител М�
 function line(o) {
   return Object.assign({
     store_name: 'Враца', supplier: 'Логистичен склад Търговище', material_code: '111',
+    /* 22.11.2026 (razliki-co-findings т.3): обектът трие само ред, подаден от
+       потребител на обекта — created_by = display_name на такъв. */
+    created_by: 'Управител Враца',
     material_name: 'АРТИКУЛ', quantity: 1, quantity_received: 0, comment: null,
     resolution_comment: null, attachments: [], difference_category: 'undelivered', unit: 'бр.',
     status: 'new', type: null, warehouse_response: null, store_response: null,
@@ -86,6 +89,8 @@ function env(user, o) {
   h.w.sdData = JSON.parse(JSON.stringify(lines));
   h.w.diffReports = JSON.parse(JSON.stringify(reps));
   h.w.sdSwaps = JSON.parse(JSON.stringify(o.swaps || []));
+  /* Подателите на обекта — както ги чете sdLoadStoreSubmitters (22.11.2026). */
+  h.w.sdStoreSubmitters = { store: 'Враца', names: { 'Управител Враца': 1 } };
   h.w.transportOrders = [];
   h.w.sdDirTab = 'interstore';
   h.w.sdFilter = 'all';

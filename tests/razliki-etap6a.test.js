@@ -246,8 +246,15 @@ const toasts = h => h.calls.toast.join(' | ');
     await render(h);
     Object.keys(T).forEach(id => ok(name + ': ' + id + ' → „' + T[id][1] + '“', turn(h, id) === T[id][1], String(turn(h, id))));
     ['n7', 'n10'].forEach(id => ok(name + ': ' + id + ' (received) → без „Ход:“', turn(h, id) === null));
-    ok(name + ': n9 (насочен) → без „Ход:“, с надписа от 5а', turn(h, 'n9') === null && row(h, 'n9').textContent.indexOf('➡️ Към ЦО — не касае склада') >= 0);
-    ok(name + ': d9 (насочен) → без „Ход:“, с надписа от 5а', turn(h, 'd9') === null && row(h, 'd9').textContent.indexOf('➡️ При регионалния — увредена стока') >= 0);
+    /* Складът не вижда насочените редове (решение на Тенчо 22.11.2026,
+       razliki-co-findings т.2) — до тогава ги виждаше с надписа от 5а. */
+    if (u === U.wh) {
+      ok(name + ': n9 (насочен) → редът не е на екрана', !row(h, 'n9'));
+      ok(name + ': d9 (насочен) → редът не е на екрана', !row(h, 'd9'));
+    } else {
+      ok(name + ': n9 (насочен) → без „Ход:“, с надписа от 5а', turn(h, 'n9') === null && row(h, 'n9').textContent.indexOf('➡️ Към ЦО — не касае склада') >= 0);
+      ok(name + ': d9 (насочен) → без „Ход:“, с надписа от 5а', turn(h, 'd9') === null && row(h, 'd9').textContent.indexOf('➡️ При регионалния — увредена стока') >= 0);
+    }
     h.close();
   }
   {
@@ -312,8 +319,9 @@ const toasts = h => h.calls.toast.join(' | ');
     h.close();
     const h2 = env(U.wh);
     await render(h2);
-    ok('склад: насоченият n9 — надпис, без бутоните на склада',
-      row(h2, 'n9').textContent.indexOf('➡️ Към ЦО — не касае склада') >= 0 && row(h2, 'n9').querySelectorAll('[onclick^="openWarehouseResponseModal"]').length === 0);
+    /* До 22.11.2026 — надпис без бутоните; от решението на Тенчо 22.11
+       (razliki-co-findings т.2) складът не вижда насочения ред изобщо. */
+    ok('склад: насоченият n9 — не е на екрана', row(h2, 'n9') === null);
     /* Етап 6б (18.11.2026): n0 е „липса“ → 3 бутона на склада, не 4. */
     ok('склад: обикновеният n0 — 3 бутона на склада (липса, 6б)', row(h2, 'n0').querySelectorAll('[onclick^="openWarehouseResponseModal"]').length === 3);
     h2.close();

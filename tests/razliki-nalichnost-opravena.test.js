@@ -111,7 +111,10 @@ const sdPatches = h => h.calls.patch.filter(x => x.table === 'stock_differences'
   {
     const h = env(U.wh);
     await render(h);
-    Object.keys(L).forEach(id => ok('ред ' + id + ' е в картата', !!row(h, id)));
+    /* a5 е насочен по 5а — складът не го вижда (решение на Тенчо 22.11.2026,
+       razliki-co-findings т.2). */
+    Object.keys(L).filter(id => id !== 'a5').forEach(id => ok('ред ' + id + ' е в картата', !!row(h, id)));
+    ok('насоченият a5 НЕ е в картата на склада', !row(h, 'a5'));
     h.close();
   }
 

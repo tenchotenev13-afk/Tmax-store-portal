@@ -1,0 +1,8 @@
+# 22.11 — razliki-co-findings
+
+- Разлики, четирите находки от писмото на Миглена 20.11 (бланка b9421650, Петрич), решения на Тенчо 22.11 — само `stock-differences.js`: (1) `sdSubmitToastText` — toast след подаване по посоката и по `sdLineRoute` на редовете; (2) `sdWhHidesLine` / `sdWhHidesReport` / `sdReportLinesShown` — складът не вижда насочените редове и бланките само с насочени (само изгледът, `sdData` цял); (3) `sdLoadStoreSubmitters` / `sdIsStoreSubmitter` — обектът трие бланка / ред само при подател от същия обект, вкл. свежата проверка; (4) `sdRouteItemText` — ред без количество без „— — бр.“.
+- База 22.11: 30 кандидата за триене от обект (до 72 ч), отпада 1 — b9421650 (Миглена Павлова, ЦО). Количествата на 87793 / 87794 — NULL.
+- Неделният складов отчет (`reportWhDiffKind` в report.js и send-scheduled-report) вече изключва насочените — не е пипан; друго място, което ги показва на склада — няма.
+- Тест `tests/razliki-co-findings.test.js` (70/70, мутации М1–М4 + М3б — всички exit 1). Обновени, защото заковаваха старото: razliki-etap1 (подател в стъба), razliki-store-delete-report (подател в стъба), razliki-etap5 т.2 и приключеният ред, razliki-etap6a т.3 и склада в края, razliki-etap6b т.0 и pm, razliki-nalichnost-opravena т.0 и a5, razliki-etap7b (складът — w1 насочен, не се рисува).
+- Функции в stock-differences.js: 355 → 362. Без схема, без rollback, без ред за Живко; едж функции — не.
+- SHA — в комита на предавката след push.
