@@ -180,7 +180,8 @@ function install(h, db) {
   install(h, db);
   const got = await new Promise(res => w.collectMinusMultiReportData(REF, res));
   /* От 19.11.2026 има и трета — „Минуси с отворена разлика“ (всички 955, без posting_date); тук се броят двете на повтарящите се. */
-  const mq = db.log.filter(x => x.tbl === 'minus_movements' && /posting_date=/.test(x.q)).map(x => x.q);
+  /* От 23.11.2026 и четвърта — „Ценови разлики“ (955 за седмицата, с qty) — тук не се брои. */
+  const mq = db.log.filter(x => x.tbl === 'minus_movements' && /posting_date=/.test(x.q) && !/qty,uom/.test(x.q)).map(x => x.q);
   ok('заявките към minus_movements (с прозорец) са пак две', mq.length === 2, mq.length);
   ok('първата иска и reason_id', /select=[^&]*reason_id/.test(mq[0]), mq[0]);
   ok('една заявка към minus_reasons (id, label)', db.log.filter(x => x.tbl === 'minus_reasons' && /select=id,label/.test(x.q)).length === 1);

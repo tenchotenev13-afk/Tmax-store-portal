@@ -150,7 +150,8 @@ function install(h, db) {
   install(h, db);
   const got = await new Promise(res => w.collectMinusMultiReportData(REF, res));
   /* От 19.11.2026 и трета — „Минуси с отворена разлика“ (всички 955, без posting_date). */
-  const qs = db.log.filter(x => x.tbl === 'minus_movements' && /posting_date=/.test(x.q)).map(x => x.q);
+  /* От 23.11.2026 и четвърта — „Ценови разлики“ (955 за седмицата, с qty) — тук не се брои. */
+  const qs = db.log.filter(x => x.tbl === 'minus_movements' && /posting_date=/.test(x.q) && !/qty,uom/.test(x.q)).map(x => x.q);
   ok('две заявки към minus_movements (с прозорец)', qs.length === 2, qs.length);
   ok('първата — както досега (955, прозорецът на повтарящите се)', /mvt_type=eq\.955/.test(qs[0]) && /posting_date=lte\.2026-10-25/.test(qs[0]));
   ok('втората — без mvt_type и без горна граница, от 12.10, само обектите', qs[1] && !/mvt_type=/.test(qs[1]) && !/posting_date=lte/.test(qs[1]) && /posting_date=gte\.2026-10-12/.test(qs[1]) && qs[1].indexOf('store_name=in.("Гоце Делчев","Монтана","Петрич","Троян")') >= 0, qs[1]);

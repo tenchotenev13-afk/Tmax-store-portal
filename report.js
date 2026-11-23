@@ -4789,11 +4789,14 @@ function collectMinusOdData(stores, cb){
    Теодор 23.11, решение А на Тенчо: в писмото към офиса (и на регионалния — само
    своите обекти) — минусите 955 за седмицата на писмото [ref − 6; ref] с попълнен
    заметнат код, без клиентската поръчка (reportMinusMultiIsCo). Стойностите и
-   разликата — по ПРАВИЛОТО НА ОФИСА в таб Минуси, не второ правило: остатъкът
-   (_rest) от mnCompute (FIFO по обект + материал върху ВСИЧКИ движения 955/956)
-   и mnValRow (остатък × цена; заметнат — само ако е ЕДИН код, mnRevRealCodes;
-   разликата — от закръглените до 2 знака) с цените от product_catalog (VKP2,
-   текущите, без история и без промо — цената към деня на продажба е етап 2).
+   разликата — с ФУНКЦИЯТА НА ОФИСА от таб Минуси (mnValRow: количество × цена;
+   заметнат — само ако е ЕДИН код, mnRevRealCodes; разликата — от закръглените до
+   2 знака), не второ правило, но по ЦЯЛОТО количество на минуса 955 (qty), не
+   по незакрития остатък (решение на Тенчо 23.11: загубата от маркирането е при
+   продажбата, независимо дали минусът после е закрит с 956). mnValRow чете
+   r._rest — подава се копие на реда с _rest = qty; таб Минуси не се пипа (там
+   остава остатъкът). Цени от product_catalog (VKP2, текущите, без история и без
+   промо — цената към деня на продажба е етап 2).
    В браузъра това са оригиналите от minusi.js; в send-scheduled-report — копия
    (tests/report-edge-sync.test.js). mnValRow чете глобалния mnPrices — тук се
    подменя само за синхронното смятане и се връща (try/finally).
@@ -4811,24 +4814,25 @@ function reportMinusPriceAdd(t, it){
   if (it.multi) t.multi++;
   else if (it.noMinus || it.noReal) t.noPrice++;
 }
-/* Чисто: movs — 955 и 956 на обектите (всички дати, с qty/uom/mat_doc/doc_item);
+/* Чисто: movs — 955 на обектите (qty, uom, real_code, reason_id; 956 се пропускат);
    cat — { prices: { код: { price, unit } }, names: { код: име }, at }. */
 function reportMinusPriceGroup(movs, cat, stores, refISO, reasons){
   var ms = Array.isArray(stores) ? stores : [];
   var c = cat || {};
   var coIds = reportMinusMultiCoIds(reasons);
   var fromISO = reportMinusMultiAddDays(refISO, -6);
-  var calc = mnCompute((Array.isArray(movs) ? movs : []).filter(function(m){ return m && ms.indexOf(m.store_name) >= 0; }), {}, 0, { count: 1, days: 1 });
   var by = {};
   var keep = mnPrices;
   mnPrices = c.prices || {};
   try {
-    calc.all.forEach(function(r){
+    (Array.isArray(movs) ? movs : []).forEach(function(r){
+      if (!r || String(r.mvt_type) !== '955' || ms.indexOf(r.store_name) < 0) return;
       var d = String(r.posting_date || '').slice(0, 10);
       if (d < fromISO || d > refISO || !mnCoKey(r.real_code) || reportMinusMultiIsCo(r, coIds)) return;
-      var v = mnValRow(r), one = mnRealOne(r), mat = mnCoKey(r.material);
+      var qty = Number(r.qty) || 0;
+      var v = mnValRow(Object.assign({}, r, { _rest: qty })), one = mnRealOne(r), mat = mnCoKey(r.material);
       (by[r.store_name] || (by[r.store_name] = [])).push({ id: r.id, date: d, material: mat, desc: r.material_desc || (c.names || {})[mat] || '',
-        real: mnCoKey(r.real_code), realOne: one, realDesc: one ? ((c.names || {})[one] || '') : '', rest: r._rest, uom: r.uom || '',
+        real: mnCoKey(r.real_code), realOne: one, realDesc: one ? ((c.names || {})[one] || '') : '', qty: qty, uom: r.uom || '',
         minus: v.minus, realVal: v.real, diff: v.diff, minusWarn: v.minusWarn || null, realWarn: v.realWarn || null,
         noMinus: !!v.noMinus, noReal: !!v.noReal, multi: !!v.realMulti });
     });
@@ -4858,7 +4862,7 @@ function reportMinusPriceHtml(pr){
   if (pr.error) return title + '<div class="mm-pr-err" style="font-size:12px;font-weight:700;color:#C0392B;">⚠️ Цените не се заредиха</div>';
   var at = pr.at ? String(pr.at).slice(0, 10) : '';
   var h = title + '<div class="mm-pr-src" style="font-size:12px;color:#475569;margin-bottom:4px;">Цени от VKP2 към ' + (at ? reportMinusMultiDM(at) + '.' + at.slice(0, 4) : '—') +
-    ', без промоции. Стойност = незакритото количество × продажната цена (както сумите в таб Минуси). Седмица ' +
+    ', без промоции. Стойност = количеството на минуса (955) × продажната цена, закръглено както в таб Минуси. Седмица ' +
     reportMinusMultiDM(pr.from) + '–' + reportMinusMultiDM(pr.to) + '.</div>';
   var t = pr.total || reportMinusPriceSum();
   if (!t.rows) return h + '<div class="mm-pr-empty" style="font-size:12px;color:#94a3b8;">Няма минус със заметнат код за седмицата.</div>';
@@ -4886,7 +4890,7 @@ function reportMinusPriceHtml(pr){
       th('Заметнат код') + th('Описание') + th('Стойност заметнат', 'right') + th('Разлика (€)', 'right') + '</tr>';
     s.items.forEach(function(it){
       h += '<tr class="mm-pr-item">' + td(esc(it.material), 'white-space:nowrap;') + td(esc(it.desc)) +
-        td(esc(mnFmtQty(it.rest) + (it.uom ? ' ' + it.uom : '')), 'text-align:right;white-space:nowrap;') +
+        td(esc(mnFmtQty(it.qty) + (it.uom ? ' ' + it.uom : '')), 'text-align:right;white-space:nowrap;') +
         eur(it.minus, it.minusWarn, it.noMinus ? gray('няма цена', 'mm-pr-noprice') : '') +
         td(esc(it.real), 'white-space:nowrap;') + td(esc(it.multi ? '' : it.realDesc)) +
         eur(it.realVal, it.realWarn, it.multi ? gray('няколко кода', 'mm-pr-multi') : (it.noReal ? gray('няма цена', 'mm-pr-noprice') : '')) +
@@ -4897,17 +4901,17 @@ function reportMinusPriceHtml(pr){
   return h + '<div class="mm-pr-total" style="font-size:13px;font-weight:700;color:#1E2761;margin:12px 0 4px;padding:6px;background:#fff7ed;">Общо за седмицата: стойност минус ' +
     money(t.minus, t.nMinus) + ' · стойност заметнат ' + money(t.real, t.nReal) + ' · разлика <span class="mm-pr-total-diff">' + money(t.diff, t.nDiff) + '</span></div>';
 }
-/* Четенията на секцията: всички движения на обектите (FIFO иска и 956 от всякакви
-   дати — както таб Минуси), после цените и имената на кодовете на седмицата,
-   на порции, и датата на последното качване на VKP2. */
+/* Четенията на секцията: 955 на обектите за седмицата, после цените и имената на
+   кодовете на седмицата, на порции, и датата на последното качване на VKP2. */
 function collectMinusPriceData(stores, refISO, reasons, cb){
   if (!stores || !stores.length) { cb(reportMinusPriceGroup([], {}, [], refISO, reasons)); return; }
   var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
   var fail = function(){ cb({ error: true }); };
-  reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,qty,uom,mat_doc,doc_item,posting_date,real_code,reason_id' + inStores +
-    '&mvt_type=in.(955,956)&order=id.asc').then(function(mv){
+  var fromISO = reportMinusMultiAddDays(refISO, -6);
+  reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,qty,uom,posting_date,real_code,reason_id' + inStores +
+    '&mvt_type=eq.955&posting_date=gte.' + fromISO + '&posting_date=lte.' + refISO + '&order=id.asc').then(function(mv){
     if (mv.partial) { fail(); return; }
-    var fromISO = reportMinusMultiAddDays(refISO, -6), seen = {}, codes = [];
+    var seen = {}, codes = [];
     var add = function(x){ x = mnCoKey(x); if (x && !seen[x]) { seen[x] = 1; codes.push(x); } };
     mv.forEach(function(m){
       var d = String(m.posting_date || '').slice(0, 10);
@@ -4940,20 +4944,22 @@ function collectMinusPriceData(stores, refISO, reasons, cb){
    Теодор 23.11, решение Б на Тенчо: всеки обект от minus_stores получава само
    своите редове от „Минуси с отворена разлика“ (същата секция, вкл. „Ход“),
    БЕЗ цени. Получатели — активните потребители на обекта с роля manager и
-   имейл (по един път на имейл). Обект без имейл → пропуснат (reason no_email);
+   имейл (по един път на имейл), САМО адреси на @temax.bg (решение на Тенчо
+   23.11, без значение от главни/малки); друг адрес → в skipped, не получава. Обект без имейл → пропуснат (reason no_email);
    без редове → без писмо (no_rows); секцията с грешка → никому (od_error).
    Пращат се от същия крон, след писмата към офиса. */
 function reportMinusStorePlan(users, minusStores){
   var ms = Array.isArray(minusStores) ? minusStores : [];
   return ms.map(function(s){
-    var emails = [], seen = {};
+    var emails = [], skipped = [], seen = {};
     (Array.isArray(users) ? users : []).forEach(function(u){
       if (!u || u.role !== 'manager' || u.active === false || u.store_name !== s) return;
       var e = String(u.email || '').trim();
       if (!e || seen[e.toLowerCase()]) return;
-      seen[e.toLowerCase()] = 1; emails.push(e);
+      seen[e.toLowerCase()] = 1;
+      if (/@temax\.bg$/i.test(e)) emails.push(e); else skipped.push(e);
     });
-    return { store: s, emails: emails };
+    return { store: s, emails: emails, skipped: skipped };
   });
 }
 function reportMinusStoreJobs(plan, od){
@@ -4961,7 +4967,7 @@ function reportMinusStoreJobs(plan, od){
     var s = od && !od.error ? (od.stores || []).filter(function(x){ return x.store === p.store; })[0] : null;
     var sub = s ? { stores: [s], total: s.items.length } : { stores: [], total: 0 };
     var reason = !od || od.error ? 'od_error' : !p.emails.length ? 'no_email' : !sub.total ? 'no_rows' : null;
-    return { store: p.store, emails: p.emails, od: sub, send: !reason, reason: reason };
+    return { store: p.store, emails: p.emails, skipped: p.skipped || [], od: sub, send: !reason, reason: reason };
   });
 }
 function reportMinusStoreSubject(store, ref){
