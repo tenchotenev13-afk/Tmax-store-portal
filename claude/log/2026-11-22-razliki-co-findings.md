@@ -5,4 +5,4 @@
 - Неделният складов отчет (`reportWhDiffKind` в report.js и send-scheduled-report) вече изключва насочените — не е пипан; друго място, което ги показва на склада — няма.
 - Тест `tests/razliki-co-findings.test.js` (70/70, мутации М1–М4 + М3б — всички exit 1). Обновени, защото заковаваха старото: razliki-etap1 (подател в стъба), razliki-store-delete-report (подател в стъба), razliki-etap5 т.2 и приключеният ред, razliki-etap6a т.3 и склада в края, razliki-etap6b т.0 и pm, razliki-nalichnost-opravena т.0 и a5, razliki-etap7b (складът — w1 насочен, не се рисува).
 - Функции в stock-differences.js: 355 → 362. Без схема, без rollback, без ред за Живко; едж функции — не.
-- SHA — в комита на предавката след push.
+- SHA `8c5b811` (push 23.11 след три rebase-а — origin мръдна с текстови комити и `710a308`; пълният пакет върху всеки нов SHA, последният: 516 теста, 28864 проверки, exit 0). Pages — живият `stock-differences.js` байт в байт с `8c5b811`, маркер `sdSubmitToastText` (в стария блоб — 0).
