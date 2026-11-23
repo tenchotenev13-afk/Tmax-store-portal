@@ -124,6 +124,7 @@ const TESTS = [
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',
   'catalog-lookup.test.js',
+  'catalog-import-retry.test.js',
   'diff-submit-validation.test.js',
   'razliki-etap1.test.js',
   'razliki-etap2.test.js',

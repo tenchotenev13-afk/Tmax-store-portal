@@ -922,9 +922,9 @@ function startCatalogImport(){
     progEl.textContent+='⏳ Качване на 0 / '+mapped.length+'...';
     batchUpsertCatalog(mapped,function(done,total,errCount){
       progEl.textContent='⏳ Качване на '+done+' / '+total+(errCount?' ('+errCount+' партиди с грешка)':'')+'...';
-    },function(errorCount,firstError){
+    },function(errorCount,firstError,failedRows){
       if(errorCount>0){
-        progEl.innerHTML='<span style="color:#dc2626;">⚠️ Завърши с '+errorCount+' неуспешни партиди от общо ~'+Math.ceil(mapped.length/500)+'. Провери конзолата (F12) за детайли.<br>Първа грешка: '+esc(String(firstError).slice(0,200))+'</span>';
+        progEl.innerHTML='<span style="color:#dc2626;">⚠️ '+failedRows+' от '+mapped.length+' реда не са записани — пусни импорта пак; повторното пускане само обновява. Провери конзолата (F12) за детайли.<br>Първа грешка: '+esc(String(firstError).slice(0,200))+'</span>';
         toast('⚠️ Импортът приключи с грешки - виж детайли','#dc2626');
       } else {
         progEl.innerHTML='<span style="color:#16a34a;">✅ Готово! Обработени '+mapped.length+' артикула.</span>';
@@ -935,39 +935,60 @@ function startCatalogImport(){
   };
   reader.readAsText(file,'UTF-8');
 }
+/* Порция, паднала със statement timeout (57014 — anon е с 3s) или мрежова
+   грешка, се праща още веднъж на две половини; едва ако и половинка падне,
+   се брои грешка (23.11.2026, сесия catalog-import-retry). Друга HTTP грешка
+   (напр. 409) — без повторен опит. onDone(errorCount, firstError, failedRows):
+   failedRows = брой реално НЕзаписани редове. */
 function batchUpsertCatalog(rows,onProgress,onDone){
   var BATCH=500;
   var i=0;
   var errorCount=0;
+  var failedRows=0;
   var firstError=null;
-  function next(){
-    if(i>=rows.length){onDone(errorCount,firstError);return;}
-    var batch=rows.slice(i,i+BATCH);
+  function send(batch,cb){
     fetch(API+'/product_catalog',{
       method:'POST',
       headers:Object.assign({},H,{'Prefer':'resolution=merge-duplicates,return=minimal'}),
       body:JSON.stringify(batch)
     }).then(function(res){
-      if(!res.ok){
-        errorCount++;
-        return res.text().then(function(errText){
-          console.error('Каталог upsert ГРЕШКА на партида (редове '+i+'-'+(i+BATCH)+'):',errText);
-          if(!firstError)firstError=errText;
-          i+=BATCH;
-          onProgress(Math.min(i,rows.length),rows.length,errorCount);
-          next();
+      if(res.ok){cb(null,false);return;}
+      return res.text().then(function(errText){
+        var code='';
+        try{code=String((JSON.parse(errText)||{}).code||'');}catch(e){}
+        cb(errText||('HTTP '+res.status),code==='57014');
+      });
+    }).catch(function(err){cb(String(err),true);});
+  }
+  function fail(from,count,err){
+    console.error('Каталог upsert ГРЕШКА (редове '+from+'-'+(from+count)+'):',err);
+    if(!firstError)firstError=err;
+    failedRows+=count;
+  }
+  function advance(){
+    i+=BATCH;
+    onProgress(Math.min(i,rows.length),rows.length,errorCount);
+    next();
+  }
+  function next(){
+    if(i>=rows.length){onDone(errorCount,firstError,failedRows);return;}
+    var start=i;
+    var batch=rows.slice(start,start+BATCH);
+    send(batch,function(err,retry){
+      if(!err){advance();return;}
+      if(!retry){errorCount++;fail(start,batch.length,err);advance();return;}
+      console.warn('Каталог upsert: порцията (редове '+start+'-'+(start+batch.length)+') падна, нов опит на две половини:',err);
+      var half=Math.ceil(batch.length/2);
+      var a=batch.slice(0,half), b=batch.slice(half);
+      send(a,function(errA){
+        if(errA)fail(start,a.length,errA);
+        if(!b.length){if(errA)errorCount++;advance();return;}
+        send(b,function(errB){
+          if(errB)fail(start+half,b.length,errB);
+          if(errA||errB)errorCount++;
+          advance();
         });
-      }
-      i+=BATCH;
-      onProgress(Math.min(i,rows.length),rows.length,errorCount);
-      next();
-    }).catch(function(err){
-      errorCount++;
-      console.error('Каталог upsert - мрежова грешка на партида (редове '+i+'-'+(i+BATCH)+'):',err);
-      if(!firstError)firstError=String(err);
-      i+=BATCH;
-      onProgress(Math.min(i,rows.length),rows.length,errorCount);
-      next();
+      });
     });
   }
   next();
