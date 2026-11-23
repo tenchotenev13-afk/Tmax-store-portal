@@ -452,6 +452,7 @@ function collectDailyKasaSection(cb, dayISO, scope, threshold){
   var posLabel = function(x){ return 'ПОС № ' + (x.pos_number == null ? '?' : x.pos_number); };
 
   var go = function(thr){
+    var kq = reportKasaReader('daily_kasa', { day: dayISO }, scope);
     /* ЗАЩИТНА МРЕЖА за стари данни (20.09.2026).
 
        returnKasaForRevision() връща и трите документа наведнъж, но до тази
@@ -473,12 +474,12 @@ function collectDailyKasaSection(cb, dayISO, scope, threshold){
        Мрежата важи САМО за двата списъка с върнати. В разминаванията по
        праг върнатият ред и без това не влиза (pushOver го реже по status) и
        това нарочно не се променя. */
-    var zoReturned = sbGet('kasa_zoborot','status=eq.returned&select=store_name,date,razlika,status,return_reason,returned_at').then(function(rows){
+    var zoReturned = kq(sbGet, 'kasa_zoborot','status=eq.returned&select=store_name,date,razlika,status,return_reason,returned_at').then(function(rows){
       var list = Array.isArray(rows) ? rows : [];
       var dates = [];
       list.forEach(function(x){ if (x.date && dates.indexOf(x.date) < 0) dates.push(x.date); });
       if (!dates.length) return { rows: list, fixed: {} };
-      return sbGet('kasa_reports','date=in.('+dates.join(',')+')&select=store_name,date,status').then(function(reps){
+      return kq(sbGet, 'kasa_reports','date=in.('+dates.join(',')+')&select=store_name,date,status').then(function(reps){
         var by = {};
         (Array.isArray(reps) ? reps : []).forEach(function(x){
           var k = x.store_name + '|' + x.date;
@@ -493,10 +494,10 @@ function collectDailyKasaSection(cb, dayISO, scope, threshold){
     }).catch(function(){ return { rows: [], fixed: {} }; });
 
     Promise.all([
-      sbGet('kasa_reports','status=eq.returned&select=store_name,date,pos_number,razlika,status,return_reason,returned_at'),
+      kq(sbGet, 'kasa_reports','status=eq.returned&select=store_name,date,pos_number,razlika,status,return_reason,returned_at'),
       zoReturned,
-      sbGet('kasa_reports','date=eq.'+dayISO+'&select=store_name,date,pos_number,razlika,status'),
-      sbGet('kasa_zoborot','date=eq.'+dayISO+'&select=store_name,date,razlika,status')
+      kq(sbGet, 'kasa_reports','date=eq.'+dayISO+'&select=store_name,date,pos_number,razlika,status'),
+      kq(sbGet, 'kasa_zoborot','date=eq.'+dayISO+'&select=store_name,date,razlika,status')
     ]).then(function(r){
       var dayD = new Date(dayISO+'T00:00:00');
 
@@ -1906,6 +1907,86 @@ function reportGetAll(t, q){
   return page(0);
 }
 
+/* ─── Каса през kasa-api в отчетите (етап 1б-3, 23.11.2026) ─────────────
+   R26 (collectDailyKasaSection) и R27 (collectCrossModuleWeeklySummary)
+   четат касовите таблици през kq(старата функция, таблица, заявка). Двете
+   функции са копие в send-scheduled-report (там kq няма — сървърът чете
+   със service ключа); разликата е описана в ACCEPTED_DRIFT на
+   tests/report-edge-sync.test.js и е САМО замяната sbGet(… → kq(sbGet, …
+   плюс реда с reportKasaReader.
+
+   Старият път: kq вика старата функция със същите аргументи. Новият: ЕДНА
+   заявка report_rows за целия колектор, а всяка стара заявка взима своята
+   част. Грешка на kasa-api → червен toast и празен масив, както sbGet при
+   грешка; на мястото на reportGetAll — с .partial, за да излезе червеният
+   ред „Непълни данни“ в отчета, както при прекъснато четене.
+
+   Кога новият път (reportKasaApiOn): report_rows е само за admin,
+   accounting и controlling (решение 4). kasa-api чете обхвата за отчети —
+   admin / controlling: всички; accounting: assigned_stores или всички.
+   Старият път чете цялата верига и реже по scope в JS, затова новият
+   тръгва само ако обхватът на kasa-api покрива scope (без scope — цялата
+   верига) И целият обхват е в ключа (както в 1б-2: обхват „всички“ — само
+   при „all“). */
+function reportKasaApiOn(scope){
+  var L = kasaApiStores;
+  if (!L || !currentUser || !currentSession) return false;
+  var role = currentUser.role, rs;
+  if (role === 'admin' || role === 'controlling') rs = null;
+  else if (role === 'accounting') rs = kasaApiScopeStores();
+  else return false;
+  var want = (scope && scope.length) ? scope : null;
+  if (rs) {
+    if (!want) return false;
+    if (!want.every(function(s){ return rs.indexOf(s) >= 0; })) return false;
+  }
+  if (L === 'all') return true;
+  if (!rs) return false;
+  return rs.every(function(s){ return L.indexOf(s) >= 0; });
+}
+/* Коя част от отговора на report_rows отговаря на старата заявка. Непозната
+   заявка → грешка: нова заявка в колектора без съответствие тук трябва да
+   се види в теста, не да тръгне тихо по стария път. */
+function reportKasaPart(kind, table, q){
+  if (kind === 'daily_kasa') {
+    if (table === 'kasa_zoborot' && /^status=eq\.returned&/.test(q)) return 'returned_zoborot';
+    if (table === 'kasa_reports' && /^status=eq\.returned&/.test(q)) return 'returned_reports';
+    if (table === 'kasa_reports' && /^date=in\./.test(q)) return 'fix_reports';
+    if (table === 'kasa_reports' && /^date=eq\./.test(q)) return 'day_reports';
+    if (table === 'kasa_zoborot' && /^date=eq\./.test(q)) return 'day_zoborot';
+  }
+  if (kind === 'cross_kasa') {
+    if (table === 'kasa_storno' && /^created_at=gte\./.test(q)) return 'storno';
+    if (table === 'kasa_zoborot' && /^date=gte\./.test(q)) return 'zoborot';
+    if (table === 'kasa_storno' && /^storno_date=gte\./.test(q)) return 'storno_week';
+  }
+  return null;
+}
+function reportKasaReader(kind, params, scope){
+  var p = null;
+  return function(oldFn, table, q){
+    return kasaApiReady().then(function(){
+      if (!reportKasaApiOn(scope)) return oldFn(table, q);
+      var part = reportKasaPart(kind, table, q);
+      if (!part) throw new Error('reportKasaReader: непозната заявка ' + table + '?' + q);
+      if (!p) {
+        var body = { kind: kind };
+        for (var k in params) if (Object.prototype.hasOwnProperty.call(params, k)) body[k] = params[k];
+        p = kasaApi('report_rows', body);
+      }
+      return p.then(function(d){
+        return (d && Array.isArray(d[part])) ? d[part].slice() : [];
+      }, function(e){
+        if (!(e && e.kasaApi)) throw e;
+        if (!e.toasted) { e.toasted = true; toast('Касовите данни за отчета не се заредиха: ' + e.message, '#dc2626'); }
+        var empty = [];
+        if (oldFn === reportGetAll) empty.partial = true;
+        return empty;
+      });
+    });
+  };
+}
+
 /* scope: масив с имена на обекти или null/празно = цялата верига.
    Дневният отчет НЕ рендира тази секция (buildCrossModuleSectionHtml се вика
    само от buildWeeklyReportHtml) — параметърът е тук, за да може срязаният
@@ -1921,6 +2002,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
   var inScope = function(s){ return !hasScope || scope.indexOf(s) >= 0; };
   var upStamp = W.toStamp ? '&created_at=lt.' + W.toStamp : '';
   var upDate = W.toISO ? '&date=lte.' + W.toISO : '';
+  var kq = reportKasaReader('cross_kasa', { from_stamp: W.fromStamp, to_stamp: W.toStamp, from_iso: W.fromISO, to_iso: W.toISO }, scope);
 
   /* "Застояли" и "остарели" НЕ следват прозореца - те са моментна снимка
      спрямо ДНЕС ("отворено от повече от 7 дни"), а не "случило се през
@@ -1936,8 +2018,8 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        не стигаше - разбивка по магазин беше физически невъзможна. */
     sbGet('differences_reports','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,direction,reviewed'),
     reportGetAll('stock_returns','select=store_name,status,supplier,created_at&order=id.asc'),
-    reportGetAll('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,status&order=id.asc'),
-    sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
+    kq(reportGetAll, 'kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,status&order=id.asc'),
+    kq(sbGet, 'kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
     /* Отворените позиции, БЕЗ филтър по created_at - той е датата на SAP
        импорта, не възрастта на позицията (виж пресмятането по-долу). */
     reportGetAll('goods_transit','status=in.(pending,sent)&archived_at=is.null&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name,reviewed_at,recon_at&order=id.asc'),
@@ -1965,7 +2047,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        принадлежи на седмицата на сторното. Подвижен прозорец (таб „Днес")
        няма седмица. */
     W.toISO
-      ? reportGetAll('kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,new_sum,articles,reason,store_comment,status&order=id.asc')
+      ? kq(reportGetAll, 'kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,new_sum,articles,reason,store_comment,status&order=id.asc')
       : Promise.resolve([]),
     /* ⏳ „Необработени разлики над N дни" — МОМЕНТНА СНИМКА, не срез от
        седмицата. Затова и трите заявки нямат прозорец по дата: въпросът е

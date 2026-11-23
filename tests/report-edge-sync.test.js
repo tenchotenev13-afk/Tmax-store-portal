@@ -376,7 +376,33 @@ const BROWSER_ONLY = ['sendWeeklyReportRouted', 'sendWeeklyReportTest'];
    ден…") падна оттук на 24.08.2026: точно както предвиждаше самият запис,
    едж файлът се изравни при първия деплой по същина — преработката на
    отчета, която и без това пренаписва тази функция. */
-const ACCEPTED_DRIFT = [];
+const ACCEPTED_DRIFT = [
+  /* Каса през kasa-api (етап 1б-3, 23.11.2026, решение 4). В браузъра
+     касовите четения на двата колектора минават през kq() — старата заявка
+     или report_rows според ключа kasa_api_stores (reportKasaReader в
+     report.js). Сървърът чете със service ключа и kq не му трябва — едж
+     функцията НЕ се деплойва заради това. Разликата е САМО: един ред
+     `var kq = reportKasaReader(…)` и sbGet('kasa_… / reportGetAll('kasa_…
+     → kq(sbGet, 'kasa_… / kq(reportGetAll, 'kasa_…. Аргументите (таблица и
+     заявка) са буквално същите. Записът пада, когато етап 2 махне стария
+     път от браузъра и колекторите се разделят изрично. */
+  { fn: 'collectDailyKasaSection',
+    note: 'kasa-api (1б-3): касовите четения в браузъра минават през kq() — стара заявка или report_rows по ключа; сървърът чете със service ключа.',
+    patch: function (s) {
+      return s.replace('  var go = function(thr){\n',
+        "  var go = function(thr){\n    var kq = reportKasaReader('daily_kasa', { day: dayISO }, scope);\n")
+        .replace(/sbGet\('kasa_/g, "kq(sbGet, 'kasa_");
+    } },
+  { fn: 'collectCrossModuleWeeklySummary',
+    note: 'kasa-api (1б-3): сторно и равнение в браузъра минават през kq() — стара заявка или report_rows по ключа; сървърът чете със service ключа.',
+    patch: function (s) {
+      return s.replace("  var upDate = W.toISO ? '&date=lte.' + W.toISO : '';\n",
+        "  var upDate = W.toISO ? '&date=lte.' + W.toISO : '';\n" +
+        "  var kq = reportKasaReader('cross_kasa', { from_stamp: W.fromStamp, to_stamp: W.toStamp, from_iso: W.fromISO, to_iso: W.toISO }, scope);\n")
+        .replace(/sbGet\('kasa_/g, "kq(sbGet, 'kasa_")
+        .replace(/reportGetAll\('kasa_/g, "kq(reportGetAll, 'kasa_");
+    } }
+];
 
 /* ── Разбор ─────────────────────────────────────────────────────────────
    Функциите се търсят на най-горно ниво (колона 0) и се затварят по БРОЯЧ

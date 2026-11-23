@@ -341,6 +341,7 @@ const TESTS = [
   'report-edge-sync.test.js',
   'kasa-api-storno-sync.test.js',
   'kasa-api-reads.test.js',
+  'kasa-api-reads-1b3.test.js',
   'report-paging-1000.test.js',
   'routed-empty-recipient.test.js',
   'report-daily-date.test.js',

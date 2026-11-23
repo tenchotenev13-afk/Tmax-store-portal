@@ -4,7 +4,7 @@
    app_settings.kasa_api_stores („all“ или имена със запетая); при него
    четенията R1–R17 (kasa.js, kasa-docs.js) и R28–R29 (notifications.js)
    минават през kasa-api, иначе — непроменените стари заявки. history.js
-   остава на стария път в тази част.
+   минава през kasa-api от 1б-3 (23.11.2026) — подробно в kasa-api-reads-1b3.test.js.
 
    Покрива:
      1. Превключвател: ключ липсва / „Кърджали“ / „all“ / паднала заявка за
@@ -574,10 +574,10 @@ const normDocs = s => s.replace(/onclick="(kasaOpenDocById|openKasaDoc)\([^"]*\)
     const f = h.doc.getElementById('h-from'), t = h.doc.getElementById('h-to'), ty = h.doc.getElementById('h-type');
     if (ok('формата за търсене в История съществува', !!(f && t && ty))) {
       f.value = dayOffset(-30); t.value = Y; ty.value = 'kasa';
-      const before = apiActs(h, 'range').length;
+      const before = apiActs(h, 'range').length, restBefore = restGets(h, 'kasa_reports').length;
       h.w.runHistorySearch();
       await settle(20);
-      ok('История (history.js) остава на стария път: /rest/v1/kasa_reports, без нов range', restGets(h, 'kasa_reports').length >= 1 && apiActs(h, 'range').length === before);
+      ok('История (history.js, 1б-3) минава през kasa-api: range с kinds [reports], 0 заявки към /rest/v1/kasa_reports', restGets(h, 'kasa_reports').length === restBefore && apiActs(h, 'range').slice(before).some(c => c.kinds.join() === 'reports'));
     }
   }
 

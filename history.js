@@ -108,18 +108,27 @@ function runHistorySearch(){
     promises.push(sbGetAll('client_orders',q2).then(function(d){histData.client=Array.isArray(d)?d:[];}));
   } else { histData.client=[]; }
 
+  /* kasa-api (R18, R19 — етап 1б-3): една заявка „range“ за двата вида
+     (kasaRangeGet в kasa.js я споделя), редът — като в старите заявки. */
+  var hKinds=[];
+  if(type==='all'||type==='kasa') hKinds.push('reports');
+  if(type==='all'||type==='storno') hKinds.push('storno');
+  var hP=histKasaParams(hKinds,from,to,store);
+
   if(type==='all'||type==='kasa'){
     /* sbGetAll + id като tiebreaker: 01.09–31.10 по всички обекти са 1309
        реда (11.10.2026), PostgREST реже на 1000 тихо. */
     var q3='order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
-    promises.push(sbGetAll('kasa_reports',q3).then(function(d){histData.kasa=Array.isArray(d)?d:[];}));
+    promises.push(kasaRangeGet('reports',hP,function(){return sbGetAll('kasa_reports',q3);},histKasaSorter(['date.desc','id.desc']))
+      .then(function(d){histData.kasa=Array.isArray(d)?d:[];}));
   } else { histData.kasa=[]; }
 
   if(type==='all'||type==='storno'){
     /* sbGetAll + id като tiebreaker: 30 дни сторна по всички обекти са над
        1000 реда (2287 на 11.10.2026) и PostgREST реже тихо. */
     var q4=STORNO_SELECT+'&order=storno_date.desc,id.desc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter;
-    promises.push(sbGetAll('kasa_storno',q4).then(function(d){histData.storno=Array.isArray(d)?d:[];}));
+    promises.push(kasaRangeGet('storno',hP,function(){return sbGetAll('kasa_storno',q4);},histKasaSorter(['storno_date.desc','id.desc']))
+      .then(function(d){histData.storno=Array.isArray(d)?d:[];}));
   } else { histData.storno=[]; }
 
   Promise.all(promises).then(function(){
@@ -130,9 +139,38 @@ function runHistorySearch(){
     else if(histData.transport.partial) toast('⚠️ Непълни данни — транспорт: прочетени '+histData.transport.length+' реда, четенето прекъсна','#dc2626');
     else if(histData.kasa.partial) toast('⚠️ Непълни данни — каса: прочетени '+histData.kasa.length+' реда, четенето прекъсна','#dc2626');
   }).catch(function(e){
+    /* kasa-api: съобщението на функцията (напр. „Периодът е над 400 дни“) —
+       вместо празна таблица, която би изглеждала като „няма данни“. */
     document.getElementById('h-results').innerHTML=
-      '<div style="text-align:center;padding:30px;color:#dc2626;">Грешка при зареждане.</div>';
+      '<div style="text-align:center;padding:30px;color:#dc2626;">Грешка при зареждане.'+(e&&e.kasaApi?' '+esc(e.message):'')+'</div>';
   });
+}
+
+/* ─── Каса през kasa-api (етап 1б-3, 23.11.2026) ───────────────────────
+   R18–R21 минават през kasaRangeGet (kasa.js): старата заявка тръгва, когато
+   kasaApiOn() каже „не“ — обект от падащото меню → този обект в списъка;
+   „— Всички —“ → целият обхват в списъка. Новият път подрежда редовете като
+   старите заявки (kasa-api има свой ред), за да са екранът и Excel-ът същите. */
+function histKasaParams(kinds,from,to,store){
+  var p={kinds:kinds,from:from,to:to};
+  if(store) p.store=store;
+  return p;
+}
+/* Ред като order=… в PostgREST: стабилен; NULL — последен при asc, пръв при desc. */
+function histKasaSorter(spec){
+  var keys=spec.map(function(s){ var p=s.split('.'); return {col:p[0],desc:p[1]==='desc'}; });
+  return function(rows){
+    return rows.map(function(r,i){return [r,i];}).sort(function(a,b){
+      for(var k=0;k<keys.length;k++){
+        var c=keys[k].col, va=a[0][c], vb=b[0][c];
+        var na=va==null, nb=vb==null;
+        if(na||nb){ if(na&&nb) continue; return (na?1:-1)*(keys[k].desc?-1:1); }
+        va=String(va); vb=String(vb);
+        if(va!==vb) return (va<vb?-1:1)*(keys[k].desc?-1:1);
+      }
+      return a[1]-b[1];
+    }).map(function(x){return x[0];});
+  };
 }
 
 /* ─── RENDER SHELL ──────────────────────────────────────────── */
@@ -429,7 +467,9 @@ function renderHistoryResults(){
   if(histData.kasa.length){
     /* sbGetAll + id като tiebreaker — 01.09–31.10 са 1427 документа
        (11.10.2026), на екрана излизаха 1000. Същата заявка като в Excel. */
-    sbGetAll('kasa_documents','order=date.desc,store_name.asc,created_at.desc,id.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ())).then(function(docs){
+    var dq='order=date.desc,store_name.asc,created_at.desc,id.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ());
+    /* kasa-api (R20): редът на „documents“ в kasa-api е същият като тук. */
+    kasaRangeGet('documents',histKasaParams(['documents'],histFilter.from,histFilter.to,histFilter.store),function(){return sbGetAll('kasa_documents',dq);}).then(function(docs){
       if(!Array.isArray(docs)||(!docs.length&&!docs.partial)) return;
       var docTypes={pos:'ПОС',glavna:'Главна каса',zoborot:'Равнение',other:'Друго'};
       var docHtml=(docs.partial?partialRow('документи',docs.length):'')+
@@ -449,13 +489,22 @@ function renderHistoryResults(){
           '<div style="font-size:11px;font-weight:600;color:#0f172a;text-align:center;word-break:break-all;">'+esc(d.file_name||'')+'</div>'+
           '<div style="font-size:10px;color:#64748b;text-align:center;">'+esc(d.store_name||'')+' · '+fmtDate(d.date)+'</div>'+
           '<div style="font-size:10px;color:#64748b;text-align:center;">'+(docTypes[d.report_type]||d.report_type||'')+'</div>'+
-          '<button data-path="'+esc(d.file_url)+'" onclick="previewKasaDoc(this.dataset.path)" style="border:1px solid #2563eb;background:#fff;color:#2563eb;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;">👁 Преглед</button>'+
+          /* kasa-api (R22): линкът по id на реда (doc_url, 300 сек), без anon ключ. */
+          (d.id&&kasaApiOn(d.store_name)
+            ? '<button data-id="'+esc(d.id)+'" onclick="histPreviewDocById(this.dataset.id)"'
+            : '<button data-path="'+esc(d.file_url)+'" onclick="previewKasaDoc(this.dataset.path)"')+
+            ' style="border:1px solid #2563eb;background:#fff;color:#2563eb;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;">👁 Преглед</button>'+
         '</div>';
       });
       docHtml+='</div></div>';
       var existing=document.getElementById('h-results');
       if(existing) existing.innerHTML+=docHtml;
-    }).catch(function(){});
+    }).catch(function(e){
+      /* kasa-api: провалът се вижда — липсваща секция би изглеждала като „няма документи“. */
+      if(!(e&&e.kasaApi)) return;
+      var existing=document.getElementById('h-results');
+      if(existing) existing.innerHTML+='<div id="h-docs-err" class="card" style="margin-top:14px;color:#991b1b;background:#fee2e2;border:1px solid #dc2626;">⚠️ Документите не се заредиха: '+esc(e.message)+'</div>';
+    });
   }
 
   wrap.innerHTML=html;
@@ -654,7 +703,14 @@ function exportKasaToExcel(){
     /* sbGetAll + id като tiebreaker — над 1000 реда PostgREST реже тихо.
        При .partial файл НЕ се прави: лист „Сторно“ с ОБЩО от непълни редове
        изглежда като пълен отчет и така тръгва нататък. */
-    sbGetAll('kasa_storno',STORNO_SELECT+'&order=storno_date.desc,store_name.asc,id.desc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter).then(function(stornoRes){
+    /* kasa-api (R21): същите четения през „range“ — сторното, после трите
+       вида в една заявка и купюрите отделно (cols:'denoms' важи само за
+       reports). Редът — като в старите заявки. */
+    var xsq=STORNO_SELECT+'&order=storno_date.desc,store_name.asc,id.desc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter;
+    var xP=histKasaParams(['zoborot','glavna','documents'],from,to,store);
+    var xD=histKasaParams(['reports'],from,to,store); xD.cols='denoms';
+    kasaRangeGet('storno',histKasaParams(['storno'],from,to,store),function(){return sbGetAll('kasa_storno',xsq);},
+      histKasaSorter(['storno_date.desc','store_name.asc','id.desc'])).then(function(stornoRes){
       var stornoAll = Array.isArray(stornoRes) ? stornoRes : [];
       if(stornoAll.partial){
         toast('⚠️ Непълни данни — сторно: прочетени '+stornoAll.length+' реда, четенето прекъсна. Excel не е създаден, опитай пак.','#dc2626');
@@ -667,13 +723,13 @@ function exportKasaToExcel(){
          histData.kasa (ПОС отчетите в листовете по магазини) идва от
          търсенето на екрана — и неговото .partial спира файла. */
       return Promise.all([
-        sbGetAll('kasa_zoborot',  'order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
-        sbGetAll('kasa_glavna',   'order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
-        sbGetAll('kasa_documents','order=date.desc,store_name.asc,created_at.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
+        kasaRangeGet('zoborot',xP,function(){return sbGetAll('kasa_zoborot',  'order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter);},histKasaSorter(['date.desc','id.desc'])),
+        kasaRangeGet('glavna',xP,function(){return sbGetAll('kasa_glavna',   'order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter);},histKasaSorter(['date.desc','id.desc'])),
+        kasaRangeGet('documents',xP,function(){return sbGetAll('kasa_documents','order=date.desc,store_name.asc,created_at.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter);}),
         /* Купюрите на ПОС отчетите — за „Разлика“ на Главна каса, смятана като
            на екрана. Отделна заявка, не histData.kasa: то е празно, ако
            търсенето е било за друг тип. */
-        sbGetAll('kasa_reports',  'select=id,store_name,date,'+GL_DENOM_COLS+'&order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter)
+        kasaRangeGet('reports',xD,function(){return sbGetAll('kasa_reports',  'select=id,store_name,date,'+GL_DENOM_COLS+'&order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter);},histKasaSorter(['date.desc','id.desc']))
       ]).then(function(res){
       var zobAll   = Array.isArray(res[0]) ? res[0] : [];
       var glAll    = Array.isArray(res[1]) ? res[1] : [];
@@ -988,6 +1044,8 @@ function exportKasaToExcel(){
 
       });
     }).catch(function(e){
+      /* kasa-api: причината + че файл няма (заменя toast-а от kasaApiFailToast). */
+      if(e&&e.kasaApi){ toast('Касовите данни не се заредиха: '+e.message+' Excel не е създаден.','#dc2626'); return; }
       console.error('Excel export error:', e);
       toast('Грешка при генериране на Excel','#dc2626');
     });
@@ -1009,6 +1067,13 @@ function exportKasaToExcel(){
 
 
 /* ── ПРЕГЛЕД НА ДОКУМЕНТ ── */
+/* kasa-api (R22): по id на реда — kasaOpenDocById (kasa-docs.js) подписва
+   през функцията и отваря нов раздел, както previewKasaDoc. */
+function histPreviewDocById(id){
+  if(!id){toast('Липсва документ','#dc2626');return;}
+  toast('⏳ Зареждане...');
+  kasaOpenDocById(id);
+}
 function previewKasaDoc(path){
   if(!path){toast('Липсва path','#dc2626');return;}
   var SB  = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';

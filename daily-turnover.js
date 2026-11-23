@@ -303,14 +303,16 @@ function loadOborot(){
        loadReportableStores() е същият източник, който ползват седмичният
        отчет, таб „Днес" и Бюлетинът. allStoresCache НЕ се пипа — там пълните
        23 записа са правилни за падащите менюта при избор на магазин. */
+    var coDate=oborotCODate;
     Promise.all([
       loadReportableStores(),
-      sbGet('daily_turnover','date=eq.'+oborotCODate+'&order=store_name.asc')
+      oborotRangeGet({kinds:['oborot'],from:coDate,to:coDate},
+        function(){return sbGet('daily_turnover','date=eq.'+coDate+'&order=store_name.asc');},true)
     ]).then(function(res){
       oborotCOStores=Array.isArray(res[0])?res[0]:[];
       oborotCORows=Array.isArray(res[1])?res[1]:[];
       renderOborot();
-    }).catch(function(){renderOborot();});
+    }).catch(function(e){if(kasaApiFailPanel(e))return;renderOborot();});
     return;
   }
   /* Един прочит покрива двете нужди: днешния запис и средното за 30 дни
@@ -318,7 +320,10 @@ function loadOborot(){
      обекта (19.11.2026), но четенето остава заради средното. */
   var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+
         '&date=gte.'+dtDay(29)+'&order=date.desc';
-  sbGet('daily_turnover',q).then(function(data){
+  /* kasa-api: горна граница няма и в старата заявка — 2099-12-31 (един обект,
+     таванът от 400 дни на kasa-api не важи). */
+  oborotRangeGet({kinds:['oborot'],from:dtDay(29),to:'2099-12-31',store:currentUser.store_name},
+    function(){return sbGet('daily_turnover',q);}).then(function(data){
     oborotRecent=Array.isArray(data)?data:[];
     var t=dtToday();
     oborotToday=null;
@@ -326,7 +331,25 @@ function loadOborot(){
       if(oborotRecent[i].date===t){oborotToday=oborotRecent[i];break;}
     }
     renderOborot();
-  }).catch(function(){renderOborot();});
+  }).catch(function(e){
+    /* kasa-api: грешка → съобщение в таба, не празна форма — празна би
+       изглеждала като „днес не е подаден“ и би поканила втори запис. */
+    if(kasaApiFailPanel(e))return;
+    renderOborot();
+  });
+}
+
+/* ─── Четене през kasa-api (етап 1б-3, 23.11.2026) ──────────────────────
+   kasaRangeGet (kasa.js): старата заявка, когато kasaApiOn() каже „не“.
+   allStores — старото четене е по ЦЯЛАТА верига (R23, ЦО), без storeQ.
+   kasa-api връща само обхвата (accounting с assigned_stores → своите), а
+   екранът трябва да е същият, затова там новият път тръгва само при обхват
+   „всички“ (admin / accounting без assigned и ключ „all“). */
+function oborotRangeGet(params,oldFn,allStores){
+  return kasaApiReady().then(function(){
+    if(allStores&&kasaApiScopeStores()!==null) return oldFn();
+    return kasaRangeGet('oborot',params,oldFn);
+  });
 }
 
 function oborotSetDate(d){
@@ -972,9 +995,12 @@ function submitOborotEdit(){
      ⚠️ task_completions НЕ се пипа при никой път оттук: отметката не следва
      датата автоматично и преместването ѝ, ако изобщо трябва, е отделно
      решение на човек. */
+  /* kasa-api (R25): същата проверка — редовете на обекта за новата дата. */
   var pre=(newDate!==r.date)
-    ? sbGet('daily_turnover','select=id&store_name=eq.'+encodeURIComponent(r.store_name)+
-        '&date=eq.'+encodeURIComponent(newDate))
+    ? oborotRangeGet({kinds:['oborot'],from:newDate,to:newDate,store:r.store_name},function(){
+        return sbGet('daily_turnover','select=id&store_name=eq.'+encodeURIComponent(r.store_name)+
+          '&date=eq.'+encodeURIComponent(newDate));
+      })
     : Promise.resolve([]);
 
   pre.then(function(rows){
@@ -1007,5 +1033,10 @@ function submitOborotEdit(){
       try{console.error('submitOborotEdit daily_turnover → '+(status||'мрежов срив')+': '+msg);}catch(e){}
       toast('Грешка при корекция: '+msg,'#dc2626');
     });
+  },function(e){
+    /* kasa-api: проверката не мина → корекцията НЕ се записва (без PATCH
+       на сляпо); toast-ът с причината е показан, формата остава отворена. */
+    oborotSubmitting=false;
+    kasaApiCatch(e);
   });
 }
