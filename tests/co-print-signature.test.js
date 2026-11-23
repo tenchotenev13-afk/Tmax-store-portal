@@ -16,7 +16,7 @@ const { boot, bubbleClick, ok, guard, section, report, dayOffset, tsOffset } = H
 function order(id, extra) {
   return Object.assign({
     id, in_num: 'Троян-' + id, store_name: 'Троян', fulfiller: 'Габрово',
-    status: 'pending', date: dayOffset(-3), hour: '10:00',
+    status: 'pending', date: '2026-11-10', hour: '10:00',
     customer_name: 'Иван Петров', phone: '0888111222', bon: 'Б-1', agent: 'Мария',
     product: 'ПАРКЕТ', sap: '111', qty: 5, unit: 'кв.м',
     items: [{ product: 'ПАРКЕТ', sap: '111', qty: 5, unit: 'кв.м' }],
