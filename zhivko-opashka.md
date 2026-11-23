@@ -14,7 +14,7 @@
 
 ## Чака изпращане
 
-(миграцията reads_as_code, reads-as-code-schema.sql — версия: ЧАКА ПРИЛАГАНЕ)
+(в базата от миграцията reads_as_code, reads-as-code-schema.sql, версия 20261123113626, приложена 23.11.2026)
 - 23.11 · stock_differences.reads_as_code — text, NULL, без default
 
 ## Потвърдено 20.11.2026
