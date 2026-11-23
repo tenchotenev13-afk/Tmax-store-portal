@@ -164,6 +164,12 @@ function assertNoDash(body) {
   section('6. Корекция на ред от бланка (submitSDCorrection)');
   {
     const { w, doc, calls } = env(STORE, EMPTY);
+    /* От 23.11.2026 обектът коригира само ред на бланка, подадена от
+       потребител на същия обект (sdStoreMayCorrect, razliki-chete-se-kato) —
+       редът е на бланка на „Управител Враца“, списъкът с подателите — зареден. */
+    w.diffReports = [{ id: 'r-v', store_name: 'Враца', submitted_by: 'Управител Враца' }];
+    w.sdData[0].report_id = 'r-v';
+    w.sdStoreSubmitters = { store: 'Враца', names: { 'Управител Враца': 1 } };
     if (guard('модалът за корекция се отваря', () => w.openSDCorrectModal('l-empty'))) {
       ok('sdc-sap е празен, не "—"', doc.getElementById('sdc-sap').value === '',
         JSON.stringify(doc.getElementById('sdc-sap').value));

@@ -232,6 +232,10 @@ function mainCell(doc, name) {
     const h = env(STORE);
     h.w.sdData = JSON.parse(JSON.stringify(LINES));
     h.w.diffReports = JSON.parse(JSON.stringify(REPS));
+    /* От 23.11.2026 ✏️ за обекта — само на бланка, подадена от потребител на
+       същия обект (sdStoreMayCorrect, razliki-chete-se-kato): подателят е от обекта. */
+    h.w.diffReports.forEach(r => { r.submitted_by = 'Управител Враца'; });
+    h.w.sdStoreSubmitters = { store: 'Враца', names: { 'Управител Враца': 1 } };
     if (guard('модалът за корекция се отваря', () => h.w.openSDCorrectModal('o-big'))) {
       const ov = h.doc.getElementById('sdc-ov');
       const labels = Array.from(ov.querySelectorAll('label.fl')).map(l => l.textContent);

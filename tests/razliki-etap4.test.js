@@ -318,7 +318,8 @@ async function submit(h) {
     ok('печат без отметката: редът го няма', !h.doc.querySelector('#mod-print .dp-noinb'));
     const aoa = h.w.sdExcelRows(h.w.sdData);
     const col = aoa[0].indexOf('Няма входяща');
-    ok('Excel: колона „Няма входяща" (последна)', col === aoa[0].length - 1, JSON.stringify(aoa[0]));
+    /* От 23.11.2026 след нея е „Чете се като“ (razliki-chete-se-kato). */
+    ok('Excel: колона „Няма входяща" (предпоследна, преди „Чете се като")', col === aoa[0].length - 2 && aoa[0][col + 1] === 'Чете се като', JSON.stringify(aoa[0]));
     ok('Excel: „да" при no_inbound, празно иначе', aoa[1][col] === 'да' && aoa[2][col] === '', JSON.stringify([aoa[1][col], aoa[2][col]]));
     ok('Excel: всеки ред е с толкова клетки, колкото заглавия', aoa.every(r => r.length === aoa[0].length));
     const mail = h.w.diffEmailBodyHtml(h.w.diffReports[0], [L[0]], '');

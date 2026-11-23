@@ -65,6 +65,9 @@ function env(user, R, L, opts) {
   h.w.sdDirTab = R.direction;
   h.w.sdView = opts.view || 'reports';
   h.w.loadStockDiff = function () {}; /* презареждането би върнало статичните данни */
+  /* От 23.11.2026 ✏️ за обекта — само на бланка, подадена от потребител на
+     същия обект (sdStoreMayCorrect, razliki-chete-se-kato): подателят е от обекта. */
+  h.w.sdStoreSubmitters = { store: R.store_name, names: { [R.submitted_by]: 1 } };
   h.w.renderStockDiff();
   return h;
 }

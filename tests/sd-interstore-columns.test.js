@@ -79,6 +79,9 @@ function env(user, lines, reports, dirTab) {
   h.w.sdStoreFilter = ''; h.w.sdSearch = ''; h.w.sdDirTab = dirTab || 'interstore';
   h.w.sdShowDone = {};
   h.w.invalidateStoreCaches(); h.w.invalidateSuppliersCache();
+  /* От 23.11.2026 ✏️ за обекта — само на бланка, подадена от потребител на
+     същия обект (sdStoreMayCorrect, razliki-chete-se-kato): подателят е от обекта. */
+  h.w.sdStoreSubmitters = { store: 'Петрич', names: { 'Управител': 1 } };
   h.w.renderStockDiff();
   return h;
 }

@@ -56,8 +56,13 @@ const crypto = require('crypto');
    ;sdPaWarnRow(this) в onblur (18) и празният <div class="di-pa-warn"></div> (30),
    по едно срещане и нищо друго: без тях HTML-ът е байт по байт старата снимка
    b06d658c… (6499), проверено машинно. Виж razliki-etap7a.test.js. */
-const MODAL_SHA = '4519db9fd177567a1ad6fd6ad34aea573f123844a223baad6adcdaa8a682d604';
-const MODAL_LEN = 6575;
+/* Обновена на 23.11.2026 (6575 -> 6608): „Чете се като (код)“ на реда
+   (razliki-chete-se-kato) — празният <div class="di-reads-wrap"></div> (33),
+   едно срещане и нищо друго: без него HTML-ът е байт по байт старата снимка
+   4519db9f… (6575), проверено машинно. Полето се появява само при
+   „грешен баркод“ — виж razliki-chete-se-kato.test.js. */
+const MODAL_SHA = '143bcbf3b0f602087ea3f01d5da50b894bc4b4cc1699fd9a131c57e3ce6f6fb0';
+const MODAL_LEN = 6608;
 
 const WH = 'Логистичен склад Търговище';
 const STORE = { email: 'petrich@temax.bg', display_name: 'Управител Петрич',

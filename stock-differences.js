@@ -416,7 +416,7 @@ function loadStockDiff() {
     diffReports = Array.isArray(res[1]) ? res[1] : [];
     /* Размените и връзките към „За връщане" зависят от вече заредените
        редове - затова след Promise.all, не в него. */
-    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks(), sdLoadStornoNotes(sq), sdLoadMe(), sdLoadProblemArticles(), sdLoadStoreSubmitters()]);
+    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks(), sdLoadStornoNotes(sq), sdLoadMe(), sdLoadProblemArticles(), sdLoadStoreSubmitters(), sdLoadReadsAsNames()]);
   }).then(function(){
     renderStockDiff();
   }).catch(function(err) {
@@ -648,7 +648,7 @@ function renderStockDiff() {
         h += '<tr id="sd-line-'+escAttr(String(r.id))+'" style="border-bottom:1px solid #f1f5f9;">'+
           '<td class="sd-c-item" style="padding:7px 10px;">'+
             '<div><span style="background:'+tcol+'1a;color:'+(TYPE_COLORS[r.type]||'#64748b')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(TYPE_LABELS[r.type]||r.type||'—')+'</span></div>'+
-            '<div class="sd-name" style="margin-top:3px;word-break:break-word;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+sdReturnMissingMark(r)+'</div>'+sdPaLineHtml(r)+
+            '<div class="sd-name" style="margin-top:3px;word-break:break-word;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+sdReturnMissingMark(r)+'</div>'+sdReadsAsHtml(r)+sdPaLineHtml(r)+
             (r.material_code?'<div style="'+MONO+'color:#64748b;">SAP '+esc(r.material_code)+'</div>':'')+
           '</td>'+
           '<td class="sd-c-who" style="padding:7px 10px;word-break:break-word;"><div style="font-weight:600;">'+esc(r.store_name||'')+'</div><div style="font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</div></td>'+
@@ -781,7 +781,7 @@ function sdExcelRows(list){
   var aoa = [['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Поръчка за връщане',
               'Дата потвърд.','Статус','Кредитно','Коментар','Коментар контролер']
              .concat(xShowWh?['Отговор на склада']:[])
-             .concat(['Дата на подаване','Документ №','Дата на документ','Няма входяща'])];
+             .concat(['Дата на подаване','Документ №','Дата на документ','Няма входяща','Чете се като'])];
   list.forEach(function(r){
     var rep = diffReports.find(function(x){ return x.id===r.report_id; }) || {};
     var q = parseFloat(r.quantity);
@@ -805,7 +805,9 @@ function sdExcelRows(list){
       txt(rep.document_number),
       fd(rep.doc_date),
       /* Етап 4: „да" / празно - вътрешно за SAP, в имейла до доставчика не влиза. */
-      rep.no_inbound ? 'да' : ''
+      rep.no_inbound ? 'да' : '',
+      /* „Грешен баркод“: код + име от каталога (23.11.2026); иначе празно. */
+      sdReadsAsCode(r) ? (sdReadsAsCode(r) + (sdReadsAsNames[sdReadsAsCode(r)] ? ' ' + sdReadsAsNames[sdReadsAsCode(r)] : '')) : ''
     ]));
   });
   return aoa;
@@ -825,7 +827,7 @@ function exportSDExcel(){
   var wb = window.XLSX.utils.book_new();
   var ws = window.XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [{wch:16},{wch:16},{wch:22},{wch:10},{wch:34},{wch:7},{wch:13},{wch:13},
-                 {wch:12},{wch:16},{wch:10},{wch:26},{wch:26},{wch:26},{wch:12},{wch:14},{wch:12},{wch:12}];
+                 {wch:12},{wch:16},{wch:10},{wch:26},{wch:26},{wch:26},{wch:12},{wch:14},{wch:12},{wch:12},{wch:30}];
   window.XLSX.utils.book_append_sheet(wb, ws, 'Разлики');
   var fname = 'razliki-'+(sdTypeFilter==='all' ? 'vsichki' : sdExcelTranslit(SD_TYPE_PLAIN[sdTypeFilter]||sdTypeFilter))+'-'+
               (sdStoreFilter ? sdExcelTranslit(sdStoreFilter) : 'vsichki')+'-'+today()+'.xlsx';
@@ -2549,9 +2551,13 @@ function sdLineTouchedByOthers(l){
    (вкл. неактивните — подател, който вече го няма, пак е от обекта).
    Непрочетен списък → без бутон. */
 var sdStoreSubmitters = { store: null, names: null };
+/* Потребител на ОБЕКТ — този, за когото се чете списъкът с подателите. */
+function sdIsStoreViewer(){
+  return !!(currentUser && currentUser.store_name) && !isGlobal() && !isLogisticsWarehouseUser() && !isCentralOfficeUser() && !sdIsCOViewer();
+}
 function sdLoadStoreSubmitters(){
   var st = currentUser && currentUser.store_name;
-  if(!st || isGlobal() || isLogisticsWarehouseUser() || isCentralOfficeUser() || sdIsCOViewer()){
+  if(!sdIsStoreViewer()){
     sdStoreSubmitters = { store: null, names: null };
     return Promise.resolve();
   }
@@ -2571,6 +2577,15 @@ function sdIsStoreSubmitter(name, store){
   if(!s || !s.names || !store || s.store !== store) return false;
   var n = String(name == null ? '' : name).trim();
   return !!n && s.names[n] === 1;
+}
+/* ✏️ „Коригирай количество/SAP код“ (решение на Тенчо 23.11.2026, проверка
+   на живо: Управител Петрич виждаше ✏️ на бланката на Миглена) — същото
+   правило като 🗑: обектът коригира само ред на бланка, подадена от
+   потребител на същия обект (sdIsStoreSubmitter по rep.submitted_by).
+   Офисът, складът и ЦО — без промяна. */
+function sdStoreMayCorrect(rep){
+  if(!sdIsStoreViewer()) return true;
+  return !!rep && sdIsStoreSubmitter(rep.submitted_by, rep.store_name);
 }
 function sdCanStoreDeleteLine(l, rep){
   if(!l || !rep || !currentUser) return false;
@@ -4498,7 +4513,7 @@ function renderDiffReportsSection(){
            живееше в нейната клетка. Скрие ли се колоната, той се мести при
            артикула, чието количество и SAP код коригира. Без това
            междускладовата бланка оставаше без никакъв път за поправка. */
-        var correctBtn = (canEditSD(l)&&!l.type&&currentUser.store_name===rep.store_name)
+        var correctBtn = (canEditSD(l)&&!l.type&&currentUser.store_name===rep.store_name&&sdStoreMayCorrect(rep))
           ? ' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>'
           : '';
         if(sdCanStoreDeleteLine(l, rep)) correctBtn += ' <button class="sd-line-del" data-lid="'+l.id+'" onclick="sdStoreDeleteLine(this.dataset.lid)" title="Изтрий реда" style="border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">🗑</button>';
@@ -4508,7 +4523,7 @@ function renderDiffReportsSection(){
              склада - там вече е отговорът плюс потвърждението, а въпросът
              "този ли е артикулът" е за самия артикул. Вижда го само складът. */
           '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdReturnSyncMark(l)+sdReturnMissingMark(l)+sdSwapBadge(l)+(repShowResolve?'':correctBtn)+(repShowWh?'':markHtml)+'</td>'+
-          '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+sdPaLineHtml(l)+'</td>'+
+          '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+sdReadsAsHtml(l)+sdPaLineHtml(l)+'</td>'+
           '<td style="padding:3px 6px;text-align:right;">'+sdQtyCell(l.quantity,(l.quantity!=null?l.quantity:'—'))+'</td>'+
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
           '<td style="padding:3px 6px;text-align:right;">'+sdQtyCell(l.quantity_received,(l.quantity_received!=null?l.quantity_received:'—'))+'</td>'+
@@ -4600,6 +4615,12 @@ function openSDCorrectModal(lineId){
      обекта - те са основата на глобата. Магазинът вижда реда и го проследява. */
   if(isWrongReceiptReadOnly(l)){
     toast('Редът е от „Сторна по грешен прием" — количествата се коригират само от централния офис','#d97706');
+    return;
+  }
+  /* Същото правило като на бутона (sdStoreMayCorrect) — и при отварянето. */
+  var cRep = diffReports.find(function(x){ return x.id===l.report_id; });
+  if(!sdStoreMayCorrect(cRep)){
+    toast('Бланката е подадена от друг потребител — обектът коригира само свои бланки','#dc2626');
     return;
   }
   var existing = document.getElementById('sdc-ov'); if(existing) existing.remove();
@@ -4849,6 +4870,7 @@ function diffItemRowHtml(item,direction){
       '</div>';
     })()+
     '<div style="margin-bottom:6px;"><select class="fi di-cat" style="width:100%;" onchange="updateDiffItemHint(this)">'+catOpts+'</select></div>'+
+    '<div class="di-reads-wrap">'+sdReadsAsFieldHtml(item.category, item.readsAs)+'</div>'+
     '<div class="di-hint"></div>'+
     '<div style="display:flex;gap:6px;">'+
       '<input class="fi di-comment" placeholder="Коментар (незадължително)" style="flex:1;" value="'+escVal(item.comment)+'">'+
@@ -4858,8 +4880,30 @@ function diffItemRowHtml(item,direction){
 }
 /* Показва инлайн подсказка под артикула, когато категорията е избрана -
    задължителни снимки и/или кой допълнително трябва да получи имейл */
+/* „Чете се като (код)“ — само при „грешен баркод“ (решение на Тенчо
+   22–23.11.2026). При друга категория полето го няма; смяна на категорията
+   от wrong_barcode към друга го изчиства (рендерира се наново, празно). */
+function sdReadsAsFieldHtml(cat, val){
+  if(String(cat || '') !== 'wrong_barcode') return '';
+  return '<div style="margin-bottom:6px;"><input class="fi di-reads" placeholder="Чете се като (код) — по избор: на какъв код се чете баркодът" value="'+escVal(val)+'" style="width:100%;"></div>';
+}
+function sdReadsAsFieldSync(row, cat){
+  var wrap = row ? row.querySelector('.di-reads-wrap') : null;
+  if(!wrap) return;
+  var has = !!wrap.querySelector('.di-reads');
+  if(String(cat || '') === 'wrong_barcode'){ if(!has) wrap.innerHTML = sdReadsAsFieldHtml(cat, ''); }
+  else wrap.innerHTML = '';
+}
+/* Стойността за записа: само при wrong_barcode; trim; празно → null. */
+function sdReadsAsFromRow(row, cat){
+  if(String(cat || '') !== 'wrong_barcode') return null;
+  var el = row.querySelector('.di-reads');
+  var v = el ? String(el.value || '').trim() : '';
+  return v || null;
+}
 function updateDiffItemHint(selectEl){
   var row=selectEl.closest('.diff-item-row');
+  sdReadsAsFieldSync(row, selectEl.value);
   var hintEl=row?row.querySelector('.di-hint'):null;
   if(!hintEl)return;
   var meta=diffCatMeta(selectEl.value);
@@ -4913,6 +4957,7 @@ function collectDiffItemsForRedraw(){
       qtyReal:parseFloat(row.querySelector('.di-qty-real').value)||null,
       unit:row.querySelector('.di-unit').value||'бр.',
       category:row.querySelector('.di-cat').value||null,
+      readsAs:(row.querySelector('.di-reads')||{}).value||'',
       comment:row.querySelector('.di-comment').value
     });
   });
@@ -5014,6 +5059,7 @@ function collectDiffItems(){
       qtyReal:parseFloat(row.querySelector('.di-qty-real').value)||null,
       unit:row.querySelector('.di-unit').value||'бр.',
       category:row.querySelector('.di-cat').value||null,
+      readsAs:sdReadsAsFromRow(row,row.querySelector('.di-cat').value),
       comment:row.querySelector('.di-comment').value.trim()
     });
   });
@@ -6007,7 +6053,8 @@ function sdRouteWho(route, store){
 function sdRouteItemText(l){
   var q = (l.quantity == null) ? '' : String(l.quantity).trim();
   return (l.material_code ? l.material_code + ' ' : '') + (l.material_name || '') +
-    (q ? ' — ' + q + (l.unit ? ' ' + l.unit : '') : '');
+    (q ? ' — ' + q + (l.unit ? ' ' + l.unit : '') : '') +
+    (sdReadsAsCode(l) ? ' · чете се като ' + sdReadsAsCode(l) : '');
 }
 /* Съобщението след подаване — към кого отива бланката (решение на Тенчо
    22.11.2026). Доставчик и сторна — Цветелина. Междускладова — по редовете,
@@ -6223,6 +6270,9 @@ function submitDiffReport(){
           quantity_supplier_doc:it.qtySupplierDoc,
           quantity_received:it.qtyReal,
           difference_category:it.category,
+          /* „Чете се като“ — винаги ключ (масивът в един POST иска едни и
+             същи колони); при друга категория / празно — null. */
+          reads_as_code:it.category==='wrong_barcode'?(it.readsAs||null):null,
           unit:it.unit,
           comment:it.comment,
           /* „Поръчка №" от формата - на ВСЕКИ ред (41…); празно → null. */
@@ -6790,7 +6840,7 @@ function renderDiffPrint(rep){
     return '<tr class="dp-row">'+
       '<td class="dp-num">'+(i+1)+'</td>'+
       '<td>'+esc(l.material_code||'')+'</td>'+
-      '<td>'+esc(l.material_name||'')+'</td>'+
+      '<td>'+esc(l.material_name||'')+(sdReadsAsText(l)?'<div class="p-sub dp-reads">'+esc(sdReadsAsText(l))+'</div>':'')+'</td>'+
       '<td class="dp-num">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
       /* !=null, не истинност: 0 е валидно количество и трябва да се отпечата
          като 0, а не да падне в тирето. */
@@ -7268,6 +7318,38 @@ function sdPaLineHtml(l){
   if(!sdPaCanWrite()) return '';
   return '<div style="margin-top:3px;"><button class="sd-pa-add" data-lid="' + escVal(String(l.id)) + '" onclick="openSDPaFromLine(this.dataset.lid)" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">➕ В регистъра</button></div>';
 }
+/* ── „Чете се като“ на реда (23.11.2026, сесия razliki-chete-se-kato) ──
+   stock_differences.reads_as_code — само при „грешен баркод“; при друга
+   категория не се показва. Името е от product_catalog (по sap_code), четено
+   веднъж при зареждане само за кодовете от редовете; няма го → само кодът. */
+var sdReadsAsNames = {};
+function sdReadsAsCode(l){
+  if(!l || String(l.difference_category || '') !== 'wrong_barcode') return '';
+  return String(l.reads_as_code == null ? '' : l.reads_as_code).trim();
+}
+function sdLoadReadsAsNames(){
+  var codes = [];
+  (sdData || []).forEach(function(l){ var c = sdReadsAsCode(l); if(c && codes.indexOf(c) < 0) codes.push(c); });
+  if(!codes.length){ sdReadsAsNames = {}; return Promise.resolve(); }
+  var q = 'select=sap_code,product_name&sap_code=in.(' + codes.map(function(c){ return encodeURIComponent('"' + c.replace(/"/g, '') + '"'); }).join(',') + ')';
+  return sbGetOk('product_catalog', q).then(function(res){
+    var m = {};
+    if(res && res.ok) res.rows.forEach(function(p){ if(p && p.sap_code && p.product_name) m[String(p.sap_code)] = String(p.product_name); });
+    sdReadsAsNames = m;
+  }).catch(function(){ sdReadsAsNames = {}; });
+}
+function sdReadsAsText(l){
+  var c = sdReadsAsCode(l);
+  if(!c) return '';
+  var n = sdReadsAsNames[c] || '';
+  return 'чете се като ' + c + (n ? ' ' + n : '');
+}
+function sdReadsAsHtml(l){
+  var c = sdReadsAsCode(l);
+  if(!c) return '';
+  var n = sdReadsAsNames[c] || '';
+  return '<div class="sd-reads-as" style="margin-top:2px;font-size:11px;color:#713f12;">🔎 чете се като <b>' + esc(c) + '</b>' + (n ? ' ' + esc(n) : '') + '</div>';
+}
 function sdPaOpenFor(code){
   sdPaSearch = String(code || '');
   sdPaShowClosed = false;
@@ -7278,6 +7360,7 @@ function openSDPaFromLine(lineId){
   var l = (sdData || []).filter(function(x){ return String(x.id) === String(lineId); })[0];
   if(!l) return;
   openSDPaModal(null, { material_code: sdPaCode(l.material_code), material_name: l.material_name || '',
+    reads_as_code: sdReadsAsCode(l), reads_as_name: sdReadsAsNames[sdReadsAsCode(l)] || '',
     note: l.comment || '', source: 'diff', source_line_id: l.id });
 }
 /* Обновява кутийката под реда от въведения SAP код. */

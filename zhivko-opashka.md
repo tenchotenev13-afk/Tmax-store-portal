@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(миграцията reads_as_code, reads-as-code-schema.sql — версия: ЧАКА ПРИЛАГАНЕ)
+- 23.11 · stock_differences.reads_as_code — text, NULL, без default
+
 ## Потвърдено 20.11.2026
 
 (информативно, не схема — миграцията loading_list_delete_draft, loading-list-delete-draft-schema.sql, версия 20261118095818, приложена 18.11.2026)
