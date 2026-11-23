@@ -1697,6 +1697,7 @@ function openCorrection(id,table){
   renderItemRows('edt-items',resolveItems(rec));
   document.getElementById('edt-bon').value=rec.bon||'';
   document.getElementById('edt-delivery').value=rec.delivery||'';
+  document.getElementById('edt-delivery').style.borderColor='';
   document.getElementById('edt-delivery-reason').value=table==='client_orders'?(rec.delivery_reason||''):'';
   document.getElementById('edt-agent').value=rec.agent||'';
   var isClient=table==='client_orders';
@@ -1796,6 +1797,11 @@ function submitCorrection(){
     patch.fulfiller=fulfillerVal;
     patch.note=v('edt-note');
   } else {
+    /* Транспорт: датата на доставка не може да се изчисти, а заварен ред без
+       нея трябва да я получи при корекцията (23.11.2026). */
+    var edtDelEl=document.getElementById('edt-delivery');
+    if(!v('edt-delivery')){if(edtDelEl){edtDelEl.style.borderColor='#dc2626';edtDelEl.focus();}toast('Попълни дата на доставка','#dc2626');return;}
+    if(edtDelEl)edtDelEl.style.borderColor='';
     patch.address=v('edt-addr');
     patch.notes=v('edt-note');
   }

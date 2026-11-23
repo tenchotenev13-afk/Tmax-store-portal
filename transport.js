@@ -348,6 +348,7 @@ function openTransportModal(){
   document.getElementById('o-date').value=today();
   document.getElementById('o-hour').value='10:00';
   document.getElementById('o-delivery').value='';
+  document.getElementById('o-delivery').style.borderColor='';
   /* Обикновените служители (точно 1 назначен магазин) не бива да могат да сменят
      магазина - заключваме на техния собствен. Само admin/multi-store потребители
      виждат истински dropdown с всички магазини. */
@@ -379,6 +380,12 @@ function submitTransport(){
   if(!store){toast('Избери магазин','#dc2626');return;}
   if(!name||!phone||!addr){toast('Попълни задължителните полета *','#dc2626');return;}
   if(!items.length){toast('Добави поне един артикул с продукт','#dc2626');return;}
+  /* Датата на доставка е задължителна (23.11.2026): без нея заявката не се
+     брои за закъсняла (reportIsLate) и изчезва от отчета и „Днес“.
+     Заварените редове без дата не се пипат — колоната остава nullable. */
+  var delEl=document.getElementById('o-delivery');
+  if(!v('o-delivery')){if(delEl){delEl.style.borderColor='#dc2626';delEl.focus();}toast('Попълни дата на доставка','#dc2626');return;}
+  if(delEl)delEl.style.borderColor='';
 
   var date=v('o-date'), hour=v('o-hour');
   checkTransportConflict(store,date,hour,function(conflicts){

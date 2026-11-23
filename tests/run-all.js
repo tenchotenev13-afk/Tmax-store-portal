@@ -540,6 +540,7 @@ const TESTS = [
   'co-filter-bar.test.js',
   'transport-detail.test.js',
   'transport-delivery-column.test.js',
+  'transport-delivery-required.test.js',
   'history-transport-delivery-hour.test.js',
   'transport-row-items.test.js',
   'transport-filter-bar.test.js',

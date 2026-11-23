@@ -200,11 +200,21 @@ function card(h, i, tag) {
     ok('refused/done/postponed → без конфликт', !conflictModal(h));
   }
   {
-    /* Нова БЕЗ delivery — както преди, по date. */
+    /* Нова БЕЗ delivery — от 23.11.2026 формата я отказва преди проверката
+       за конфликт (transport-delivery-required.test.js): без модал, без заявка. */
     const h = await submit([tr('W', { date: TUE, delivery: FRI, hour: '14:20' })], '', TUE);
-    ok('нова без delivery: по date (същия date=вт, 14:20) → конфликт', !!conflictModal(h));
+    ok('нова без delivery през формата: няма модал за конфликт', !conflictModal(h));
+    ok('нова без delivery през формата: проверката за конфликт не тръгва', !h.urls.some(u => /transport_orders/.test(u)), JSON.stringify(h.urls));
+  }
+  {
+    /* Резервният клон на checkTransportConflict() без delivery — по date (пряко извикване). */
+    const h = env(MGR, [tr('W', { date: TUE, delivery: FRI, hour: '14:20' })]);
+    let got = null;
+    h.w.checkTransportConflict(STORE, TUE, '14:00', c => { got = c; }, '');
+    await ticks(6);
+    ok('checkTransportConflict без delivery: по date (date=вт, 14:20) → конфликт', !!got && got.length === 1, JSON.stringify(got));
     const q = h.urls.filter(u => /transport_orders/.test(u)).pop() || '';
-    ok('нова без delivery: заявката е date=eq.', /date=eq\./.test(q) && !/or=/.test(q), q);
+    ok('checkTransportConflict без delivery: заявката е date=eq.', /date=eq\./.test(q) && !/or=/.test(q), q);
   }
 
   report();
