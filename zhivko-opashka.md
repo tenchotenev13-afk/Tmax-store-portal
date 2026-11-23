@@ -14,7 +14,7 @@
 
 ## Чака изпращане
 
-(миграцията checklist_transit_deadline, weekly-checklist-transit-deadline-schema.sql — НЕ Е ПРИЛОЖЕНА към 23.11.2026; номерът от базата се добавя тук след прилагането)
+(в базата от миграцията checklist_transit_deadline, weekly-checklist-transit-deadline-schema.sql, версия 20261123123732, приложена 23.11.2026; data миграцията за 108-те клетки — още не)
 - 23.11 · нова таблица weekly_checklist_snapshots — year int NOT NULL · week_number int NOT NULL · metric_key text NOT NULL (PK: year, week_number, metric_key) · taken_at timestamptz NOT NULL, default now() · taken_by text NULL (стойности 'cron' / 'freeze-late')
 - 23.11 · weekly_checklist.portal_value за metric_key 'stoka_na_pat' — нови стойности 'da' / 'ne' вместо „N/M"; в седмиците без 10-то число — NULL (колоната не се мени, само съдържанието)
 
