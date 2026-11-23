@@ -2262,6 +2262,152 @@ function bulPlanGroups(dateISO, store){
   untimed.sort(function(a,b){ return a.rank[0]-b.rank[0] || a.rank[1]-b.rank[1] || a.rank[2]-b.rank[2]; });
   return {timed:timed, untimed:untimed, later:later, notices:notices};
 }
+/* ══ Проблемни артикули в Бюлетина (сесия bulletin-problem-articles,
+   23.11.2026; решения на Тенчо 22.11 и 23.11) ══
+   Активни записи от problem_articles с bulletin_on, чийто bulletin_stores е
+   NULL (всички) или съдържа обекта. Обектът натиска „✅ Направено“ (+ снимка,
+   задължителна при photo_required) → problem_article_done (една отметка на
+   обект). Без отмяна от обекта; затворен запис изчезва, отметката остава.
+   НЕ се показва (решение 23.11): „План за деня“, календар, „Днес“, печат на
+   Бюлетина, сутрешно писмо, седмичен отчет, push/известия, баджът „нова
+   задача от Бюлетин“. Снимките — bucket-ът и компресията от Разлики
+   (DIFF_BKT, diffCompressImage), префикс problem-articles/. */
+var bulPa = [];
+var bulPaDoneRows = [];
+var bulPaBusy = false;
+function bulPaLoad(){
+  var q = 'select=id,material_code,material_name,reads_as_code,reads_as_name,store_action,note,photos,bulletin_stores,photo_required&status=eq.active&bulletin_on=eq.true&order=material_code.asc,id.asc';
+  return Promise.all([sbGetOk('problem_articles', q), sbGetOk('problem_article_done', 'select=*&order=done_at.asc,id.asc')]).then(function(r){
+    if(!r[0].ok){ bulPa = []; try{ console.error('problem_articles (Бюлетин): ' + r[0].error); }catch(e){} }
+    else bulPa = r[0].rows || [];
+    if(!r[1].ok){ bulPaDoneRows = []; try{ console.error('problem_article_done (Бюлетин): ' + r[1].error); }catch(e){} }
+    else bulPaDoneRows = r[1].rows || [];
+  });
+}
+function bulPaForStore(store){
+  if(!store) return [];
+  return bulPa.filter(function(p){
+    return p && (p.bulletin_stores == null || (Array.isArray(p.bulletin_stores) && p.bulletin_stores.indexOf(store) >= 0));
+  });
+}
+function bulPaDoneOf(p, store){
+  return bulPaDoneRows.filter(function(d){ return d && String(d.article_id) === String(p.id) && d.store_name === store; })[0] || null;
+}
+function bulPaThumbs(photos){
+  return (Array.isArray(photos) ? photos : []).filter(function(f){ return f && f.url; }).map(function(f){
+    return '<a href="' + esc(f.url) + '" target="_blank" rel="noopener" style="display:inline-block;margin:3px 4px 0 0;"><img src="' + esc(f.url) + '" alt="" style="width:48px;height:48px;object-fit:cover;border:1px solid #e2e8f0;border-radius:5px;"></a>';
+  }).join('');
+}
+function bulPaFmtDay(val){
+  var d = new Date(val);
+  if(!val || isNaN(d.getTime())) return '';
+  var q = function(n){ return (n<10?'0':'')+n; };
+  return q(d.getDate()) + '.' + q(d.getMonth()+1);
+}
+function bulPaHtml(){
+  var store = bulPlanForStore();
+  var list = bulPaForStore(store);
+  if(!list.length) return '';
+  var canDo = !bulSeesAll();
+  var h = '<div class="bcard" id="sec-problem-articles">';
+  h += '<div style="font-size:14px;font-weight:600;margin-bottom:4px;">🏷️ Проблемни артикули</div>';
+  h += '<div style="font-size:11.5px;color:#64748b;margin-bottom:6px;">Баркодът на тези артикули се чете като друг. Направи каквото пише и отбележи „Направено“.</div>';
+  list.forEach(function(p){
+    var d = bulPaDoneOf(p, store);
+    var reads = p.reads_as_code ? '<b>' + esc(String(p.reads_as_code)) + '</b> ' + esc(p.reads_as_name || '') : esc(p.reads_as_name || '—');
+    h += '<div class="bul-pa-row" data-id="' + esc(String(p.id)) + '" style="display:flex;align-items:flex-start;gap:10px;padding:8px 2px;border-bottom:1px solid #f1f5f9;flex-wrap:wrap;">';
+    h += '<div style="flex:1 1 260px;min-width:0;">' +
+      '<div style="font-size:12.5px;"><b>' + esc(String(p.material_code || '')) + '</b> ' + esc(p.material_name || '') + '</div>' +
+      '<div style="font-size:11.5px;color:#475569;">Чете се като: ' + reads + '</div>' +
+      '<div style="font-size:12px;color:#0f172a;margin-top:2px;">👉 ' + esc(p.store_action || '') + '</div>' +
+      (p.note ? '<div style="font-size:11.5px;color:#64748b;">' + esc(p.note) + '</div>' : '') +
+      (bulPaThumbs(p.photos) ? '<div>' + bulPaThumbs(p.photos) + '</div>' : '') +
+      '</div>';
+    h += '<div style="flex-shrink:0;text-align:right;">';
+    if(d){
+      h += '<div class="bul-pa-done" style="font-size:12px;font-weight:600;color:#047857;">✓ Направено ' + esc(bulPaFmtDay(d.done_at)) + ' от ' + esc(d.done_by || '—') + '</div>' +
+        (bulPaThumbs(d.photos) ? '<div>' + bulPaThumbs(d.photos) + '</div>' : '');
+    } else if(canDo){
+      h += '<button class="bul-pa-btn" data-id="' + esc(String(p.id)) + '" onclick="bulPaOpenDone(this.dataset.id)" style="border:none;background:#047857;color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">✅ Направено</button>';
+    } else {
+      h += '<div style="font-size:12px;color:#94a3b8;">Още не е направено</div>';
+    }
+    h += '</div></div>';
+  });
+  return h + '</div>';
+}
+function bulPaOpenDone(id){
+  var p = bulPa.filter(function(x){ return String(x.id) === String(id); })[0];
+  var store = bulPlanForStore();
+  if(!p || !store || bulSeesAll()) return;
+  var ex = document.getElementById('bulpa-ov'); if(ex) ex.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="bulpa-ov"><div class="bmod" style="width:420px;">' +
+    '<div style="font-size:15px;font-weight:600;margin-bottom:6px;">✅ Направено — ' + esc(String(p.material_code || '')) + '</div>' +
+    '<div style="font-size:12.5px;color:#475569;margin-bottom:10px;">' + esc(p.material_name || '') + ' · ' + esc(p.store_action || '') + '</div>' +
+    '<label class="fl">📸 Снимка ' + (p.photo_required ? '<b style="color:#dc2626;">(задължителна)</b>' : '(по избор)') + '</label>' +
+    '<input type="file" id="bulpa-file" accept="image/*" multiple style="margin-bottom:10px;">' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+    '<button onclick="document.getElementById(\'bulpa-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button id="bulpa-ok" data-id="' + esc(String(p.id)) + '" onclick="bulPaConfirm(this.dataset.id)" style="border:none;background:#047857;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Потвърди</button>' +
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+/* Качване на една снимка — bucket-ът и компресията от Разлики. Връща
+   {url,name} или null при грешка. */
+function bulPaUpload(file, articleId, store){
+  var comp = (typeof diffCompressImage === 'function') ? diffCompressImage(file, 1600, 0.75) : Promise.resolve(file);
+  return comp.then(function(blob){
+    var isImg = !!file.type && file.type.indexOf('image/') === 0;
+    var ext = isImg ? 'jpg' : ((file.name.split('.').pop() || 'bin').toLowerCase());
+    var path = 'problem-articles/' + articleId + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+    return fetch(DIFF_SB + '/storage/v1/object/' + DIFF_BKT + '/' + path, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + DIFF_KEY, 'Content-Type': isImg ? 'image/jpeg' : (file.type || 'application/octet-stream'), 'x-upsert': 'true' },
+      body: blob
+    }).then(function(r){
+      if(!r || !r.ok) return null;
+      return { url: DIFF_SB + '/storage/v1/object/public/' + DIFF_BKT + '/' + path, name: file.name };
+    });
+  }).catch(function(){ return null; });
+}
+function bulPaConfirm(id){
+  if(bulPaBusy) return;
+  var p = bulPa.filter(function(x){ return String(x.id) === String(id); })[0];
+  var store = bulPlanForStore();
+  if(!p || !store || bulSeesAll()) return;
+  var inp = document.getElementById('bulpa-file');
+  var files = inp && inp.files ? Array.prototype.slice.call(inp.files) : [];
+  if(p.photo_required && !files.length){ toast('Снимката е задължителна за този артикул', '#dc2626'); return; }
+  var btnEl = document.getElementById('bulpa-ok');
+  var unlock = function(){ bulPaBusy = false; if(btnEl){ btnEl.disabled = false; btnEl.textContent = 'Потвърди'; } };
+  bulPaBusy = true;
+  if(btnEl){ btnEl.disabled = true; btnEl.textContent = '⏳ …'; }
+  var ups = files.map(function(f){ return bulPaUpload(f, p.id, store); });
+  return Promise.all(ups).then(function(photos){
+    if(photos.some(function(x){ return !x; })){ toast('Грешка при качване на снимката — опитай пак', '#dc2626'); unlock(); return; }
+    var body = { article_id: p.id, store_name: store, done_by: (currentUser.display_name || currentUser.email), photos: photos };
+    return sbPost('problem_article_done', body).then(function(res){
+      if(!res || !res.ok){
+        var isDup = !!(res && res.error && (res.error.code === '23505' || /duplicate|unique/i.test(String(res.error.message || res.error || ''))));
+        if(isDup){
+          /* Друг от обекта вече е отбелязал — опресняваме, не дублираме. */
+          toast('Вече е отбелязано от обекта', '#2563eb');
+          var ov0 = document.getElementById('bulpa-ov'); if(ov0) ov0.remove();
+          bulPaBusy = false;
+          return bulPaLoad().then(function(){ if(curBul) renderBulletin(); });
+        }
+        toast('Грешка при запис (' + String(p.material_code || '') + '): ' + ((typeof sbErrMsg === 'function') ? sbErrMsg(res) : 'грешка'), '#dc2626');
+        unlock();
+        return;
+      }
+      var ov = document.getElementById('bulpa-ov'); if(ov) ov.remove();
+      bulPaBusy = false;
+      toast('✅ Отбелязано');
+      return bulPaLoad().then(function(){ if(curBul) renderBulletin(); });
+    });
+  });
+}
 function bulDayPlanHtml(){
   var open=bulPlanIsOpen();
   var day=bulPlanDay();
@@ -2756,6 +2902,9 @@ function loadBulletin(){
      Топъл кеш връща веднага, без нова заявка. */
   if(!allStoresCache)loadAllStores().then(function(){ if(curBul)renderBulletin(); });
   if(!reportableStoresCache)loadReportableStores().then(function(){ if(curBul)renderBulletin(); });
+  /* Проблемни артикули — при всяко отваряне (Миглена може да е затворила
+     запис междувременно). */
+  bulPaLoad().then(function(){ if(curBul)renderBulletin(); });
   /* Бутоните „🏷️ Преоценка →" / „➖ Минуси →" — след флаговете на пилота. */
   var pilotWait=bulPilotFlagsWait();
   if(pilotWait)pilotWait.then(function(){ if(curBul)renderBulletin(); });
@@ -3024,6 +3173,10 @@ function renderBulView(){
 
   /* Промоции */
   html+=renderPromotionsSection();
+
+  /* Проблемни артикули (23.11.2026) — точно над „План за деня“, за обекта
+     от bulPlanForStore(). Без обект или без записи — нищо. */
+  html+=bulPaHtml();
 
   /* План за деня — НАД календара: той е работният изглед, календарът е
      обзорът. Вътре в bul-body, за да се пререндира при всяко отмятане. */

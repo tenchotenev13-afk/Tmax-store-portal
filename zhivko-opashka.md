@@ -18,6 +18,12 @@
 - 23.11 · нова таблица weekly_checklist_snapshots — year int NOT NULL · week_number int NOT NULL · metric_key text NOT NULL (PK: year, week_number, metric_key) · taken_at timestamptz NOT NULL, default now() · taken_by text NULL (стойности 'cron' / 'freeze-late')
 - 23.11 · weekly_checklist.portal_value за metric_key 'stoka_na_pat' — нови стойности 'da' / 'ne' вместо „N/M"; в седмиците без 10-то число — NULL (колоната не се мени, само съдържанието)
 
+(в базата от миграцията bulletin_problem_articles, bulletin-problem-articles-schema.sql, версия 20261123130220, приложена 23.11.2026)
+- 23.11 · problem_articles.bulletin_on — boolean, NOT NULL, default false
+- 23.11 · problem_articles.bulletin_stores — jsonb, NULL, без default
+- 23.11 · problem_articles.photo_required — boolean, NOT NULL, default false
+- 23.11 · нова таблица problem_article_done — id uuid PK, article_id uuid NOT NULL, store_name text NOT NULL, done_by text NULL, done_at timestamptz NOT NULL default now(), photos jsonb NOT NULL default '[]'; уникалност article_id + store_name
+
 ## Изпратено 23.11.2026
 
 (в базата от миграцията reads_as_code, reads-as-code-schema.sql, версия 20261123113626, приложена 23.11.2026)

@@ -7229,9 +7229,29 @@ var sdPaLoaded = false;
 var sdPaFailed = false;
 var sdPaSearch = '';
 var sdPaShowClosed = false;
+/* Бюлетин (сесия bulletin-problem-articles, 23.11.2026): отметките
+   „Направено“ по обект (problem_article_done) — за колоната „Бюлетин“ и
+   модала по обекти. Паднало четене → console.error и „⚠️“ в колоната, не 0/Y.
+   Целевите обекти при bulletin_stores = NULL — reportableStoresCache (същият
+   списък като знаменателя в Бюлетина), затова се зарежда тук. */
+var sdPaDone = [];
+var sdPaDoneFailed = false;
+function sdLoadProblemArticleDone(){
+  var st = (typeof loadReportableStores === 'function') ? loadReportableStores() : null;
+  var rd = sbGetOk('problem_article_done', 'select=*&order=done_at.asc,id.asc').then(function(res){
+    if(!res.ok){
+      sdPaDone = []; sdPaDoneFailed = true;
+      try{ console.error('problem_article_done: ' + res.error); }catch(e){}
+      return;
+    }
+    sdPaDone = res.rows || []; sdPaDoneFailed = false;
+  });
+  return Promise.all([st, rd]);
+}
 function sdLoadProblemArticles(force){
   if(sdPaLoaded && !force) return Promise.resolve();
-  return sbGetOk('problem_articles', 'select=*&order=material_code.asc,id.asc').then(function(res){
+  var done = sdLoadProblemArticleDone();
+  return Promise.all([done, sbGetOk('problem_articles', 'select=*&order=material_code.asc,id.asc').then(function(res){
     sdPaLoaded = true;
     if(!res.ok){
       sdPa = []; sdPaFailed = true;
@@ -7241,7 +7261,61 @@ function sdLoadProblemArticles(force){
     /* По код с числова подредба — текстовата в базата слага 104894 преди 34924. */
     sdPa = (res.rows || []).slice().sort(function(x, y){ return sdPaCode(x.material_code).localeCompare(sdPaCode(y.material_code), 'bg', { numeric: true }) || String(x.id).localeCompare(String(y.id)); });
     sdPaFailed = false;
-  });
+  })]);
+}
+/* Целевите обекти на записа в Бюлетина: масивът от bulletin_stores или, при
+   NULL, всички обекти от reportableStoresCache. */
+function sdPaTargets(p){
+  if(p && Array.isArray(p.bulletin_stores)) return p.bulletin_stores.slice();
+  return (typeof reportableStoresCache !== 'undefined' && Array.isArray(reportableStoresCache)) ? reportableStoresCache.slice() : [];
+}
+function sdPaDoneFor(p){
+  return sdPaDone.filter(function(d){ return d && String(d.article_id) === String(p.id); });
+}
+function sdPaBulCell(p){
+  if(!p || p.bulletin_on !== true) return '<span style="color:#94a3b8;">—</span>';
+  if(sdPaDoneFailed) return '<span title="Отметките не можаха да се заредят" style="color:#C0392B;font-weight:700;">⚠️</span>';
+  var tg = sdPaTargets(p);
+  var x = sdPaDoneFor(p).filter(function(d){ return tg.indexOf(d.store_name) >= 0; }).length;
+  return '<button class="sd-pa-bul" data-id="' + escVal(String(p.id)) + '" onclick="openSDPaDoneModal(this.dataset.id)" title="Кой е направил — по обекти" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#047857;border-radius:5px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">✓ ' + x + '/' + tg.length + ' обекта</button>';
+}
+function sdPaFmtWhen(val){
+  var d = new Date(val);
+  if(!val || isNaN(d.getTime())) return '';
+  function q(n){ return (n<10?'0':'')+n; }
+  return sdFmtDayMonth(val) + ' ' + q(d.getHours()) + ':' + q(d.getMinutes());
+}
+function sdPaThumbs(photos){
+  var arr = Array.isArray(photos) ? photos : [];
+  return arr.filter(function(f){ return f && f.url; }).map(function(f){
+    return '<a href="' + escVal(f.url) + '" target="_blank" rel="noopener" title="' + escVal(f.name || 'Снимка') + '" style="display:inline-block;margin:3px 4px 0 0;">' +
+      '<img src="' + escVal(f.url) + '" alt="" style="width:56px;height:56px;object-fit:cover;border:1px solid #e2e8f0;border-radius:5px;"></a>';
+  }).join('');
+}
+/* Модалът по обекти (Миглена): кой и кога е направил + снимките; „Още не са“. */
+function openSDPaDoneModal(id){
+  var p = sdPa.filter(function(x){ return String(x.id) === String(id); })[0];
+  if(!p) return;
+  var tg = sdPaTargets(p), done = sdPaDoneFor(p);
+  var doneStores = done.map(function(d){ return d.store_name; });
+  var notYet = tg.filter(function(s){ return doneStores.indexOf(s) < 0; });
+  var ex = document.getElementById('sdpa-done-ov'); if(ex) ex.remove();
+  var h = '<div class="bov open" id="sdpa-done-ov"><div class="bmod" style="width:520px;">' +
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">📰 ' + esc(sdPaCode(p.material_code)) + ' ' + esc(p.material_name || '') + '</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">Направили: ' + done.filter(function(d){ return tg.indexOf(d.store_name) >= 0; }).length + ' от ' + tg.length + (Array.isArray(p.bulletin_stores) ? ' избрани обекта' : ' обекта (всички)') + (p.photo_required ? ' · снимката е задължителна' : '') + '</div>';
+  h += '<div style="font-size:12.5px;font-weight:700;margin-bottom:4px;">✓ Направили</div>';
+  h += done.length ? done.map(function(d){
+    return '<div class="sdpa-done-row" data-store="' + escVal(d.store_name) + '" style="padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12.5px;">' +
+      '<b>' + esc(d.store_name) + '</b> · ' + esc(d.done_by || '—') + ' · ' + esc(sdPaFmtWhen(d.done_at)) +
+      (tg.indexOf(d.store_name) < 0 ? ' <span style="color:#94a3b8;">(извън списъка)</span>' : '') +
+      '<div>' + sdPaThumbs(d.photos) + '</div></div>';
+  }).join('') : '<div style="font-size:12px;color:#94a3b8;padding:4px 0;">Още никой</div>';
+  h += '<div style="font-size:12.5px;font-weight:700;margin:10px 0 4px;">⏳ Още не са (' + notYet.length + ')</div>';
+  h += '<div id="sdpa-notyet" style="font-size:12px;color:#475569;">' + (notYet.length ? notYet.map(esc).join(', ') : '—') + '</div>';
+  h += '<div style="display:flex;justify-content:flex-end;margin-top:12px;"><button onclick="document.getElementById(\'sdpa-done-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Затвори</button></div>';
+  h += '</div></div>';
+  var div = document.createElement('div'); div.innerHTML = h;
+  document.body.appendChild(div.firstChild);
 }
 function sdPaCanWrite(){
   if(!currentUser || isLogisticsWarehouseUser()) return false;
@@ -7387,7 +7461,7 @@ function sdPaVisible(){
 function sdPaRowsHtml(){
   var list = sdPaVisible(), w = sdPaCanWrite();
   if(!list.length){
-    return '<tr><td colspan="' + (w ? 8 : 7) + '" id="sd-pa-empty" style="padding:24px;text-align:center;color:#94a3b8;">' +
+    return '<tr><td colspan="' + (w ? 9 : 8) + '" id="sd-pa-empty" style="padding:24px;text-align:center;color:#94a3b8;">' +
       (sdPaShowClosed ? 'Няма затворени записи' : 'Няма активни записи') + (sdPaSearch.trim() ? ' по това търсене' : '') + '</td></tr>';
   }
   var TD = 'padding:6px 8px;font-size:12px;border-bottom:1px solid #eef1f6;vertical-align:top;';
@@ -7403,6 +7477,7 @@ function sdPaRowsHtml(){
       '<td style="' + TD + 'white-space:nowrap;">' + (closed
         ? '<span style="color:#64748b;">Затворен' + (p.closed_at ? ' · ' + esc(sdFmtDayMonth(p.closed_at)) : '') + (p.closed_by ? ' · ' + esc(p.closed_by) : '') + '</span>'
         : '<span style="color:#047857;font-weight:600;">Активен</span>') + '</td>' +
+      '<td class="sd-pa-bulcell" style="' + TD + 'white-space:nowrap;">' + sdPaBulCell(p) + '</td>' +
       (w ? '<td style="' + TD + 'white-space:nowrap;">' + (closed ? '' :
         '<button class="sd-pa-edit" data-id="' + esc(String(p.id)) + '" onclick="openSDPaModal(this.dataset.id)" title="Редакция" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button> ' +
         '<button class="sd-pa-close" data-id="' + esc(String(p.id)) + '" onclick="closeSDPa(this.dataset.id)" style="border:none;background:#047857;color:#fff;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;">✅ Затвори</button>') + '</td>' : '') +
@@ -7425,9 +7500,44 @@ function sdPaHtml(){
   var TH = 'padding:6px 8px;font-size:10.5px;font-weight:700;color:#6B7280;text-align:left;background:#F9FAFC;border-bottom:1px solid #e2e8f0;';
   h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr>' +
     '<th style="' + TH + '">Код</th><th style="' + TH + '">Име</th><th style="' + TH + '">Чете се като</th>' +
-    '<th style="' + TH + '">Какво прави обектът</th><th style="' + TH + '">Бележка</th><th style="' + TH + '">От кога</th><th style="' + TH + '">Статус</th>' +
+    '<th style="' + TH + '">Какво прави обектът</th><th style="' + TH + '">Бележка</th><th style="' + TH + '">От кога</th><th style="' + TH + '">Статус</th><th style="' + TH + '">Бюлетин</th>' +
     (w ? '<th style="' + TH + '"></th>' : '') + '</tr></thead><tbody id="sd-pa-body">' + sdPaRowsHtml() + '</tbody></table></div>';
   return h + '</div>';
+}
+/* Полетата за Бюлетина в модала (23.11.2026): „📰 Покажи в Бюлетина“ (нов —
+   отметнат, съществуващ — от базата), обекти „Всички“ (→ NULL) или избрани
+   (чекбоксове от reportableStoresCache — списъкът на Бюлетина; избран обект
+   извън него също се показва, за да не се загуби при запис) и „📸 Снимката е
+   задължителна“. */
+function sdPaBulFieldsHtml(on, stores, photo){
+  var sel = Array.isArray(stores) ? stores : null;
+  var list = (typeof reportableStoresCache !== 'undefined' && Array.isArray(reportableStoresCache)) ? reportableStoresCache.slice() : [];
+  (sel || []).forEach(function(s){ if(list.indexOf(s) < 0) list.push(s); });
+  var chk = function(idAttr, c, lbl){ return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin:4px 0;cursor:pointer;"><input type="checkbox" id="' + idAttr + '"' + (c ? ' checked' : '') + '> ' + lbl + '</label>'; };
+  var rad = function(idAttr, c, lbl){ return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;margin-right:14px;cursor:pointer;"><input type="radio" name="sdpa-st-mode" id="' + idAttr + '"' + (c ? ' checked' : '') + ' onchange="sdPaStModeChanged()"> ' + lbl + '</label>'; };
+  return '<div id="sdpa-bul-box" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin:4px 0 8px;background:#f8fafc;">' +
+    chk('sdpa-bul', on, '📰 Покажи в Бюлетина') +
+    '<div style="margin:4px 0 2px;">' + rad('sdpa-st-all', !sel, 'Всички обекти') + rad('sdpa-st-sel', !!sel, 'Избрани обекти') + '</div>' +
+    '<div id="sdpa-stores" style="display:' + (sel ? 'grid' : 'none') + ';grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px;max-height:160px;overflow-y:auto;margin:4px 0;">' +
+      (list.length ? list.map(function(s){
+        return '<label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;"><input type="checkbox" class="sdpa-st" value="' + escVal(s) + '"' + (sel && sel.indexOf(s) >= 0 ? ' checked' : '') + '> ' + esc(s) + '</label>';
+      }).join('') : '<div style="font-size:12px;color:#94a3b8;">Списъкът с обекти не е зареден</div>') +
+    '</div>' +
+    chk('sdpa-photo', photo, '📸 Снимката е задължителна') +
+    '</div>';
+}
+function sdPaStModeChanged(){
+  var box = document.getElementById('sdpa-stores'), s = document.getElementById('sdpa-st-sel');
+  if(box) box.style.display = (s && s.checked) ? 'grid' : 'none';
+}
+function sdPaReadBulFields(){
+  var g = function(x){ var el = document.getElementById(x); return !!(el && el.checked); };
+  var on = g('sdpa-bul'), photo = g('sdpa-photo'), stores = null;
+  if(g('sdpa-st-sel')){
+    stores = Array.prototype.slice.call(document.querySelectorAll('#sdpa-stores .sdpa-st')).filter(function(c){ return c.checked; }).map(function(c){ return c.value; });
+    if(!stores.length) return { err: 'Избери поне един обект или „Всички обекти“' };
+  }
+  return { on: on, stores: stores, photo: photo };
 }
 /* pre — попълване за нов запис (етап 7б, от ред „грешен баркод“): полетата +
    source / source_line_id, които отиват в POST-а през бутона „Запази“. */
@@ -7450,6 +7560,7 @@ function openSDPaModal(id, pre){
     fld('Какво прави обектът *', 'sdpa-action', p.store_action) +
     fld('Бележка', 'sdpa-note', p.note) +
     fld('От кога', 'sdpa-from', p.valid_from, 'date') +
+    sdPaBulFieldsHtml(id ? p.bulletin_on === true : true, id ? p.bulletin_stores : null, id ? p.photo_required === true : false) +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
     '<button onclick="document.getElementById(\'sdpa-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button id="sdpa-save" data-id="' + escVal(id || '') + '"' + (!id && p.source ? ' data-src="' + escVal(p.source) + '"' : '') + (!id && p.source_line_id != null ? ' data-line="' + escVal(String(p.source_line_id)) + '"' : '') + ' onclick="submitSDPa(this.dataset.id)" style="border:none;background:#7c3aed;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>' +
@@ -7463,10 +7574,13 @@ function submitSDPa(id){
   if(!code || !action){ toast('Код по система и „Какво прави обектът“ са задължителни', '#dc2626'); return; }
   var dup = sdPaActiveByCode(code, id);
   if(dup){ toast('Вече има активен запис за код ' + code, '#dc2626'); return; }
+  var bul = sdPaReadBulFields();
+  if(bul.err){ toast(bul.err, '#dc2626'); return; }
   var body = {
     material_code: code, material_name: v('sdpa-name') || null,
     reads_as_code: v('sdpa-rcode') || null, reads_as_name: v('sdpa-rname') || null,
-    store_action: action, note: v('sdpa-note') || null, valid_from: v('sdpa-from') || today()
+    store_action: action, note: v('sdpa-note') || null, valid_from: v('sdpa-from') || today(),
+    bulletin_on: bul.on, bulletin_stores: bul.stores, photo_required: bul.photo
   };
   var at = new Date().toISOString(), by = sdActor();
   var req;
