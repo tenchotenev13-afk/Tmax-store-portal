@@ -1,6 +1,6 @@
 # 23.11 — bulletin-problem-articles
 
-- SHA: (попълва се след push).
+- SHA: `4a42fee` (push 23.11, Pages сверен байт в байт за bulletin.js, stock-differences.js, index.html; маркер `bulPaHtml` / `sdPaBulCell` — 0 в eb9a4df).
 - Миграция `bulletin_problem_articles`, версия 20261123130220 (приложена 23.11, `bulletin-problem-articles-schema.sql`): `problem_articles` + `bulletin_on` / `bulletin_stores` / `photo_required`; нова таблица `problem_article_done` (unique article_id + store_name, RLS select/insert/update, без delete). Проверено в базата: колоните, 3 политики, anon без DELETE/TRUNCATE, anon GET 200; 25 активни, 0 с bulletin_on (заварените остават извън Бюлетина — решение 23.11 „само новите“).
 - Разлики (`stock-differences.js`): в модала на записа — „📰 Покажи в Бюлетина“ (нов — отметнат), обекти „Всички“ (NULL) / избрани (reportableStoresCache), „📸 Снимката е задължителна“; колона „Бюлетин“ „✓ X/Y обекта“ → модал по обекти (кой, кога, снимки, „Още не са“).
 - Бюлетин (`bulletin.js`): блок „🏷️ Проблемни артикули“ над „📋 План за деня“ за `bulPlanForStore()`; „✅ Направено“ + снимка (bucket `bulletin-files`, префикс `problem-articles/`) → `problem_article_done`; отметнат ред — „✓ Направено дд.мм от <кой>“, без отмяна; затворен запис изчезва. Офисът вижда блока при избран обект, без бутон.
