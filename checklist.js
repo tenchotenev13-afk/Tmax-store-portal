@@ -60,6 +60,9 @@ var checklistResponses = [];   /* weekly_checklist_responses за показан
    false → portal_value се смята ЖИВО от checklist_portal_values() и стои
    само в паметта; null → още не е заредено. */
 var checklistWeekFrozen = null;
+/* weekly_checklist_snapshots за показаната седмица (етап Б, 23.11.2026) —
+   снимката на колона със срок е направена ли. */
+var checklistSnapshots = [];
 
 /* Стойностите се пазят в базата на латиница, за да не зависи схемата от
    изписването. Превеждат се само тук, при показване. */
@@ -314,8 +317,12 @@ function loadChecklist() {
     sbGet('weekly_checklist_responses', weekQ + storeFilter),
     /* Затворена ли е седмицата (checklist-live-calc, етап 2). Провал → []
        → показва се живо — стойностите пак са верни към момента. */
-    sbGet('weekly_checklist_freezes', weekQ + '&select=year,week_number', true)
+    sbGet('weekly_checklist_freezes', weekQ + '&select=year,week_number', true),
+    /* Снимките на колоните със срок (етап Б). Провал → [] → „още рано" се
+       решава само по датата. */
+    sbGet('weekly_checklist_snapshots', weekQ + '&select=year,week_number,metric_key,taken_by', true)
   ]).then(function (res) {
+    checklistSnapshots = Array.isArray(res[6]) ? res[6] : [];
     checklistMetrics = Array.isArray(res[0]) ? res[0] : [];
     checklistRows = Array.isArray(res[1]) ? res[1] : [];
     var sends = Array.isArray(res[2]) ? res[2] : [];
@@ -1065,6 +1072,9 @@ function checklistRecurringChangesFor(idx, autos, ids, weekISO) {
    свършена. Иначе обект с всичко проверено излиза 0/29 в чек листа, докато
    Стока на път показва „необработени 0", а тригерът transit_store_done вече е
    отметнал задачата в Бюлетина. Правилото е същото като там. */
+/* ОТ 23.11.2026 (етап Б, решение на Тенчо): да/не вместо „N/M" — 'da', ако
+   ВСИЧКИ входящи са обработени, иначе 'ne'; без входящи → null. В коя седмица
+   изобщо има стойност решава срокът (checklistModuleChanges). */
 function checklistTransitValue(rows) {
   var incoming = rows.filter(function (t) { return t && t.direction === 'incoming'; });
   if (!incoming.length) return null;
@@ -1072,7 +1082,7 @@ function checklistTransitValue(rows) {
     /* „🔍 Чака засечка" (recon_at) е обработен — както reviewed_at (етап 3, 04.11.2026). */
     return (!!t.status && t.status !== 'pending') || !!t.reviewed_at || !!t.recon_at;
   });
-  return done.length + '/' + incoming.length;
+  return done.length === incoming.length ? 'da' : 'ne';
 }
 
 /* Дялът обработени записи за връщане: „29/40".
@@ -1135,8 +1145,45 @@ function checklistModuleChanges(idx) {
     var spec = id ? CHECKLIST_MODULE_FILL[id] : null;
     if (!spec) return;
 
+    /* Колона със срок (етап Б, 23.11.2026): извън седмицата със срока —
+       нищо; след снимката — записаното в weekly_checklist; иначе живо.
+       Огледално на checklist_portal_values(). Провалена заявка за снимката
+       (sbGet → []) → живо. */
+    if (checklistDeadlineDay(m)) {
+      if (!checklistDeadlineDate(m, checklistYear, checklistWeek)) return;
+      var wq = 'year=eq.' + checklistYear + '&week_number=eq.' + checklistWeek + '&metric_key=eq.' + encodeURIComponent(m.key);
+      jobs.push(Promise.resolve(sbGet('weekly_checklist_snapshots', wq + '&select=metric_key', true)).then(function (sn) {
+        if (!(Array.isArray(sn) && sn.length)) return checklistModuleJob(m, spec, idx);
+        return checklistGetAll('weekly_checklist', wq + '&select=id,store_name,portal_value').then(function (rows) {
+          var changes = [];
+          rows.forEach(function (r) {
+            if (!r || checklistStores.indexOf(r.store_name) < 0) return;
+            if (r.portal_value === null || r.portal_value === undefined || r.portal_value === '') return;
+            var row = idx[r.store_name + ' ' + m.key];
+            if (row && row.portal_value === r.portal_value) return;
+            changes.push({ store: r.store_name, metric_key: m.key, value: r.portal_value });
+          });
+          return changes;
+        }, function (err) {
+          toast('Грешка при зареждане на снимката: ' + ((err && err.message) || err), '#dc2626');
+          return [];
+        });
+      }));
+      return;
+    }
+    jobs.push(checklistModuleJob(m, spec, idx));
+  });
+
+  if (!jobs.length) return Promise.resolve([]);
+  return Promise.all(jobs).then(function (parts) {
+    return parts.reduce(function (a, b) { return a.concat(b); }, []);
+  });
+}
+
+/* Един модулен показател на живо (тялото на обхода отпреди етап Б). */
+function checklistModuleJob(m, spec, idx) {
     var load = spec.load ? spec.load() : checklistGetAll(spec.table, spec.query);
-    jobs.push(load.then(function (rows) {
+    return load.then(function (rows) {
       /* Не-масив от load() = „тази седмица нищо не се пише" (бъдеща). */
       if (!Array.isArray(rows)) return [];
       var byStore = {};
@@ -1161,13 +1208,7 @@ function checklistModuleChanges(idx) {
       /* Непълни данни не стават стойност — клетките остават каквито са. */
       toast('Грешка при зареждане на ' + spec.table + ': ' + ((err && err.message) || err), '#dc2626');
       return [];
-    }));
-  });
-
-  if (!jobs.length) return Promise.resolve([]);
-  return Promise.all(jobs).then(function (parts) {
-    return parts.reduce(function (a, b) { return a.concat(b); }, []);
-  });
+    });
 }
 
 /* ЕТАЛОНЪТ: всички автоматични стойности за показаната седмица по правилото
@@ -1271,10 +1312,41 @@ function checklistDeadlineDay(metric) {
   return isNaN(d) ? null : d;
 }
 
-function checklistIsEarly(metric, now) {
+/* ОТ 23.11.2026 (checklist-store-gaps, етап Б; решение на Тенчо): колона със
+   срок има стойност САМО в ISO седмицата, която съдържа деня deadline_day
+   (и когато той е събота или неделя — седмицата е пн–нд). Оценката е снимка в
+   23:59 Europe/Sofia на деня-срок (weekly_checklist_snapshots, крон
+   checklist-transit-snapshot-2359). Огледално на checklist_portal_values().
+
+   Денят-срок в седмицата (year, week) като ISO дата, или null. */
+function checklistDeadlineDate(metric, year, week) {
   var d = checklistDeadlineDay(metric);
-  if (!d) return false;
-  return (now || new Date()).getDate() <= d;
+  if (!d || !year || !week) return null;
+  var days = weekDays(week, year);
+  for (var i = 0; i < days.length; i++) {
+    if (days[i].getDate() === d) return toLocalISO(days[i]);
+  }
+  return null;
+}
+
+/* Има ли снимка на колоната за показаната седмица. */
+function checklistHasSnapshot(metricKey) {
+  return (checklistSnapshots || []).some(function (s) {
+    return s && s.metric_key === metricKey &&
+      Number(s.year) === checklistYear && Number(s.week_number) === checklistWeek;
+  });
+}
+
+/* „Още рано" (бледо, с подсказка) — само в седмицата със срока, преди
+   снимката и преди края на деня-срок. В другите седмици клетката е празна и
+   „рано" няма какво да значи. */
+function checklistIsEarly(metric, now) {
+  var dl = checklistDeadlineDate(metric, checklistYear, checklistWeek);
+  if (!dl) return false;
+  if (checklistHasSnapshot(metric.key)) return false;
+  var p = dl.split('-');
+  var end = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + 1);   /* следващата полунощ */
+  return (now || new Date()).getTime() < end.getTime();
 }
 
 /* „10-то", „1-во", „2-ро", „7-мо". Само за текста в подсказката. */

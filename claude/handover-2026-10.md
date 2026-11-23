@@ -1280,6 +1280,22 @@ M − N; разминат ли се или провал → без дни + cons
 неделният отчет до Теодор (report.js, send-scheduled-report), „Днес" и табът
 НЕ са пипани. Етап Б („Стока на път" само в седмицата със срока, схема) —
 отделно. Проверка на живо — `claude/open/23-11-checklist-store-gaps-live.md`.
+23.11 (сесия checklist-store-gaps, етап Б — код и миграции, НЕ СА ПРИЛОЖЕНИ):
+„Стока на път" има стойност само в ISO седмицата с деня `deadline_day` (10;
+и в събота/неделя), да/не вместо N/M (всички входящи обработени → „да"; без
+входящи → празно). Снимка в 23:59 Europe/Sofia на деня-срок: нова таблица
+`weekly_checklist_snapshots`, функция `checklist_snapshot_deadline()`, крон
+`checklist-transit-snapshot-2359` (`59 20,21 * * *` + guard 23 ч. в София);
+`checklist_portal_values()` след снимката връща записаното; неделното
+`checklist_freeze_week()` не я презаписва, а при паднал крон записва живото с
+`taken_by = 'freeze-late'` (решение на Тенчо 23.11). Миграции
+`20261123120000_checklist_transit_deadline` (+ огледало
+`weekly-checklist-transit-deadline-schema.sql`) и отделно data
+`20261123120100_checklist_transit_history_data` — РЕШЕНИЕ В: 108 клетки в
+седмици 40, 42–45, 47 → празни; 41 и 46 остават с брой (записаното е 16 и 6
+дни след срока). report.js и send-scheduled-report четат `weekly_checklist` —
+следват правилото без промяна. Проверка след прилагането —
+`claude/open/23-11-checklist-transit-deadline-apply.md`.
 
 **Разлики** — междускладови: отговор на обекта (ПРИЕТО / ПУСНАТО В SAP /
 НЯМА НАЛИЧНОСТ) живо от 15.09; `stock_diff_swaps` (размяна между обекти,

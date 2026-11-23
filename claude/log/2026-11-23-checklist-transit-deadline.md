@@ -1,0 +1,8 @@
+# 23.11 — checklist-store-gaps (етап Б)
+
+- „Стока на път" (stoka_na_pat) — стойност само в ISO седмицата с деня `deadline_day` (вкл. сб/нд), да/не вместо N/M; снимка в 23:59 Europe/Sofia на деня-срок (`weekly_checklist_snapshots`, `checklist_snapshot_deadline()`, крон `checklist-transit-snapshot-2359` — модел „два UTC часа + guard"); `checklist_freeze_week()` не презаписва снимката, при паднал крон — `taken_by = 'freeze-late'`.
+- checklist.js: `checklistTransitValue` → da/ne, проверка за седмицата и снимката в `checklistModuleChanges` (`checklistModuleJob`), „още рано" само в седмицата със срока преди снимката (`checklistDeadlineDate`, `checklistHasSnapshot`).
+- Миграции (НЕ СА ПРИЛОЖЕНИ): `20261123120000_checklist_transit_deadline` (+ `_down`, огледало `weekly-checklist-transit-deadline-schema.sql`); data `20261123120100_checklist_transit_history_data` (+ `_down` със стойностите).
+- Решение В (Тенчо 23.11): 108 клетки → празни — седмици 40, 42, 43, 44 (по 18: 16× N/N, Пирдоп 208/293, Севлиево 337/347), 45 (17× N/N, Севлиево 32/49), 47 (17× N/N, Севлиево 45/49); 0 ръчни стойности. 41 и 46 — без промяна (брой).
+- Проверка само с четене: новото SQL тяло като SELECT за седмици 40–48 и 50 — 1440 други клетки, 0 разлики със живата функция; parity JS срещу живата — 144 разлики, всичките stoka_na_pat и точно по новото правило.
+- Тестове: нов `tests/checklist-transit-deadline.test.js` (44 проверки, 5 мутанта убити); обновени `checklist-transit` и `checklist-returns` (N/M → да/не, закована седмица 37).

@@ -234,9 +234,11 @@ function freezeDay(h, day) {
     const h = env({
       returns: many('Раднево', 'pending', null, 10),
       transit: [{ store_name:'Раднево', direction:'incoming', status:'pending' }],
-      rpc: [live('Раднево', 'stoka_vrashtane', '0/10'), live('Раднево', 'stoka_na_pat', '0/1')]
+      rpc: [live('Раднево', 'stoka_vrashtane', '0/10'), live('Раднево', 'stoka_na_pat', 'ne')]
     });
     freezeDay(h, 5);            /* ден, в който „стока на път" Е рано */
+    /* От етап Б (23.11.2026) „рано" е само в седмицата със срока — 37/2026 (10.09). */
+    h.w.checklistYear = 2026; h.w.checklistWeek = 37;
     h.w.loadChecklist();
     await ticks();
 
@@ -271,6 +273,8 @@ function freezeDay(h, day) {
       returns: many('Раднево', 'taken', null, 5),
       transit: transitRows
     });
+    /* „Стока на път" има стойност само в седмицата със срока (етап Б). */
+    h.w.checklistYear = 2026; h.w.checklistWeek = 37;
     h.w.loadChecklist();
     await ticks();
     await compute(h);
@@ -279,7 +283,7 @@ function freezeDay(h, day) {
        got(h, 'Раднево', 'stoka_vrashtane') === '5/5',
        JSON.stringify(got(h, 'Раднево', 'stoka_vrashtane')));
     ok('стоката на път — също',
-       got(h, 'Раднево', 'stoka_na_pat') === '2/10',
+       got(h, 'Раднево', 'stoka_na_pat') === 'ne',   /* 2 от 10 → „не" (етап Б) */
        JSON.stringify(got(h, 'Раднево', 'stoka_na_pat')));
     ok('module:kasa НЕ се пълни (няма правило)',
        got(h, 'Раднево', 'storna_priem') === null,

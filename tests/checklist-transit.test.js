@@ -27,6 +27,13 @@
       пристигнало") се брои като обработен — същото правило като тригера
       transit_store_done, който отмята задачата в Бюлетина.
 
+   ЕТАП Б (checklist-store-gaps, 23.11.2026; решение на Тенчо): стойността е
+   да/не вместо „N/M" (всички входящи обработени → „да") и има стойност САМО в
+   седмицата, която съдържа деня-срок; „още рано" — в тази седмица, преди края
+   на деня-срок и преди снимката. Затова тук седмицата е ЗАКОВАНА: 37/2026
+   (07.09 – 13.09, срокът 10-ти е четвъртък). Седмиците без срока, снимката и
+   неделното затваряне — tests/checklist-transit-deadline.test.js.
+
    ЕТАП 2 (checklist-live-calc, 26.10.2026): отварянето на таба вече НЕ пише
    portal_value, затова правилото се проверява през чистата
    checklistComputePortalValues() (без запис), а мрежата се захранва от
@@ -81,7 +88,10 @@ function env(opts) {
     }
   };
   if (opts.fail) b.fail = opts.fail;
-  return boot(b);
+  const h = boot(b);
+  /* Седмицата със срока (етап Б) — 37/2026, 10.09 е в нея. */
+  h.w.checklistYear = 2026; h.w.checklistWeek = 37;
+  return h;
 }
 
 function writes(h) {
@@ -134,7 +144,7 @@ function freezeDay(h, day) {
 (async function () {
 
   /* ── 1. Дялът ────────────────────────────────────────────────────────── */
-  section('1. „52/190" — само входящите, само непending');
+  section('1. 52 от 190 обработени → „не"; чуждите посоки не влизат');
   {
     const h = env({ transit: []
       .concat(many('Севлиево', 'incoming', 'pending', 138))
@@ -152,13 +162,22 @@ function freezeDay(h, day) {
     /* Клетката в мрежата вече идва от rpc (етап 2) — проверката „клетката
        показва 52/190" е махната: тя би проверявала подадените rpc данни. */
     const w = got(h, 'Севлиево', 'stoka_na_pat');
-    ok('изчислено е 52/190', w === '52/190', JSON.stringify(w));
-
-    /* Без филтъра по посока знаменателят би бил 256, а числителят 107. */
-    ok('знаменателят НЕ брои outgoing и transfer',
-       !!w && w.indexOf('/256') < 0, JSON.stringify(w));
-    ok('числителят НЕ брои чуждите received/sent',
-       !!w && w.indexOf('107/') < 0, JSON.stringify(w));
+    ok('изчислено е „не" (52/190, етап Б — да/не)', w === 'ne', JSON.stringify(w));
+    h.close();
+  }
+  {
+    /* Всички входящи обработени, а чуждите посоки висят pending → „да":
+       outgoing и transfer не влизат (иначе би било „не"). */
+    const h = env({ transit: []
+      .concat(many('Сливен', 'incoming', 'received', 5))
+      .concat(many('Сливен', 'outgoing', 'pending', 9))
+      .concat(many('Сливен', 'transfer', 'pending', 4))
+    });
+    h.w.loadChecklist();
+    await ticks();
+    await compute(h);
+    ok('всички входящи обработени → „да" (outgoing/transfer pending не броят)',
+       got(h, 'Сливен', 'stoka_na_pat') === 'da', JSON.stringify(got(h, 'Сливен', 'stoka_na_pat')));
     h.close();
   }
 
@@ -184,7 +203,7 @@ function freezeDay(h, day) {
        Object.keys(h.vals).every(function (k) { return h.vals[k] !== '0/0'; }), JSON.stringify(h.vals));
     /* А обектът с входящи все пак е изчислен — иначе горното минава и при
        напълно счупен показател. */
-    ok('Севлиево пак е изчислено', got(h, 'Севлиево', 'stoka_na_pat') === '0/3',
+    ok('Севлиево пак е изчислено („не")', got(h, 'Севлиево', 'stoka_na_pat') === 'ne',
        JSON.stringify(got(h, 'Севлиево', 'stoka_na_pat')));
     h.close();
   }
@@ -201,7 +220,17 @@ function freezeDay(h, day) {
     await ticks();
     await compute(h);
     /* SQL-ското `status <> 'pending'` също не пропуска NULL. */
-    ok('1/3, не 2/3', got(h, 'Севлиево', 'stoka_na_pat') === '1/3',
+    ok('„не" (1 от 3 — NULL не е обработен)', got(h, 'Севлиево', 'stoka_na_pat') === 'ne',
+       JSON.stringify(got(h, 'Севлиево', 'stoka_na_pat')));
+    h.close();
+  }
+  {
+    /* Обработеният + NULL статус → пак „не": NULL не минава за обработен. */
+    const h = env({ transit: [tr('Севлиево', 'incoming', 'received'), tr('Севлиево', 'incoming', null)] });
+    h.w.loadChecklist();
+    await ticks();
+    await compute(h);
+    ok('received + NULL → „не"', got(h, 'Севлиево', 'stoka_na_pat') === 'ne',
        JSON.stringify(got(h, 'Севлиево', 'stoka_na_pat')));
     h.close();
   }
@@ -210,14 +239,14 @@ function freezeDay(h, day) {
   section('4. На 5-то число клетката е бледа и обяснява защо');
   {
     const h = env({ transit: many('Севлиево', 'incoming', 'pending', 190),
-                    rpc: [live('Севлиево', 'stoka_na_pat', '0/190')] });
+                    rpc: [live('Севлиево', 'stoka_na_pat', 'ne')] });
     freezeDay(h, 5);
     h.w.loadChecklist();
     await ticks();
 
     const v = valSpan(h, 'Севлиево', 'stoka_na_pat');
     if (ok('стойността е рендирана', !!v, (cellOf(h,'Севлиево','stoka_na_pat')||{}).innerHTML)) {
-      ok('стойността се ВИЖДА (не е скрита)', v.textContent.trim() === '0/190',
+      ok('стойността се ВИЖДА (не е скрита)', v.textContent.trim() === 'не',
          v.textContent.trim());
       ok('носи клас cl-early', (v.getAttribute('class') || '').indexOf('cl-early') >= 0,
          v.getAttribute('class'));
@@ -246,10 +275,10 @@ function freezeDay(h, day) {
        контролингът е отметнал. Правилото „отметнатото бие портала" няма
        изключения: човекът е гледал и е решил, независимо че срокът тече. */
     const h = env({
-      rows: [{ store_name:'Севлиево', metric_key:'stoka_na_pat', portal_value:'0/190',
+      rows: [{ store_name:'Севлиево', metric_key:'stoka_na_pat', portal_value:'ne',
                control_value:'da', control_num:null, comment:null }],
       transit: many('Севлиево', 'incoming', 'pending', 190),
-      rpc: [live('Севлиево', 'stoka_na_pat', '0/190')]
+      rpc: [live('Севлиево', 'stoka_na_pat', 'ne')]
     });
     freezeDay(h, 5);
     h.w.loadChecklist();
@@ -273,10 +302,10 @@ function freezeDay(h, day) {
        „още рано" пак важи. Иначе горните проверки минават и при съвсем
        изключено правило. */
     const h2 = env({
-      rows: [{ store_name:'Севлиево', metric_key:'stoka_na_pat', portal_value:'0/190',
+      rows: [{ store_name:'Севлиево', metric_key:'stoka_na_pat', portal_value:'ne',
                control_value:null, control_num:null, comment:null }],
       transit: many('Севлиево', 'incoming', 'pending', 190),
-      rpc: [live('Севлиево', 'stoka_na_pat', '0/190')]
+      rpc: [live('Севлиево', 'stoka_na_pat', 'ne')]
     });
     freezeDay(h2, 5);
     h2.w.loadChecklist(); await ticks();
@@ -292,14 +321,14 @@ function freezeDay(h, day) {
   section('5. На 15-то число клетката е нормална');
   {
     const h = env({ transit: many('Севлиево', 'incoming', 'pending', 190),
-                    rpc: [live('Севлиево', 'stoka_na_pat', '0/190')] });
+                    rpc: [live('Севлиево', 'stoka_na_pat', 'ne')] });
     freezeDay(h, 15);
     h.w.loadChecklist();
     await ticks();
 
     const v = valSpan(h, 'Севлиево', 'stoka_na_pat');
     if (ok('стойността е рендирана', !!v)) {
-      ok('същата стойност', v.textContent.trim() === '0/190', v.textContent.trim());
+      ok('същата стойност', v.textContent.trim() === 'не', v.textContent.trim());
       ok('НЯМА клас cl-early', (v.getAttribute('class') || '').indexOf('cl-early') < 0,
          v.getAttribute('class'));
       ok('title е обичайният за portal_value',
@@ -312,16 +341,20 @@ function freezeDay(h, day) {
   }
 
   /* ── 6. Границата ────────────────────────────────────────────────────── */
-  section('6. Границата: 10-то е още рано, 11-то вече не');
+  section('6. Границата: 10-то до 23:59 е още рано, 11-то вече не (седмица 37)');
   {
     const m = METRICS[1];
     const probe = env(); const w = probe.w;
 
     ok('9-то: рано', w.checklistIsEarly(m, new Date(2026, 8, 9)) === true);
     ok('10-то ВКЛЮЧИТЕЛНО: рано', w.checklistIsEarly(m, new Date(2026, 8, 10)) === true);
-    ok('11-то: вече не', w.checklistIsEarly(m, new Date(2026, 8, 11)) === false);
+    ok('10-то 23:59: още рано', w.checklistIsEarly(m, new Date(2026, 8, 10, 23, 59)) === true);
+    ok('11-то 00:00: вече не', w.checklistIsEarly(m, new Date(2026, 8, 11, 0, 0)) === false);
     ok('1-во: рано', w.checklistIsEarly(m, new Date(2026, 8, 1)) === true);
-    ok('31-во: не', w.checklistIsEarly(m, new Date(2026, 7, 31)) === false);
+    /* От етап Б „рано" е спрямо деня-срок в ПОКАЗАНАТА седмица, не спрямо
+       деня от месеца: 31.08 е преди 10.09 → рано. */
+    ok('31.08 (преди срока на седмицата): рано', w.checklistIsEarly(m, new Date(2026, 7, 31)) === true);
+    ok('15.09: не', w.checklistIsEarly(m, new Date(2026, 8, 15)) === false);
 
     ok('deadline_day = null → никога рано',
        w.checklistIsEarly({ deadline_day: null }, new Date(2026, 8, 1)) === false);
@@ -370,7 +403,7 @@ function freezeDay(h, day) {
     await compute(h);
     /* Проверките за тялото на записа (без control_value / comment) са махнати:
        от етап 2 при отваряне няма запис — виж секция 9 (нула POST). */
-    ok('изчислено е 0/190 (не старото 1/5)', got(h, 'Севлиево', 'stoka_na_pat') === '0/190',
+    ok('изчислено е „не" (0/190; не старото 1/5)', got(h, 'Севлиево', 'stoka_na_pat') === 'ne',
        JSON.stringify(got(h, 'Севлиево', 'stoka_na_pat')));
     ok('нула POST към weekly_checklist', writes(h).length === 0, 'реално: ' + writes(h).length);
     const row = h.w.checklistRows.filter(function (r) {
@@ -418,7 +451,7 @@ function freezeDay(h, day) {
     await compute(h);
     ok('нула записа и след checklistComputePortalValues()', writes(h).length === 0,
        'реално: ' + writes(h).length);
-    ok('а стойността е изчислена (0/190)', got(h, 'Севлиево', 'stoka_na_pat') === '0/190',
+    ok('а стойността е изчислена („не")', got(h, 'Севлиево', 'stoka_na_pat') === 'ne',
        JSON.stringify(h.vals));
     h.close();
   }
@@ -457,14 +490,16 @@ function freezeDay(h, day) {
     await compute(h);
 
     const w = got(h, 'Севлиево', 'stoka_na_pat');
-    ok('Севлиево 130/159 (не 10/20 от първата страница)', w === '130/159', JSON.stringify(w));
+    /* 10/20 от първата страница също е „не" — затова и Враца: 700 от 700
+       (на първата страница няма нито един неин ред → без страниране — празно). */
+    ok('Севлиево „не" (130/159)', w === 'ne', JSON.stringify(w));
     const gets = h.calls.get.filter(u => /goods_transit/.test(u));
     ok('три страници: offset 0, 1000, 2000', gets.length === 3 &&
        [0, 1000, 2000].every((o, i) => gets[i].indexOf('offset=' + o) >= 0), gets.join(' | '));
     ok('всяка страница е с order=id.asc и limit=1000',
        gets.every(u => u.indexOf('order=id.asc') >= 0 && u.indexOf('limit=1000') >= 0), gets.join(' | '));
     ok('тегли се и reviewed_at', gets.every(u => /select=[^&]*reviewed_at/.test(u)), gets[0]);
-    ok('Враца 700/700', got(h, 'Враца', 'stoka_na_pat') === '700/700',
+    ok('Враца „да" (700/700 — само от втората страница)', got(h, 'Враца', 'stoka_na_pat') === 'da',
        JSON.stringify(got(h, 'Враца', 'stoka_na_pat')));
     h.close();
   }
@@ -479,7 +514,7 @@ function freezeDay(h, day) {
     await compute(h);
     const gets = h.calls.get.filter(u => /goods_transit/.test(u));
     ok('точно 1000 реда → 2 заявки (втората празна)', gets.length === 2, gets.join(' | '));
-    ok('1000/1000', got(h, 'Севлиево', 'stoka_na_pat') === '1000/1000',
+    ok('1000 от 1000 → „да"', got(h, 'Севлиево', 'stoka_na_pat') === 'da',
        JSON.stringify(got(h, 'Севлиево', 'stoka_na_pat')));
     h.close();
   }
@@ -518,11 +553,14 @@ function freezeDay(h, day) {
     h.w.loadChecklist();
     await ticks();
     await compute(h);
-    ok('3/4: двата проверени + приетият', got(h, 'Севлиево', 'stoka_na_pat') === '3/4',
+    ok('„не" (3/4: двата проверени + приетият, един необработен)', got(h, 'Севлиево', 'stoka_na_pat') === 'ne',
        JSON.stringify(got(h, 'Севлиево', 'stoka_na_pat')));
-    ok('пряко: непроверен pending не се брои', h.w.checklistTransitValue([tr('X', 'incoming', 'pending')]) === '0/1');
-    ok('пряко: проверен pending се брои',
-       h.w.checklistTransitValue([Object.assign(tr('X', 'incoming', 'pending'), { reviewed_at: at })]) === '1/1');
+    ok('пряко: непроверен pending → „не"', h.w.checklistTransitValue([tr('X', 'incoming', 'pending')]) === 'ne');
+    ok('пряко: проверен pending → „да"',
+       h.w.checklistTransitValue([Object.assign(tr('X', 'incoming', 'pending'), { reviewed_at: at })]) === 'da');
+    ok('пряко: „🔍 чака засечка" (recon_at) → „да"',
+       h.w.checklistTransitValue([Object.assign(tr('X', 'incoming', 'pending'), { recon_at: at })]) === 'da');
+    ok('пряко: само outgoing → null', h.w.checklistTransitValue([tr('X', 'outgoing', 'pending')]) === null);
     h.close();
   }
 
