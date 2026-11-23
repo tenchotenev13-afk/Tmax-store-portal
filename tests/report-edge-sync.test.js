@@ -183,7 +183,7 @@ const COPIED_HELPERS = [
   { fn: 'mnRound', from: MINUSI }, { fn: 'mnFmtQty', from: MINUSI }, { fn: 'mnNormUom', from: MINUSI },
   { fn: 'mnCoKey', from: MINUSI }, { fn: 'mnRealOne', from: MINUSI }, { fn: 'mnValRow', from: MINUSI },
   { fn: 'mnValUomWarn', from: MINUSI }, { fn: 'mnFmtEur', from: MINUSI },
-  { fn: 'mnRevIsCode', from: MINUSI }, { fn: 'mnRevRealCodes', from: MINUSI },
+  { fn: 'mnRevIsCode', from: MINUSI }, { fn: 'mnRevRealCodes', from: MINUSI }, { fn: 'mnRevIsPreoc', from: MINUSI },
   /* fmtDate2 — вика го reportSpanPendingHtml; липсата му събори седмичния
      отчет на 04.10.2026 (ReferenceError). */
   { fn: 'fmtDate2', from: BULLETIN },

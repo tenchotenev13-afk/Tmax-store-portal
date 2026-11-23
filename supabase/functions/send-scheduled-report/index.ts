@@ -9,7 +9,9 @@
          на офиса от таб Минуси (mnValRow; копия от minusi.js, сверени в
          report-edge-sync), но по ЦЯЛОТО количество на 955 (qty), не по
          незакрития остатък (решение на Тенчо 23.11); цени VKP2 към последното
-         качване, без промо. Без цена / няколко кода — в реда, извън разликата, преброени.
+         качване, без промо. Преоценен код (минусът или заметнатият,
+         mnRevIsPreoc) → „няма цена (преоценен)“, извън разликата и сумите,
+         преброен отделно (Миглена 23.11). Без цена / няколко кода — в реда, извън разликата, преброени.
          Грешка → червен ред, писмото тръгва (reportMinusPriceGroup / Html /
          ForStores, collectMinusPriceData).
       2) писма до обектите — „Минуси с отворена разлика“ само с редовете на
@@ -5469,12 +5471,20 @@ function collectMinusOdData(stores, cb){
 }
 /* ── Копия от minusi.js за „Ценови разлики" (minusi-weekly-prices-stores, 23.11.2026) ──
    Дословно: стойностите на офиса (mnValRow, mnRealOne, mnRevRealCodes,
-   mnFmtEur, mnFmtQty и помощниците им). В браузъра report.js вика оригиналите —
+   mnFmtEur, mnFmtQty и помощниците им) и разпознаването на преоценен код от
+   темплейта за ревизия (mnRevIsPreoc, MN_REV_PREOC_RE; mnRevCat се подменя). В браузъра report.js вика оригиналите —
    затова в report.js ги няма. Сверени в tests/report-edge-sync.test.js
    (функциите) и tests/minusi-weekly-prices.test.js (MN_LOOKALIKE). mnPrices —
    глобалният на таба; тук го подменя reportMinusPriceGroup. */
 var MN_LOOKALIKE = { 'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X' };
 var mnPrices: any = {};
+var mnRevCat: any = {};
+var MN_REV_PREOC_RE = /^\s*ПРЕОЦ/i;
+function mnRevIsPreoc(e){
+  if(MN_REV_PREOC_RE.test(e.desc || '')) return true;
+  var p = mnRevCat[e.code];
+  return !!p && (p.cat === 'Преоценка' || MN_REV_PREOC_RE.test(p.name || ''));
+}
 function mnRound(x){ return Math.round(Number(x) * 1e6) / 1e6; }
 function mnFmtQty(n){
   if(n == null || !isFinite(n)) return '';
@@ -5540,11 +5550,19 @@ function mnRevRealCodes(real){
    Сумите — като реда „Общо“ в таба: всяка колона сбира редовете, в които я има.
    Без цена / няколко кода → в реда „няма цена“ / „няколко кода“ и не влизат
    в разликата; броят им стои над таблиците.
+   ПРЕОЦЕНЕН код (Миглена 23.11: цената във VKP2 не е реалната — Петрич 8080018
+   „ПРЕОЦ. СВЕЩНИК…“ 103,28 € срещу 1,99 € на каса) — минусът ИЛИ някой от
+   заметнатите: редът е „няма цена (преоценен)“, не влиза нито в разликата,
+   нито в сумите, брои се отделно („N реда с преоценен код — без цена“).
+   Разпознаването — mnRevIsPreoc от темплейта за ревизия (описание „ПРЕОЦ“,
+   category 'Преоценка', product_name „ПРЕОЦ“); глобалният mnRevCat се подменя
+   за смятането като mnPrices. Таб Минуси НЕ е пипан.
    Грешка при четене → { error: true }: червен ред, писмото тръгва. */
 var REPORT_MINUS_PRICE_BATCH = 150;
-function reportMinusPriceSum(){ return { minus: 0, nMinus: 0, real: 0, nReal: 0, diff: 0, nDiff: 0, rows: 0, noPrice: 0, multi: 0 }; }
+function reportMinusPriceSum(){ return { minus: 0, nMinus: 0, real: 0, nReal: 0, diff: 0, nDiff: 0, rows: 0, noPrice: 0, multi: 0, preoc: 0 }; }
 function reportMinusPriceAdd(t, it){
   t.rows++;
+  if (it.preoc) { t.preoc++; return; }
   if (it.minus != null) { t.minus += it.minus; t.nMinus++; }
   if (it.realVal != null) { t.real += it.realVal; t.nReal++; }
   if (it.diff != null) { t.diff += it.diff; t.nDiff++; }
@@ -5552,15 +5570,16 @@ function reportMinusPriceAdd(t, it){
   else if (it.noMinus || it.noReal) t.noPrice++;
 }
 /* Чисто: movs — 955 на обектите (qty, uom, real_code, reason_id; 956 се пропускат);
-   cat — { prices: { код: { price, unit } }, names: { код: име }, at }. */
+   cat — { prices: { код: { price, unit } }, names: { код: име }, rev: { код: { name, cat } } (форматът на mnRevCat), at }. */
 function reportMinusPriceGroup(movs, cat, stores, refISO, reasons){
   var ms = Array.isArray(stores) ? stores : [];
   var c = cat || {};
   var coIds = reportMinusMultiCoIds(reasons);
   var fromISO = reportMinusMultiAddDays(refISO, -6);
   var by = {};
-  var keep = mnPrices;
+  var keep = mnPrices, keepCat = mnRevCat;
   mnPrices = c.prices || {};
+  mnRevCat = c.rev || {};
   try {
     (Array.isArray(movs) ? movs : []).forEach(function(r){
       if (!r || String(r.mvt_type) !== '955' || ms.indexOf(r.store_name) < 0) return;
@@ -5568,12 +5587,15 @@ function reportMinusPriceGroup(movs, cat, stores, refISO, reasons){
       if (d < fromISO || d > refISO || !mnCoKey(r.real_code) || reportMinusMultiIsCo(r, coIds)) return;
       var qty = Number(r.qty) || 0;
       var v = mnValRow(Object.assign({}, r, { _rest: qty })), one = mnRealOne(r), mat = mnCoKey(r.material);
+      var preoc = mnRevIsPreoc({ code: mat, desc: r.material_desc || '' }) ||
+        mnRevRealCodes(mnCoKey(r.real_code)).some(function(x){ return mnRevIsPreoc({ code: x, desc: '' }); });
       (by[r.store_name] || (by[r.store_name] = [])).push({ id: r.id, date: d, material: mat, desc: r.material_desc || (c.names || {})[mat] || '',
         real: mnCoKey(r.real_code), realOne: one, realDesc: one ? ((c.names || {})[one] || '') : '', qty: qty, uom: r.uom || '',
-        minus: v.minus, realVal: v.real, diff: v.diff, minusWarn: v.minusWarn || null, realWarn: v.realWarn || null,
-        noMinus: !!v.noMinus, noReal: !!v.noReal, multi: !!v.realMulti });
+        minus: preoc ? null : v.minus, realVal: preoc ? null : v.real, diff: preoc ? null : v.diff,
+        minusWarn: preoc ? null : v.minusWarn || null, realWarn: preoc ? null : v.realWarn || null,
+        noMinus: !preoc && !!v.noMinus, noReal: !preoc && !!v.noReal, multi: !preoc && !!v.realMulti, preoc: preoc });
     });
-  } finally { mnPrices = keep; }
+  } finally { mnPrices = keep; mnRevCat = keepCat; }
   var out = { from: fromISO, to: refISO, at: c.at || null, stores: [], total: reportMinusPriceSum() };
   ms.forEach(function(s){
     var items = by[s];
@@ -5606,7 +5628,9 @@ function reportMinusPriceHtml(pr){
   h += '<div class="mm-pr-count" style="font-size:12px;color:#475569;margin-bottom:6px;">Редове: <b>' + t.rows + '</b>' +
     (t.noPrice ? ' · без цена: <b class="mm-pr-noprice-n">' + t.noPrice + '</b>' : '') +
     (t.multi ? ' · с няколко заметнати кода: <b class="mm-pr-multi-n">' + t.multi + '</b>' : '') +
-    (t.noPrice || t.multi ? ' (не влизат в разликата)' : '') + '</div>';
+    (t.noPrice || t.multi ? ' (не влизат в разликата)' : '') + '</div>' +
+    (t.preoc ? '<div class="mm-pr-preoc-n" style="font-size:12px;color:#b45309;margin-bottom:6px;"><b>' + t.preoc + '</b> ' + (t.preoc === 1 ? 'ред' : 'реда') +
+      ' с преоценен код — без цена (цената във VKP2 не е реалната; не влизат в разликата и сумите)</div>' : '');
   var th = function(x, a){ return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:' + (a || 'left') + ';border-bottom:2px solid #e2e8f0;">' + x + '</th>'; };
   var td = function(x, extra){ return '<td style="padding:6px;font-size:12px;color:#1e293b;vertical-align:top;border-bottom:1px solid #eef1f6;' + (extra || '') + '">' + x + '</td>'; };
   var gray = function(x, cls){ return '<span class="' + cls + '" style="color:#94a3b8;font-size:11px;">' + x + '</span>'; };
@@ -5628,9 +5652,9 @@ function reportMinusPriceHtml(pr){
     s.items.forEach(function(it){
       h += '<tr class="mm-pr-item">' + td(esc(it.material), 'white-space:nowrap;') + td(esc(it.desc)) +
         td(esc(mnFmtQty(it.qty) + (it.uom ? ' ' + it.uom : '')), 'text-align:right;white-space:nowrap;') +
-        eur(it.minus, it.minusWarn, it.noMinus ? gray('няма цена', 'mm-pr-noprice') : '') +
+        eur(it.minus, it.minusWarn, it.preoc ? gray('няма цена (преоценен)', 'mm-pr-preoc') : it.noMinus ? gray('няма цена', 'mm-pr-noprice') : '') +
         td(esc(it.real), 'white-space:nowrap;') + td(esc(it.multi ? '' : it.realDesc)) +
-        eur(it.realVal, it.realWarn, it.multi ? gray('няколко кода', 'mm-pr-multi') : (it.noReal ? gray('няма цена', 'mm-pr-noprice') : '')) +
+        eur(it.realVal, it.realWarn, it.preoc ? gray('няма цена (преоценен)', 'mm-pr-preoc') : it.multi ? gray('няколко кода', 'mm-pr-multi') : (it.noReal ? gray('няма цена', 'mm-pr-noprice') : '')) +
         eur(it.diff, null, '') + '</tr>';
     });
     h += tot('Общо ' + esc(s.store), s.sum) + '</table>';
@@ -5659,17 +5683,18 @@ function collectMinusPriceData(stores, refISO, reasons, cb){
     var parts = [];
     for (var i = 0; i < codes.length; i += REPORT_MINUS_PRICE_BATCH) parts.push(codes.slice(i, i + REPORT_MINUS_PRICE_BATCH));
     return Promise.all(parts.map(function(p){
-      return reportGetAll('product_catalog', 'select=sap_code,product_name,sale_price,sale_price_unit&sap_code=in.(' +
+      return reportGetAll('product_catalog', 'select=sap_code,product_name,category,sale_price,sale_price_unit&sap_code=in.(' +
         p.map(function(x){ return '"' + encodeURIComponent(x) + '"'; }).join(',') + ')&order=sap_code.asc');
     })).then(function(rs){
       if (rs.some(function(r){ return !r || r.partial; })) { fail(); return; }
       return sbGet('product_catalog', 'select=sale_price_uploaded_at&sale_price_uploaded_at=not.is.null&order=sale_price_uploaded_at.desc&limit=1').then(function(up){
         if (!Array.isArray(up)) { fail(); return; }
-        var cat = { prices: {}, names: {}, at: up[0] ? up[0].sale_price_uploaded_at : null };
+        var cat = { prices: {}, names: {}, rev: {}, at: up[0] ? up[0].sale_price_uploaded_at : null };
         rs.forEach(function(r){ r.forEach(function(x){
           if (!x) return;
           var k = mnCoKey(x.sap_code);
           if (x.product_name) cat.names[k] = x.product_name;
+          cat.rev[k] = { name: x.product_name ? String(x.product_name) : '', cat: x.category ? String(x.category) : '' };
           if (x.sale_price != null && isFinite(Number(x.sale_price))) cat.prices[k] = { price: Number(x.sale_price), unit: x.sale_price_unit || '' };
         }); });
         try { cb(reportMinusPriceGroup(mv, cat, stores, refISO, reasons)); } catch (e) { fail(); }

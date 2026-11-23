@@ -6,7 +6,10 @@
        Стойностите и разликата — функцията на офиса от таб Минуси (mnValRow:
        количество × цена; заметнат само при ЕДИН код; разлика от закръглените до
        2 знака), но по ЦЯЛОТО количество на 955 (qty), не по незакрития остатък
-       (решение на Тенчо 23.11) — закрит с 956 минус пак носи разлика. Без цена / няколко кода — в реда, извън
+       (решение на Тенчо 23.11) — закрит с 956 минус пак носи разлика.
+       Преоценен код (минусът или заметнатият, mnRevIsPreoc — описание „ПРЕОЦ“,
+       category 'Преоценка', product_name „ПРЕОЦ“) → „няма цена (преоценен)“,
+       извън разликата и сумите, преброен отделно (Миглена 23.11). Без цена / няколко кода — в реда, извън
        разликата, преброени. Сума по обект и „Общо за седмицата“. Регионалният —
        само своите обекти.
    (Б) Писмо до обекта: само неговите редове от „Минуси с отворена разлика“, без
@@ -22,7 +25,8 @@
      M2 друг обект в писмото на обекта (reportMinusStoreJobs не филтрира по обект);
      M3 код без цена влиза в сумата (липсващата цена на заметнатия = 0);
      M4 пак по остатъка (количеството минус 956 по същия материал на обекта);
-     M5 без филтъра @temax.bg (всеки адрес на управител получава).
+     M5 без филтъра @temax.bg (всеки адрес на управител получава);
+     M6 преоценен влиза в сумата (стойностите на преоценения ред не се нулират).
    Броят паднали — в отчета на сесията. */
 'use strict';
 
@@ -55,19 +59,25 @@ const MOVS = [
   /* m10 */ mv(SH, 'C2', '2026-11-23', '955', 1, 'D1'),               /* след неделята → не */
   /* m11 */ mv('Добрич', 'X1', '2026-11-18', '955', 1, 'B1'),        /* не е в minus_stores */
   /* m12 */ mv(MT, 'A8', '2026-11-19', '955', 1, 'B1'),               /* изцяло закрит с 956 → пак 9 − 7,5 = 1,50 (≠ 0) */
-  /* m13 */ mv(MT, 'A8', '2026-11-20', '956', -1)
+  /* m13 */ mv(MT, 'A8', '2026-11-20', '956', -1),
+  /* m14 */ mv(MT, 'A9', '2026-11-18', '955', 1, 'B1', { material_desc: 'ПРЕОЦ. СВЕЩНИК' }), /* минусът преоценен (описание) */
+  /* m15 */ mv(MT, 'A10', '2026-11-18', '955', 1, 'P2'),             /* заметнатият преоценен (category 'Преоценка') */
+  /* m16 */ mv(SH, 'C3', '2026-11-18', '955', 1, 'D1')               /* минусът преоценен по product_name в каталога */
 ];
 const REASONS = [{ id: 9, label: 'Клиентска поръчка', requires_note: true }, { id: 1, label: 'Грешен код', requires_note: false }];
 const CAT = {
   prices: { A1: { price: 10, unit: 'БР' }, A2: { price: 5, unit: 'БР' }, A3: { price: 4, unit: 'БР' }, A4: { price: 6, unit: 'БР' }, B1: { price: 7.5, unit: 'БР' },
-    A8: { price: 9, unit: 'БР' }, C1: { price: 3.333, unit: 'БР' }, D1: { price: 1.111, unit: 'БР' } },
-  names: { B1: 'ЗАМЕТНАТ B1', D1: 'ЗАМЕТНАТ D1', NOP: 'БЕЗ ЦЕНА' },
+    A8: { price: 9, unit: 'БР' }, A9: { price: 103.28, unit: 'БР' }, A10: { price: 2, unit: 'БР' }, P2: { price: 1, unit: 'БР' }, C3: { price: 50, unit: 'БР' }, C1: { price: 3.333, unit: 'БР' }, D1: { price: 1.111, unit: 'БР' } },
+  names: { B1: 'ЗАМЕТНАТ B1', D1: 'ЗАМЕТНАТ D1', NOP: 'БЕЗ ЦЕНА', P2: 'ЛАМПА P2', C3: 'ПРЕОЦ. ЛАМПА' },
+  cats: { P2: 'Преоценка' },
+  rev: { B1: { name: 'ЗАМЕТНАТ B1', cat: '' }, D1: { name: 'ЗАМЕТНАТ D1', cat: '' }, P2: { name: 'ЛАМПА P2', cat: 'Преоценка' }, C3: { name: 'ПРЕОЦ. ЛАМПА', cat: '' } },
   at: '2026-11-09T09:40:50.839+00:00'
 };
-/* Ръчно, по количеството на 955: Монтана — A1, A2, A3, A8, A4 (5 реда); Шумен — C1. */
+/* Ръчно, по количеството на 955: Монтана — A1, A2, A9, A10, A3, A8, A4 (7 реда, 2 преоценени
+   извън сумите); Шумен — C1, C3 (1 преоценен). Сумите — същите като без преоценените. */
 const HAND = {
-  [MT]: { rows: 5, minus: 20 + 5 + 12 + 9 + 12, nMinus: 5, real: 15 + 7.5 + 15, nReal: 3, diff: 5 + 1.5 - 3, nDiff: 3, noPrice: 1, multi: 1 },
-  [SH]: { rows: 1, minus: 3.333, nMinus: 1, real: 1.111, nReal: 1, diff: 2.22, nDiff: 1, noPrice: 0, multi: 0 }
+  [MT]: { rows: 7, minus: 20 + 5 + 12 + 9 + 12, nMinus: 5, real: 15 + 7.5 + 15, nReal: 3, diff: 5 + 1.5 - 3, nDiff: 3, noPrice: 1, multi: 1, preoc: 2 },
+  [SH]: { rows: 2, minus: 3.333, nMinus: 1, real: 1.111, nReal: 1, diff: 2.22, nDiff: 1, noPrice: 0, multi: 0, preoc: 1 }
 };
 
 /* „Минуси с отворена разлика“ — минимални редове за писмата до обектите. */
@@ -100,11 +110,11 @@ function edgeCtx(){
     'reportMinusOdTurn', 'reportMinusOdStatus', 'reportMinusOdComments', 'reportMinusOdGroup', 'reportMinusOdHtml', 'reportDiffIsRouted',
     'reportMinusMultiDM', 'reportMinusMultiAddDays', 'reportMinusMultiCoIds', 'reportMinusMultiIsCo', 'reportEmailShell',
     'sdIsClosed', 'sdIsTaken', 'sdIsCompleted', 'sdRowAwaitsMark', 'sdStoreMustAct', 'sdStatusWords', 'bulDiffLineWaitsStore', 'bulDiffStoreWaiting', 'diffLineWaitsStore',
-    'mnRound', 'mnFmtQty', 'mnNormUom', 'mnCoKey', 'mnRealOne', 'mnValRow', 'mnValUomWarn', 'mnFmtEur', 'mnRevIsCode', 'mnRevRealCodes', 'esc', 'escAttr'];
-  const vars = ['REPORT_MINUS_OD_DIR', 'REPORT_MINUS_OD_TURN', 'SD_CLOSED_STATUSES', 'SD_STATUS_NEW_LABEL', 'MN_LOOKALIKE', 'REPORT_MINUS_PRICE_BATCH', 'PORTAL_URL'];
+    'mnRound', 'mnFmtQty', 'mnNormUom', 'mnCoKey', 'mnRealOne', 'mnValRow', 'mnValUomWarn', 'mnFmtEur', 'mnRevIsCode', 'mnRevRealCodes', 'mnRevIsPreoc', 'esc', 'escAttr'];
+  const vars = ['REPORT_MINUS_OD_DIR', 'REPORT_MINUS_OD_TURN', 'SD_CLOSED_STATUSES', 'SD_STATUS_NEW_LABEL', 'MN_LOOKALIKE', 'MN_REV_PREOC_RE', 'REPORT_MINUS_PRICE_BATCH', 'PORTAL_URL'];
   const ctx = {};
   vm.createContext(ctx);
-  const code = 'var mnReasons = []; var mnPrices = {}; var mnRepeatDays = 0; var mnMultiCount = 1; var mnMultiDays = 1;\n' +
+  const code = 'var mnRevCat = {}; var mnReasons = []; var mnPrices = {}; var mnRepeatDays = 0; var mnMultiCount = 1; var mnMultiDays = 1;\n' +
     vars.map(grabVar).join('\n') + '\n' + fns.map(grabFn).join('\n');
   vm.runInContext(code.replace(/\((\w+): any\)/g, '($1)').replace(/function (\w+)\(s: any\)/g, 'function $1(s)') +
     '\n;this.getPrices = function(){ return mnPrices; };', ctx);
@@ -121,7 +131,7 @@ const prShape = pr => J({ from: pr.from, to: pr.to, at: pr.at, total: pr.total, 
 
   section('1. Кои редове влизат (А)');
   ok('седмицата 16.11–22.11', pr.from === '2026-11-16' && pr.to === REF, pr.from + '–' + pr.to);
-  ok('Монтана: A1, A2, A3, A8, A4 (по дата); Шумен: C1; Петрич и Добрич — нищо', J(pr.stores.map(s => [s.store, s.items.map(it => it.material)])) === J([[MT, ['A1', 'A2', 'A3', 'A8', 'A4']], [SH, ['C1']]]),
+  ok('Монтана: A1, A2, A9, A10, A3, A8, A4 (по дата); Шумен: C1, C3; Петрич и Добрич — нищо', J(pr.stores.map(s => [s.store, s.items.map(it => it.material)])) === J([[MT, ['A1', 'A2', 'A9', 'A10', 'A3', 'A8', 'A4']], [SH, ['C1', 'C3']]]),
     J(pr.stores.map(s => [s.store, s.items.map(it => it.material)])));
   ok('не влизат: предходна седмица (A5), без заметнат (A6), клиентска поръчка (A7), след неделята (C2), извън minus_stores (X1)',
     !item(MT, 'A5') && !item(MT, 'A6') && !item(MT, 'A7') && !item(SH, 'C2'));
@@ -142,15 +152,23 @@ const prShape = pr => J({ from: pr.from, to: pr.to, at: pr.at, total: pr.total, 
   const a8tab = w.mnValRow(calc.all.find(r => r.material === 'A8'));
   w.mnPrices = keep;
   ok('таб Минуси за същия закрит A8 остава по остатъка (0,00) — табът не е пипнат', a8tab.minus === 0 && a8tab.diff === 0, J(a8tab));
-  ok('всеки ред = mnValRow (функцията на таба) с количеството на 955 (minus / real / diff)', pr.stores.every(s => s.items.every(it => { const v = tab[it.id];
+  ok('преоценен минус по описание (A9 „ПРЕОЦ. СВЕЩНИК“, 103,28 € във VKP2) → без стойности и без разлика', item(MT, 'A9').preoc && item(MT, 'A9').minus == null && item(MT, 'A9').realVal == null && item(MT, 'A9').diff == null, J(item(MT, 'A9')));
+  ok('преоценен заметнат по category „Преоценка“ (A10 → P2) → без стойности', item(MT, 'A10').preoc && item(MT, 'A10').minus == null && item(MT, 'A10').diff == null, J(item(MT, 'A10')));
+  ok('преоценен минус по product_name „ПРЕОЦ“ в каталога (Шумен C3) → без стойности', item(SH, 'C3').preoc && item(SH, 'C3').minus == null && item(SH, 'C3').diff == null, J(item(SH, 'C3')));
+  ok('обикновените редове не са преоценени', ['A1', 'A2', 'A3', 'A8', 'A4'].every(c => !item(MT, c).preoc) && !item(SH, 'C1').preoc);
+  ok('разпознаването = mnRevIsPreoc на темплейта (същото решение за всеки код)', (() => { const keepC = w.eval('mnRevCat'); w.eval('mnRevCat = ' + J(CAT.rev));
+    const r = w.mnRevIsPreoc({ code: 'A9', desc: 'ПРЕОЦ. СВЕЩНИК' }) && w.mnRevIsPreoc({ code: 'P2', desc: '' }) && w.mnRevIsPreoc({ code: 'C3', desc: 'АРТИКУЛ C3' }) && !w.mnRevIsPreoc({ code: 'B1', desc: '' });
+    w.mnRevCat = keepC; return r; })());
+  ok('глобалният mnRevCat на таба е върнат след смятането (не е каталогът на писмото)', (() => { const before = w.eval('mnRevCat'); w.reportMinusPriceGroup(MOVS, CAT, STORES, REF, REASONS); return w.eval('mnRevCat') === before; })());
+  ok('всеки непреоценен ред = mnValRow (функцията на таба) с количеството на 955 (minus / real / diff)', pr.stores.every(s => s.items.filter(it => !it.preoc).every(it => { const v = tab[it.id];
     return v && v.minus === it.minus && v.real === it.realVal && v.diff === it.diff; })), J(pr.stores.map(s => s.items.map(it => [it.id, it.minus, it.realVal, it.diff, tab[it.id]]))));
   ok('глобалният mnPrices на таба е върнат след смятането', w.eval('mnPrices') === keep);
 
   section('3. Суми по обект и общо, „няма цена“ — преброени и извън сумата');
-  const chk = (s, e) => s.rows === e.rows && near(s.minus, e.minus) && s.nMinus === e.nMinus && near(s.real, e.real) && s.nReal === e.nReal && near(s.diff, e.diff) && s.nDiff === e.nDiff && s.noPrice === e.noPrice && s.multi === e.multi;
-  ok('Монтана: 5 реда, разлика 3,50 (5,00 + 1,50 − 3,00), 1 без цена, 1 с няколко кода', chk(byStore[MT].sum, HAND[MT]), J(byStore[MT].sum));
-  ok('Шумен: 1 ред, разлика 2,22', chk(byStore[SH].sum, HAND[SH]), J(byStore[SH].sum));
-  ok('Общо за седмицата: 6 реда, разлика 5,72 (3,50 + 2,22)', pr.total.rows === 6 && near(pr.total.diff, 5.72) && pr.total.noPrice === 1 && pr.total.multi === 1 && pr.total.nDiff === 4, J(pr.total));
+  const chk = (s, e) => s.rows === e.rows && s.preoc === e.preoc && near(s.minus, e.minus) && s.nMinus === e.nMinus && near(s.real, e.real) && s.nReal === e.nReal && near(s.diff, e.diff) && s.nDiff === e.nDiff && s.noPrice === e.noPrice && s.multi === e.multi;
+  ok('Монтана: 7 реда (2 преоценени — извън сумите), разлика 3,50 (5,00 + 1,50 − 3,00), 1 без цена, 1 с няколко кода', chk(byStore[MT].sum, HAND[MT]), J(byStore[MT].sum));
+  ok('Шумен: 2 реда (1 преоценен), разлика 2,22', chk(byStore[SH].sum, HAND[SH]), J(byStore[SH].sum));
+  ok('Общо за седмицата: 9 реда, 3 преоценени, разлика 5,72 (3,50 + 2,22) — преоценените не влизат', pr.total.rows === 9 && pr.total.preoc === 3 && near(pr.total.diff, 5.72) && near(pr.total.minus, 58 + 3.333) && pr.total.noPrice === 1 && pr.total.multi === 1 && pr.total.nDiff === 4, J(pr.total));
 
   section('4. HTML (А)');
   const html = w.reportMinusPriceHtml(pr);
@@ -159,8 +177,10 @@ const prShape = pr => J({ from: pr.from, to: pr.to, at: pr.at, total: pr.total, 
   ok('заглавие и „Цени от VKP2 към 09.11.2026, без промоции.“', /Ценови разлики \(минус ↔ заметнат\)/.test(txt) && /Цени от VKP2 към 09\.11\.2026, без промоции\./.test(txt), txt.slice(0, 200));
   ok('колоните: Код минус · Описание · К-во · Стойност минус · Заметнат код · Описание · Стойност заметнат · Разлика (€)',
     J(Array.from(doc.querySelector('table tr').cells).map(c => c.textContent)) === J(['Код минус', 'Описание', 'К-во', 'Стойност минус', 'Заметнат код', 'Описание', 'Стойност заметнат', 'Разлика (€)']));
-  ok('6 реда; A3 носи „няма цена“, A2 — „няколко кода“', doc.querySelectorAll('tr.mm-pr-item').length === 6 && doc.querySelectorAll('.mm-pr-noprice').length === 1 && doc.querySelectorAll('.mm-pr-multi').length === 1);
+  ok('9 реда; A3 носи „няма цена“, A2 — „няколко кода“', doc.querySelectorAll('tr.mm-pr-item').length === 9 && doc.querySelectorAll('.mm-pr-noprice').length === 1 && doc.querySelectorAll('.mm-pr-multi').length === 1);
   ok('броят над таблиците: без цена 1, с няколко кода 1 (не влизат в разликата)', /без цена: 1/.test(txt) && /няколко заметнати кода: 1/.test(txt) && /не влизат в разликата/.test(txt));
+  ok('„3 реда с преоценен код — без цена“ над таблиците; в редовете „няма цена (преоценен)“ (по 2 клетки × 3 реда)', /3 реда с преоценен код — без цена/.test(doc.querySelector('.mm-pr-preoc-n').textContent) && doc.querySelectorAll('.mm-pr-preoc').length === 6 &&
+    /няма цена \(преоценен\)/.test(Array.from(doc.querySelectorAll('tr.mm-pr-item')).find(tr => tr.cells[0].textContent === 'A9').textContent));
   const sums = Array.from(doc.querySelectorAll('tr.mm-pr-sum')).map(tr => tr.textContent);
   ok('сума по обект: „Общо Монтана … 3,50 €“ и „Общо Шумен … 2,22 €“', sums.length === 2 && /^Общо Монтана/.test(sums[0]) && /3,50 €$/.test(sums[0]) && /2,22 €$/.test(sums[1]), J(sums));
   ok('„Общо за седмицата … разлика 5,72 €“', /Общо за седмицата: .*разлика 5,72 €/.test(doc.querySelector('.mm-pr-total').textContent), doc.querySelector('.mm-pr-total').textContent);
@@ -174,9 +194,10 @@ const prShape = pr => J({ from: pr.from, to: pr.to, at: pr.at, total: pr.total, 
   section('5. Регионалният — само своите обекти');
   const data = Object.assign(w.reportMinusMultiGroup([], STORES, 3, 30, REF), { pr: pr });
   const sub = w.reportMinusMultiForStores(data, [SH], true);
-  ok('Шумен: само Шумен, разлика 2,22, 1 ред', J(sub.pr.stores.map(s => s.store)) === J([SH]) && sub.pr.total.rows === 1 && near(sub.pr.total.diff, 2.22), J(sub.pr.total));
+  ok('Шумен: само Шумен, разлика 2,22, 2 реда', J(sub.pr.stores.map(s => s.store)) === J([SH]) && sub.pr.total.rows === 2 && near(sub.pr.total.diff, 2.22), J(sub.pr.total));
   ok('… и в HTML-а му няма Монтана', !/Монтана/.test(w.reportMinusPriceHtml(sub.pr)));
-  ok('без обхват — всичките 6', w.reportMinusMultiForStores(data, STORES, false).pr.total.rows === 6);
+  ok('без обхват — всичките 9', w.reportMinusMultiForStores(data, STORES, false).pr.total.rows === 9);
+  ok('Шумен: 1 преоценен след срязването', sub.pr.total.preoc === 1);
   ok('грешката остава грешка', w.reportMinusMultiForStores(Object.assign({}, data, { pr: { error: true } }), [SH], true).pr.error === true);
 
   section('6. Писма до обектите (Б)');
@@ -229,7 +250,7 @@ const prShape = pr => J({ from: pr.from, to: pr.to, at: pr.at, total: pr.total, 
         if (failPrice) return res(500, { message: 'boom' });
         if (/sale_price_uploaded_at=not\.is\.null/.test(qy)) return res(200, [{ sale_price_uploaded_at: CAT.at }]);
         const codes = ((qy.match(/sap_code=in\.\(([^)]*)\)/) || [])[1] || '').split(',').map(c => c.replace(/"/g, ''));
-        return res(200, codes.filter(c => CAT.prices[c] || CAT.names[c]).map(c => ({ sap_code: c, product_name: CAT.names[c] || null,
+        return res(200, codes.filter(c => CAT.prices[c] || CAT.names[c]).map(c => ({ sap_code: c, product_name: CAT.names[c] || null, category: CAT.cats[c] || null,
           sale_price: CAT.prices[c] ? CAT.prices[c].price : null, sale_price_unit: CAT.prices[c] ? CAT.prices[c].unit : null })));
       }
       let rows = route[t] || [];
@@ -246,7 +267,7 @@ const prShape = pr => J({ from: pr.from, to: pr.to, at: pr.at, total: pr.total, 
     /store_name=in\.\("Монтана","Шумен","Петрич"\)/.test(mq[0].q), mq[0] && mq[0].q);
   const pq = ok1.log.filter(x => x.t === 'product_catalog' && /sap_code=in/.test(x.q));
   ok('цените: само кодовете на седмицата със заметнат (минус + заметнатите, вкл. разделените 38554 / 38619; A7 — колекторът не знае причината, редът отпада после)', pq.length === 1 &&
-    J(pq[0].q.match(/sap_code=in\.\(([^)]*)\)/)[1].replace(/"/g, '').split(',').sort()) === J(['38554', '38619', 'A1', 'A2', 'A3', 'A4', 'A7', 'A8', 'B1', 'C1', 'D1', 'NOP'].sort()), pq[0] && pq[0].q);
+    J(pq[0].q.match(/sap_code=in\.\(([^)]*)\)/)[1].replace(/"/g, '').split(',').sort()) === J(['38554', '38619', 'A1', 'A2', 'A3', 'A4', 'A7', 'A8', 'A9', 'A10', 'P2', 'C3', 'B1', 'C1', 'D1', 'NOP'].sort()), pq[0] && pq[0].q);
   ok('с успех: pr = чистото смятане, at = датата на качването', ok1.got && ok1.got.pr && prShape(ok1.got.pr) === prShape(pr), ok1.got && ok1.got.pr && prShape(ok1.got.pr).slice(0, 300));
   const bad = await run1(true);
   ok('цените паднаха → данните ги има (писмото тръгва), pr.error', !!bad.got && bad.got.pr && bad.got.pr.error === true);
