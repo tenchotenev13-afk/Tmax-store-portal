@@ -27,10 +27,11 @@
 - 23.11 · problem_articles.photo_required — boolean, NOT NULL, default false
 - 23.11 · нова таблица problem_article_done — id uuid PK, article_id uuid NOT NULL, store_name text NOT NULL, done_by text NULL, done_at timestamptz NOT NULL default now(), photos jsonb NOT NULL default '[]'; уникалност article_id + store_name
 
-## Изпратено 23.11.2026
+## Потвърдено 23.11.2026
 
 (в базата от миграцията reads_as_code, reads-as-code-schema.sql, версия 20261123113626, приложена 23.11.2026)
 - 23.11 · stock_differences.reads_as_code — text, NULL, без default
+(Живко, 23.11: колоната е в огледалото, синхронът мина (2680 реда), пълният синхрон в 14:00 — чист)
 
 ## Потвърдено 20.11.2026
 
