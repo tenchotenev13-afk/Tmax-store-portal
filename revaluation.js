@@ -540,17 +540,134 @@ function rvApplyPctAll(){
 
 /* ─── Ръчен ред + автодопълване ────────────────────────── */
 function rvToggleAdd(){ rvShowAdd = !rvShowAdd; rvAcRes = []; rvRender(); }
+/* Сканиране (етап 1/3, 23.11.2026): полето за код приема и EAN. SAP кодовете
+   в product_catalog са 5–7 цифри, EAN-ите — 8–14, тоест 8–14 цифри винаги
+   значат баркод (сверено в базата на 23.11.2026). Enter (ръчен скенер пише
+   цифрите + Enter), „Добави" с EAN в полето и камерата минават по ЕДИН път —
+   rvEanLookup. Същият код втори път → НОВ ред, без сливане: всяка бройка
+   може да има свой % и дефект (решение на Тенчо, 23.11.2026). */
+var rvEanRes = [];   /* EAN на повече от един ред в каталога → избор */
 function rvAddRowHtml(){
   var f = function(id, ph, w, extra){ return '<input id="' + id + '" type="text" placeholder="' + ph + '" style="width:' + w + ';"' + (extra || '') + '>'; };
+  var pct = rvPct();
   return '<div id="rv-add" style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:8px;">' +
-    '<div style="position:relative;">' + f('rv-a-code', 'SAP код', '110px', ' oninput="rvAcSchedule(this.value)" autocomplete="off"') +
+    '<div style="position:relative;">' + f('rv-a-code', 'SAP код или EAN', '130px', ' inputmode="numeric" oninput="rvAcSchedule(this.value)" onkeydown="rvCodeKey(event)" onchange="rvCodeChange(this.value)" autocomplete="off"') +
     '<div id="rv-ac" style="display:none;position:absolute;z-index:20;background:#fff;border:1px solid #cbd5e1;border-radius:6px;min-width:320px;"></div></div>' +
-    f('rv-a-name', 'Описание', '220px') + f('rv-a-unit', 'МЕ', '50px') + f('rv-a-qty', 'Кол.', '60px') +
-    f('rv-a-std', 'Ст. цена', '72px') + f('rv-a-comment', 'Коментар обект', '180px') +
+    '<button class="btn-sm" onclick="rvScanOpen()" title="Сканирай баркода с камерата">📷 Сканирай</button>' +
+    f('rv-a-name', 'Описание', '220px') + f('rv-a-unit', 'МЕ', '50px') +
+    f('rv-a-qty', 'Кол.', '60px', ' value="1" inputmode="decimal"') +
+    '<div>' + f('rv-a-std', 'Ст. цена', '72px', ' inputmode="decimal"') +
+    '<div id="rv-a-std-hint" style="display:none;font-size:11px;color:#b45309;max-width:170px;">Повторна преоценка — въведи текущата цена на обекта</div></div>' +
+    f('rv-a-pct', '%', '52px', ' inputmode="decimal" value="' + escAttrVal(pct == null ? '' : rvFmtQty(pct)) + '"') +
+    f('rv-a-comment', 'Причина / дефект', '180px') +
     '<button class="btn-sm" onclick="rvAddRow()" style="background:#2563eb;color:#fff;">Добави</button></div>';
+}
+function rvIsEan(code){ return /^\d{8,14}$/.test(String(code == null ? '' : code).trim()); }
+function rvCodeKey(ev){
+  if(!ev || (ev.key !== 'Enter' && ev.keyCode !== 13)) return;
+  if(ev.preventDefault) ev.preventDefault();
+  var code = v('rv-a-code');
+  if(rvIsEan(code)) rvEanLookup(code);
+}
+/* SAP код, написан на ръка (без избор от списъка) — % от съществуващ ред. */
+function rvCodeChange(val){ if(!rvIsEan(val)) rvPctFromExisting(val); }
+function rvSetVal(id, val){ var el = document.getElementById(id); if(el) el.value = val == null ? '' : val; }
+function rvFocus(id){ var el = document.getElementById(id); if(el && el.focus) el.focus(); }
+/* Каталогът → полетата. Повторна преоценка (код 8xxxxxx): цената в каталога
+   НЕ е цената на обекта (6/6 реда в базата се разминават, 23.11.2026) —
+   полето остава празно, с подсказка. Обикновен код: sale_price (56/56 реда
+   съвпадат със std_price). */
+function rvFillFromCat(p){
+  var rep = rvIsRepeat(p.sap_code);
+  rvSetVal('rv-a-code', p.sap_code);
+  rvSetVal('rv-a-name', p.product_name);
+  rvSetVal('rv-a-unit', p.default_unit);
+  rvSetVal('rv-a-std', rep || p.sale_price == null ? '' : rvFmt(p.sale_price));
+  var std = document.getElementById('rv-a-std');
+  if(std) std.placeholder = rep ? 'въведи текущата цена на обекта' : 'Ст. цена';
+  var hint = document.getElementById('rv-a-std-hint');
+  if(hint) hint.style.display = rep ? 'block' : 'none';
+  rvPctFromExisting(p.sap_code);
+  rvFocus(rep ? 'rv-a-std' : 'rv-a-comment');
+}
+/* Кодът вече е в бланката → % във формата е този на съществуващия ред, не на
+   бланката: един артикул = един 8-код = една цена (rvSameCodeConflicts).
+   Нов код → процентът на бланката. Вика се при всяко попълване на кода. */
+function rvPctFromExisting(code){
+  var c = String(code == null ? '' : code).trim(), pct = rvPct();
+  for(var i = 0; i < rvItems.length; i++){
+    if(String(rvItems[i].sap_code) === c && rvItems[i].discount_pct != null){ pct = Number(rvItems[i].discount_pct); break; }
+  }
+  rvSetVal('rv-a-pct', pct == null ? '' : rvFmtQty(pct));
+}
+function rvEanLookup(code){
+  /* Автодопълването не бива да изтегли резултат върху вече намерения артикул. */
+  if(rvAcTimer){ clearTimeout(rvAcTimer); rvAcTimer = null; }
+  rvAcSeq++; rvAcRes = []; rvEanRes = []; rvAcRender();
+  var vars = llEanVariants(code);
+  if(!vars.length) return Promise.resolve(0);
+  var q = vars.length === 1 ? 'ean_code=eq.' + encodeURIComponent(vars[0]) : 'ean_code=in.(' + vars.map(encodeURIComponent).join(',') + ')';
+  return sbGet('product_catalog', q + '&select=sap_code,product_name,default_unit,sale_price,ean_code&order=sap_code.asc&limit=10').then(function(rows){
+    var r = Array.isArray(rows) ? rows : [];
+    if(!r.length){
+      toast('Баркодът не е в каталога — въведи кода на ръка', '#d97706');
+      rvSetVal('rv-a-code', '');
+      rvFocus('rv-a-code');
+      return 0;
+    }
+    if(r.length === 1){ rvFillFromCat(r[0]); return 1; }
+    rvEanRes = r;
+    rvEanRender();
+    return r.length;
+  });
+}
+function rvEanRender(){
+  var box = document.getElementById('rv-ac');
+  if(!box) return;
+  box.innerHTML = '<div style="padding:7px 9px;font-size:12px;font-weight:600;color:#92400e;background:#fffbeb;">Баркодът съвпада с ' + rvEanRes.length + ' артикула — избери:</div>' +
+    rvEanRes.map(function(p, k){
+      return '<div class="rv-ean-pick" data-k="' + k + '" onmousedown="event.preventDefault()" onclick="rvEanPick(+this.dataset.k)" style="padding:7px 9px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:12.5px;">' +
+        '<b style="font-family:DM Mono,monospace;">' + esc(p.sap_code) + '</b> · ' + esc(p.product_name) +
+        (p.default_unit ? ' <span style="color:#94a3b8;">(' + esc(p.default_unit) + ')</span>' : '') + '</div>';
+    }).join('');
+  box.style.display = 'block';
+}
+function rvEanPick(k){
+  var p = rvEanRes[k];
+  if(!p) return;
+  rvEanRes = [];
+  var box = document.getElementById('rv-ac');
+  if(box){ box.innerHTML = ''; box.style.display = 'none'; }
+  rvFillFromCat(p);
+}
+/* Камерата — скенерът на Товарни листи (loading.js: html5-qrcode 2.3.8 със
+   SRI, BarcodeDetector), със свой обработчик. Едно сканиране = един артикул:
+   скенерът се затваря, защото всяка бройка иска свой % и причина. */
+function rvScanOpen(){
+  if(!rvCanEdit()) return Promise.resolve(false);
+  return llLoadScanLib().then(function(){
+    llScanShowModal(null, { title: '📷 Сканиране — Преоценка', onRead: rvScanRead });
+    return true;
+  }, function(){
+    toast('Скенерът не се зареди — въведи кода на ръка', '#dc2626');
+    rvFocus('rv-a-code');
+    return false;
+  });
+}
+function rvScanRead(i, text){
+  llScanClose();
+  var code = String(text == null ? '' : text).trim();
+  if(!rvIsEan(code)){
+    toast('Прочетеният код не е EAN — въведи кода на ръка', '#d97706');
+    rvFocus('rv-a-code');
+    return Promise.resolve(0);
+  }
+  rvSetVal('rv-a-code', code);
+  return rvEanLookup(code);
 }
 function rvAcSchedule(val){
   if(rvAcTimer) clearTimeout(rvAcTimer);
+  if(rvIsEan(val)){ rvAcTimer = null; rvAcRes = []; rvAcRender(); return; }   /* баркод → Enter / „Добави", не автодопълване */
   var term = String(val == null ? '' : val).replace(/[,()*"\\]/g, ' ').replace(/\s+/g, ' ').trim();
   if(term.length < 3){ rvAcRes = []; rvAcRender(); return; }
   rvAcTimer = setTimeout(function(){ rvAcTimer = null; rvAcFetch(term); }, 300);
@@ -583,6 +700,10 @@ function rvAcPick(k){
   if(!p) return;
   var set = function(id, val){ var el = document.getElementById(id); if(el) el.value = val || ''; };
   set('rv-a-code', p.sap_code); set('rv-a-name', p.product_name); set('rv-a-unit', p.default_unit);
+  /* Автодопълването не носи цена — изчисти останалата от предишно сканиране. */
+  set('rv-a-std', '');
+  var hint = document.getElementById('rv-a-std-hint'); if(hint) hint.style.display = 'none';
+  rvPctFromExisting(p.sap_code);
   rvAcRes = []; rvAcRender();
   var q = document.getElementById('rv-a-qty'); if(q) q.focus();
 }
@@ -591,8 +712,9 @@ function rvNextSort(){
   rvItems.forEach(function(x){ if((x.sort_order || 0) > m) m = x.sort_order || 0; });
   return m + 1;
 }
-function rvItemBody(sub, code, name, unit, qty, std, comment, sort){
-  var pct = rvPct();
+/* pct — по избор (ръчният ред има свое поле %); липсва → процентът на бланката. */
+function rvItemBody(sub, code, name, unit, qty, std, comment, sort, pct){
+  if(pct === undefined) pct = rvPct();
   return {
     submission_id: sub.id, campaign_id: sub.campaign_id, store_name: sub.store_name, sort_order: sort,
     sap_code: code, product_name: name || null, unit: unit || null, qty: qty, std_price: std,
@@ -604,21 +726,30 @@ function rvAddRow(){
   if(!rvCanEdit()) return Promise.resolve(false);
   if(rvSub && rvSub.no_items){ toast('Бланката е отбелязана „нямаме за преоценка" — първо я отключи ЦО', '#dc2626'); return Promise.resolve(false); }
   var code = v('rv-a-code');
-  if(!code){ toast('Въведи SAP код', '#dc2626'); return Promise.resolve(false); }
-  if(rvItems.some(function(x){ return String(x.sap_code) === code; })){ toast('Код ' + code + ' вече е в бланката', '#d97706'); return Promise.resolve(false); }
+  if(!code){ toast('Въведи SAP код или EAN', '#dc2626'); return Promise.resolve(false); }
+  /* EAN в полето → първо каталогът; редът се добавя със следващото „Добави",
+     след като човекът види попълнения артикул. Код, който вече е в бланката,
+     НЕ се отказва — нов ред (решение 23.11.2026). */
+  if(rvIsEan(code)) return rvEanLookup(code).then(function(){ return false; });
   var qty = v('rv-a-qty') === '' ? 0 : rvNum(v('rv-a-qty'));
   var std = v('rv-a-std') === '' ? null : rvNum(v('rv-a-std'));
+  var pct = v('rv-a-pct') === '' ? null : rvNum(v('rv-a-pct'));
   if(qty == null || qty < 0){ toast('Количеството е число ≥ 0', '#dc2626'); return Promise.resolve(false); }
   if(v('rv-a-std') !== '' && (std == null || std < 0)){ toast('Невалидна стандартна цена', '#dc2626'); return Promise.resolve(false); }
+  if(v('rv-a-pct') !== '' && (pct == null || pct < 0 || pct > 100)){ toast('Процентът е от 0 до 100', '#dc2626'); return Promise.resolve(false); }
   var name = v('rv-a-name'), unit = v('rv-a-unit'), comment = v('rv-a-comment');
   return rvEnsureSub().then(function(sub){
     if(!sub){ rvRender(); return false; }
-    return sbPostReturn('revaluation_items', rvItemBody(sub, code, name, unit, qty, std == null ? null : rvRound2(std), comment, rvNextSort())).then(function(res){
+    return sbPostReturn('revaluation_items', rvItemBody(sub, code, name, unit, qty, std == null ? null : rvRound2(std), comment, rvNextSort(), pct)).then(function(res){
       if(!res.ok || !res.row){ toast('Редът не е записан: ' + sbErrMsg(res), '#dc2626'); rvRender(); return false; }
       rvItems.push(res.row);
-      rvShowAdd = false;
+      /* Формата остава отворена и празна, фокусът — в полето за код:
+         следващото сканиране (ръчен скенер) влиза направо. */
+      rvAcRes = []; rvEanRes = [];
       toast('Редът е добавен');
-      rvRender(); return true;
+      rvRender();
+      rvFocus('rv-a-code');
+      return true;
     });
   });
 }
@@ -742,12 +873,41 @@ function rvRowProblems(it){
   if(!(Number(it.proposed_price) > 0)) p.push('няма цена');
   return p;
 }
+/* Един артикул в един обект = един преоценен код 8xxxxxx (rvCoProposeCode от
+   оригиналния код) = ЕДНА цена във VK11 (по обект). Отделните редове с един
+   код остават — дефект по бройка — но % и предложената цена трябва да са
+   еднакви (решение на Тенчо 23.11.2026; въпросът към Елица —
+   claude/open/23-11-preocenka-same-code-8code.md). Връща {id: true} за всеки
+   ред от група с разминаване. */
+var RV_SAME_CODE_MSG = 'Еднакъв артикул с различен % — в SAP е един преоценен код с една цена';
+function rvSameCodeConflicts(items){
+  var key = function(x){ return x == null || x === '' ? '' : String(Number(x)); };
+  var groups = {}, out = {};
+  items.forEach(function(it){
+    var c = String(it.sap_code == null ? '' : it.sap_code).trim();
+    if(c) (groups[c] = groups[c] || []).push(it);
+  });
+  Object.keys(groups).forEach(function(c){
+    var g = groups[c];
+    if(g.length < 2) return;
+    var diff = g.some(function(it){
+      return key(it.discount_pct) !== key(g[0].discount_pct) || key(it.proposed_price) !== key(g[0].proposed_price);
+    });
+    if(diff) g.forEach(function(it){ out[it.id] = true; });
+  });
+  return out;
+}
 function rvSubmit(){
   if(!rvCanSubmit()) return Promise.resolve(false);
   if(!rvItems.length){ toast('Няма редове — ако нямате артикули, ползвай „Нямаме за преоценка"', '#dc2626'); return Promise.resolve(false); }
   rvBad = {};
   var n = 0;
-  rvItems.forEach(function(it){ var p = rvRowProblems(it); if(p.length){ rvBad[it.id] = p; n++; } });
+  var same = rvSameCodeConflicts(rvItems);
+  rvItems.forEach(function(it){
+    var p = rvRowProblems(it);
+    if(same[it.id]) p.push(RV_SAME_CODE_MSG);
+    if(p.length){ rvBad[it.id] = p; n++; }
+  });
   if(n){ rvRender(); toast(n + ' ' + (n === 1 ? 'ред не минава' : 'реда не минават') + ' — маркирани са, бланката НЕ е подадена', '#dc2626'); return Promise.resolve(false); }
   if(!confirm('Подаване на ' + rvItems.length + ' реда? След подаване обектът не може да редактира.')) return Promise.resolve(false);
   var n0 = rvItems.length;

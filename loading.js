@@ -4502,7 +4502,11 @@ function llScanToggleTorch(){
     return true;
   });
 }
-function llScanShowModal(i){
+/* opts (по избор, 23.11.2026 — Преоценка ползва същия скенер):
+     onRead(i, text) → Promise — вместо llHandleScannedEan; title — заглавие.
+   Без opts поведението на Товарни листи е непроменено. */
+function llScanShowModal(i, opts){
+  opts = opts || {};
   llScanClose();
   var m = document.createElement('div');
   m.id = 'll-scan-modal';
@@ -4510,7 +4514,7 @@ function llScanShowModal(i){
   m.innerHTML =
     '<div style="width:100%;max-width:480px;background:#fff;border-radius:12px;padding:12px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
-        '<div style="font-size:15px;font-weight:700;">📷 Сканиране — поредно</div>'+
+        '<div style="font-size:15px;font-weight:700;">'+esc(opts.title || '📷 Сканиране — поредно')+'</div>'+
         '<div style="display:flex;gap:6px;">'+
           /* Скрит, докато не се знае дали тракът има фенер — виж llScanAfterStart. */
           '<button id="ll-scan-torch" onclick="llScanToggleTorch()" style="display:none;border:1px solid #cbd5e1;background:#fff;color:#0f172a;border-radius:8px;padding:8px 12px;font-size:14px;font-weight:600;cursor:pointer;">🔦 Фенер</button>'+
@@ -4526,7 +4530,7 @@ function llScanShowModal(i){
     '</div>';
   document.body.appendChild(m);
   llScan = { row: i, inst: null, pending: null, choices: null, busy: false, last: '', lastAt: 0,
-             torchOk: false, torch: false };
+             torchOk: false, torch: false, onRead: opts.onRead || null };
 
   var fmts;
   try {
@@ -4571,7 +4575,7 @@ function llScanOnRead(text){
   llScan.last = text; llScan.lastAt = now;
   llScan.busy = true;
   try { if(llScan.inst && llScan.inst.pause) llScan.inst.pause(true); } catch(e){}
-  llHandleScannedEan(llScan.row, text).then(function(){ if(llScan) llScan.busy = false; });
+  (llScan.onRead || llHandleScannedEan)(llScan.row, text).then(function(){ if(llScan) llScan.busy = false; });
 }
 function llScanResume(){
   if(!llScan) return;

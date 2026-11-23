@@ -494,7 +494,9 @@ async function imported(o) {
     realClick(h.w, btn(mod(h), '＋ Ред'));
     h.doc.getElementById('rv-a-code').value = '53531';
     realClick(h.w, btn(h.doc.getElementById('rv-add'), 'Добави')); await ticks(3);
-    ok('код, който вече е в бланката → не се добавя', h.w.rvItems.length === 5 && h.calls.toast.some(t => t.indexOf('вече е в бланката') >= 0));
+    /* До 23.11.2026 повторен код се отказваше; оттогава е НОВ ред — всяка
+       бройка със свой % и дефект (revaluation-scan.test.js). */
+    ok('код, който вече е в бланката → нов ред, без сливане', h.w.rvItems.length === 6 && !h.calls.toast.some(t => t.indexOf('вече е в бланката') >= 0));
     h.doc.getElementById('rv-a-code').value = '11111';
     h.doc.getElementById('rv-a-name').value = 'НОВ';
     h.doc.getElementById('rv-a-qty').value = '2';
@@ -503,7 +505,7 @@ async function imported(o) {
     realClick(h.w, btn(h.doc.getElementById('rv-add'), 'Добави')); await ticks(3);
     const p = h.calls.post.filter(x => x.table === 'revaluation_items').pop();
     ok('ръчен ред: POST с цена 0,65 (1,29 × 50 %)', p && p.body.sap_code === '11111' && p.body.proposed_price === 0.65 && p.body.std_price === 1.29, JSON.stringify(p && p.body));
-    ok('6 реда', h.w.rvItems.length === 6);
+    ok('7 реда', h.w.rvItems.length === 7);
 
     const closed = Object.assign({}, CAMP, { starts_on: dayOffset(-10), ends_on: dayOffset(-1) });
     const c = env({ campaigns: [closed] }); await open(c);
