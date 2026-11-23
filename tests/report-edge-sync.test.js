@@ -50,6 +50,7 @@ const SHARED = path.join(ROOT, 'shared.js');
 const BULLETIN = path.join(ROOT, 'bulletin.js');
 const KASA = path.join(ROOT, 'kasa.js');
 const STOCKDIFF = path.join(ROOT, 'stock-differences.js');
+const MINUSI = path.join(ROOT, 'minusi.js');
 
 /* ── Списъкът е ИЗРИЧЕН, не сканиран ──
    Ако беше сканиран, изтриването на функция от двата файла щеше да мине
@@ -130,6 +131,9 @@ const SHARED_FNS = [
   'reportMinusMultiCoIds', 'reportMinusMultiIsCo', 'reportMinusMultiCoGroup', 'reportMinusMultiCoHtml',
   /* „Минуси с отворена разлика" (v72, 19.11.2026, minusi-open-diff-weekly). */
   'reportMinusOdTurn', 'reportMinusOdStatus', 'reportMinusOdComments', 'reportMinusOdGroup', 'reportMinusOdHtml', 'collectMinusOdData',
+  /* „Ценови разлики" и писмата до обектите (v74, 23.11.2026, minusi-weekly-prices-stores). */
+  'reportMinusPriceSum', 'reportMinusPriceAdd', 'reportMinusPriceGroup', 'reportMinusPriceForStores', 'reportMinusPriceHtml', 'collectMinusPriceData',
+  'reportMinusStorePlan', 'reportMinusStoreJobs', 'reportMinusStoreSubject', 'reportMinusStoreHtml',
   /* Кой получава дневния / седмичния (v68, 12.11.2026) — ЕДИН избор за крона,
      recipients_only и „Изпрати сега“. Разминае ли се копието, порталът ще
      показва едни получатели, а кронът ще праща на други. */
@@ -173,6 +177,15 @@ const COPIED_HELPERS = [
   { fn: 'sdStatusWords', from: STOCKDIFF },
   { fn: 'bulDiffLineWaitsStore', from: BULLETIN },
   { fn: 'bulDiffStoreWaiting', from: BULLETIN },
+  /* „Ценови разлики" (v74, 23.11.2026): FIFO остатъкът и стойностите на офиса
+     от таб Минуси. В report.js ги няма — там се викат оригиналите от minusi.js.
+     Разминае ли се копието, писмото смята сумите по друго правило от таба. */
+  { fn: 'mnRound', from: MINUSI }, { fn: 'mnFmtQty', from: MINUSI }, { fn: 'mnNormUom', from: MINUSI },
+  { fn: 'mnDays', from: MINUSI }, { fn: 'mnReasonNeedsNote', from: MINUSI }, { fn: 'mnIsCoReason', from: MINUSI },
+  { fn: 'mnCmp955', from: MINUSI }, { fn: 'mnPassThreshold', from: MINUSI }, { fn: 'mnCompute', from: MINUSI },
+  { fn: 'mnCoKey', from: MINUSI }, { fn: 'mnRealOne', from: MINUSI }, { fn: 'mnValRow', from: MINUSI },
+  { fn: 'mnValUomWarn', from: MINUSI }, { fn: 'mnFmtEur', from: MINUSI },
+  { fn: 'mnRevIsCode', from: MINUSI }, { fn: 'mnRevRealCodes', from: MINUSI },
   /* fmtDate2 — вика го reportSpanPendingHtml; липсата му събори седмичния
      отчет на 04.10.2026 (ReferenceError). */
   { fn: 'fmtDate2', from: BULLETIN },
@@ -507,7 +520,7 @@ function scanCalls(file) {
   const GLOBALS = ['fetch', 'JSON', 'Promise', 'Array', 'Object', 'String',
     'Number', 'Math', 'Date', 'Boolean', 'Response', 'Request', 'Error',
     'Deno', 'decodeURIComponent', 'encodeURIComponent', 'parseInt',
-    'parseFloat', 'isNaN', 'Set', 'Map', 'RegExp', 'console'];
+    'parseFloat', 'isNaN', 'isFinite', 'Set', 'Map', 'RegExp', 'console'];
 
   const called = new Set();
   const re = /(^|[^.\w$])([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;

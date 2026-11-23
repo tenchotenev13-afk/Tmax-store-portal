@@ -222,7 +222,9 @@ function mailChecks(label, F) {
     const grab = name => { const i = src.indexOf('\nfunction ' + name + '('); if (i < 0) throw new Error('няма ' + name); const j = src.indexOf('\n}\n', i); return src.slice(i, j + 3); };
     const names = ['reportMinusMultiAddDays', 'reportMinusMultiDM', 'reportMinusMultiCoIds', 'reportMinusMultiIsCo', 'reportMinusMultiCoGroup', 'reportMinusMultiCoHtml',
       'reportMinusMultiGroup', 'reportMinusMultiPct', 'reportMinusMultiWeekTotal', 'reportMinusMultiWeek', 'reportMinusMultiWeekHtml', 'reportMinusMultiCommon',
-      'reportMinusMultiCommonHtml', 'reportMinusMultiHtml', 'reportMinusMultiForStores', 'reportMinusOdHtml'];
+      'reportMinusMultiCommonHtml', 'reportMinusMultiHtml', 'reportMinusMultiForStores', 'reportMinusOdHtml',
+      /* „Ценови разлики“ (v74, 23.11.2026) — reportMinusMultiHtml / ForStores ги викат. */
+      'reportMinusPriceSum', 'reportMinusPriceAdd', 'reportMinusPriceForStores', 'reportMinusPriceHtml'];
     const ctx = { esc: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
       reportEmailShell: (t, s, b) => '<h1>' + t + '</h1>' + b, REPORT_MINUS_MULTI_COUNT: 3, REPORT_MINUS_MULTI_DAYS: 30 };
     vm.createContext(ctx);

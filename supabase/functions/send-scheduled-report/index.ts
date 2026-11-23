@@ -1,6 +1,24 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v74 (23.11.2026) — ДВЕ неща в minus_multi (копие от report.js, сесия
+      minusi-weekly-prices-stores; Теодор 23.11, решения А и Б на Тенчо):
+      1) нова секция „Ценови разлики (минус ↔ заметнат)“ в писмото към офиса
+         (регионалният — само своите обекти): 955 за седмицата [ref−6; ref] със
+         заметнат код, без клиентската поръчка; стойности и разлика по правилото
+         на офиса в таб Минуси (mnCompute → _rest, mnValRow; копия от minusi.js,
+         сверени в report-edge-sync), цени VKP2 към последното качване, без
+         промо. Без цена / няколко кода — в реда, извън разликата, преброени.
+         Грешка → червен ред, писмото тръгва (reportMinusPriceGroup / Html /
+         ForStores, collectMinusPriceData).
+      2) писма до обектите — „Минуси с отворена разлика“ само с редовете на
+         обекта (вкл. „Ход“), без цени, до управителите (role manager, активни,
+         с имейл) на обектите от minus_stores; без редове / без имейл → без
+         писмо (reportMinusStorePlan / Jobs / Subject / Html). Пращат се след
+         писмата към офиса (и при 0 писма към офиса). dry_run: pr_total,
+         pr_stores, pr_at, recipients[].pr, store_letters (обект → имейли →
+         редове → send / reason), managers_read. Останалото — непроменено.
+
    v73 (20.11.2026) — ЕДНО нещо (копие от report.js, сесия report-transit-split;
       решение на Тенчо 20.11): „🚚 Стока на път“ в седмичния (общ и личен) —
       застоялите (над 7 дни по документ) разделени на три по отговора на
@@ -5448,6 +5466,352 @@ function collectMinusOdData(stores, cb){
     });
   }).catch(fail);
 }
+/* ── Копия от minusi.js за „Ценови разлики" (minusi-weekly-prices-stores, 23.11.2026) ──
+   Дословно: FIFO остатъкът (mnCompute и помощниците му) и стойностите на офиса
+   (mnValRow, mnRealOne, mnRevRealCodes, mnFmtEur). В браузъра report.js вика
+   оригиналите — затова в report.js ги няма. Сверени в
+   tests/report-edge-sync.test.js (функциите) и tests/minusi-weekly-prices.test.js
+   (константите). mnReasons / mnPrices / mnRepeatDays / mnMulti* — глобалните на
+   таба; тук mnPrices се подменя от reportMinusPriceGroup, mnReasons остава
+   празен (влияе само на баджа „многократен", не на остатъка). */
+var MN_EPS = 1e-9;
+var MN_LOOKALIKE = { 'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X' };
+var mnReasons: any[] = [];
+var mnPrices: any = {};
+var mnRepeatDays = 0;
+var mnMultiCount = 1;
+var mnMultiDays = 1;
+function mnRound(x){ return Math.round(Number(x) * 1e6) / 1e6; }
+function mnFmtQty(n){
+  if(n == null || !isFinite(n)) return '';
+  return String(mnRound(Math.round(Number(n) * 1000) / 1000)).replace('.', ',');
+}
+function mnNormUom(u){
+  return String(u == null ? '' : u).trim().toUpperCase().replace(/\.+$/, '').replace(/[АВЕКМНОРСТХ]/g, function(c){ return MN_LOOKALIKE[c]; });
+}
+function mnDays(a, b){
+  var pa = String(a).split('-'), pb = String(b).split('-');
+  return Math.round((Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000);
+}
+function mnReasonNeedsNote(id){
+  for(var i = 0; i < mnReasons.length; i++) if(String(mnReasons[i].id) === String(id)) return mnReasons[i].requires_note === true;
+  return false;
+}
+function mnIsCoReason(r){ return !!r && r.reason_id != null && mnReasonNeedsNote(r.reason_id); }
+function mnCmp955(a, b){
+  var x = String(a.posting_date).localeCompare(String(b.posting_date));
+  if(x) return x;
+  x = String(a.mat_doc).localeCompare(String(b.mat_doc), undefined, { numeric: true });
+  if(x) return x;
+  return String(a.doc_item).localeCompare(String(b.doc_item), undefined, { numeric: true });
+}
+function mnPassThreshold(rest, uom, thr){
+  rest = mnRound(rest);
+  if(!(rest > MN_EPS)) return false;
+  var k = mnNormUom(uom);
+  if(thr && Object.prototype.hasOwnProperty.call(thr, k)) return rest >= mnRound(thr[k]) - MN_EPS;
+  return true;
+}
+function mnCompute(movs, thr, repeatDays, multi){
+  var N = repeatDays != null ? repeatDays : mnRepeatDays;
+  var MC = multi && multi.count != null ? multi.count : mnMultiCount;
+  var MD = multi && multi.days != null ? multi.days : mnMultiDays;
+  var groups = {}, order = [];
+  (movs || []).forEach(function(m){
+    var k = m.store_name + '\u0001' + m.material;
+    if(!groups[k]){ groups[k] = { store_name: m.store_name, material: m.material, desc: '', uom: '', r955: [], r956: [], s955: 0, s956: 0 }; order.push(k); }
+    var g = groups[k], q = Number(m.qty) || 0;
+    if(m.material_desc) g.desc = m.material_desc;
+    if(String(m.mvt_type) === '955'){ g.r955.push(m); g.s955 += q; if(m.uom) g.uom = m.uom; }
+    else if(String(m.mvt_type) === '956'){ g.r956.push(m); g.s956 += q; if(!g.uom && m.uom) g.uom = m.uom; }
+  });
+  /* all — ВСИЧКИ редове 955 (история; решение на Миглена 21.10.2026: от
+     „Дневен" нищо не изчезва), всеки със _state: 'open' (остатък ≥ прага),
+     'under' (0 < остатък < прага) или 'closed' (остатък 0; _closedOn = датата
+     на 956, който го е закрил ДОКРАЙ). open — само 'open' (броячът и
+     „само незакрити"). FIFO: 956 се подреждат по дата, документ, позиция и
+     закриват 955 от най-стария. */
+  /* early — двойки (955, 956) „сторно преди минуса" за червената карта. */
+  var out = { all: [], open: [], byMat: [], over: [], early: [] };
+  order.forEach(function(k){
+    var g = groups[k];
+    var net = mnRound(g.s955 + g.s956);
+    if(net < -MN_EPS) out.over.push({ store_name: g.store_name, material: g.material, desc: g.desc, uom: g.uom, s955: mnRound(g.s955), s956: mnRound(g.s956), rest: net });
+    var q956 = g.r956.slice().sort(mnCmp955), qi = 0;
+    var avail = q956.map(function(m){ return mnRound(-(Number(m.qty) || 0)); });
+    var s955 = g.r955.slice().sort(mnCmp955);
+    s955.forEach(function(r, i){
+      var need = Number(r.qty) || 0, lastDate = null, early = [];
+      while(need > MN_EPS && qi < q956.length){
+        if(!(avail[qi] > MN_EPS)){ qi++; continue; }
+        var take = Math.min(need, avail[qi]);
+        need = mnRound(need - take);
+        avail[qi] = mnRound(avail[qi] - take);
+        lastDate = q956[qi].posting_date;
+        if(take > MN_EPS && String(q956[qi].posting_date) < String(r.posting_date)) early.push(q956[qi]);
+        if(!(avail[qi] > MN_EPS)) qi++;
+      }
+      var rest = mnRound(need);
+      var st = !(rest > MN_EPS) ? 'closed' : mnPassThreshold(rest, r.uom, thr) ? 'open' : 'under';
+      var prev = i > 0 ? s955[i - 1] : null;
+      var prevDays = prev ? mnDays(prev.posting_date, r.posting_date) : null;
+      var cnt30 = s955.filter(function(x){ var d = mnDays(x.posting_date, r.posting_date); return d >= 0 && d <= 29; }).length;
+      /* Многократен: N-тият 955 в [дата − (MD − 1); дата] до този ред включително.
+         Брои САМО минусите, които НЕ са клиентска поръчка (11.11.2026); редът с
+         клиентска поръчка не носи баджа — _coMulti само показва полето по желание. */
+      var inWin = s955.slice(0, i + 1).filter(function(x){ var d = mnDays(x.posting_date, r.posting_date); return d >= 0 && d <= MD - 1; });
+      var isCo = mnIsCoReason(r);
+      var multiN = isCo ? 0 : inWin.filter(function(x){ return !mnIsCoReason(x); }).length;
+      var row = Object.assign({}, r, {
+        _rest: rest, _state: st, _closedOn: st === 'closed' ? lastDate : null,
+        _prevDate: prev ? prev.posting_date : null, _prevDays: prevDays, _cnt30: cnt30,
+        _repeat: !!prev && prevDays <= N, _early: early.length > 0,
+        _multiN: multiN, _multi: !isCo && multiN >= MC,
+        _coMulti: isCo && inWin.filter(mnIsCoReason).length >= MC
+      });
+      out.all.push(row);
+      if(st === 'open') out.open.push(row);
+      early.forEach(function(m6){ out.early.push({ row: row, m956: m6 }); });
+    });
+    if(net >= -MN_EPS && mnPassThreshold(net, g.uom, thr)) out.byMat.push({ store_name: g.store_name, material: g.material, desc: g.desc, uom: g.uom, s955: mnRound(g.s955), s956: mnRound(g.s956), rest: net });
+  });
+  var newest = function(a, b){ return String(b.posting_date).localeCompare(String(a.posting_date)) || String(a.material).localeCompare(String(b.material), undefined, { numeric: true }); };
+  out.all.sort(newest);
+  out.open.sort(newest);
+  var byMatSort = function(a, b){ return String(a.material).localeCompare(String(b.material), undefined, { numeric: true }) || String(a.store_name).localeCompare(String(b.store_name), 'bg'); };
+  out.byMat.sort(byMatSort);
+  out.over.sort(byMatSort);
+  out.early.sort(function(a, b){ return byMatSort(a.row, b.row) || mnCmp955(a.row, b.row); });
+  return out;
+}
+function mnCoKey(v){ return String(v == null ? '' : v).trim(); }
+function mnRealOne(r){
+  var c = mnRevRealCodes(mnCoKey(r.real_code));
+  return c.length === 1 ? c[0] : null;
+}
+function mnValRow(r){
+  var rest = Number(r._rest) || 0, out = { minus: null, real: null, diff: null };
+  var pm = mnPrices[mnCoKey(r.material)];
+  out.noMinus = !pm;
+  if(pm){ out.minus = rest * pm.price; out.minusWarn = mnValUomWarn(pm.unit, r.uom); }
+  var raw = mnCoKey(r.real_code), one = mnRealOne(r);
+  out.realMulti = !!raw && !one;
+  if(one){
+    var pr = mnPrices[one];
+    out.noReal = !pr;
+    if(pr){ out.real = rest * pr.price; out.realWarn = mnValUomWarn(pr.unit, r.uom); }
+  }
+  /* Разликата — от закръглените до 2 знака стойности, каквито се виждат (проверка
+     на живо 09.11: 0,85 ЛМ даваше −0,43 при 2,97 − 3,39). */
+  if(out.minus != null && out.real != null) out.diff = Math.round(out.minus * 100) / 100 - Math.round(out.real * 100) / 100;
+  return out;
+}
+function mnValUomWarn(priceUnit, uom){
+  if(!priceUnit || !uom || mnNormUom(priceUnit) === mnNormUom(uom)) return null;
+  return 'цена за ' + priceUnit + ' · минус в ' + uom;
+}
+function mnFmtEur(n){
+  if(n == null || !isFinite(n)) return '';
+  var v = Math.round(n * 100) / 100;
+  return (v < 0 ? '−' : '') + Math.abs(v).toFixed(2).replace('.', ',') + ' €';
+}
+function mnRevIsCode(c){ return /^[0-9A-Za-z._\-]+$/.test(c); }
+function mnRevRealCodes(real){
+  if(!real) return [];
+  if(mnRevIsCode(real)) return [real];
+  var out = [], re = /(^|\D)(\d{4,7})(?!\d)/g, m;
+  while((m = re.exec(real))) if(out.indexOf(m[2]) < 0) out.push(m[2]);
+  return out;
+}
+/* ═══════ ЦЕНОВИ РАЗЛИКИ (минус ↔ заметнат) (minusi-weekly-prices-stores, 23.11.2026) ═══
+   Теодор 23.11, решение А на Тенчо: в писмото към офиса (и на регионалния — само
+   своите обекти) — минусите 955 за седмицата на писмото [ref − 6; ref] с попълнен
+   заметнат код, без клиентската поръчка (reportMinusMultiIsCo). Стойностите и
+   разликата — по ПРАВИЛОТО НА ОФИСА в таб Минуси, не второ правило: остатъкът
+   (_rest) от mnCompute (FIFO по обект + материал върху ВСИЧКИ движения 955/956)
+   и mnValRow (остатък × цена; заметнат — само ако е ЕДИН код, mnRevRealCodes;
+   разликата — от закръглените до 2 знака) с цените от product_catalog (VKP2,
+   текущите, без история и без промо — цената към деня на продажба е етап 2).
+   В браузъра това са оригиналите от minusi.js; в send-scheduled-report — копия
+   (tests/report-edge-sync.test.js). mnValRow чете глобалния mnPrices — тук се
+   подменя само за синхронното смятане и се връща (try/finally).
+   Сумите — като реда „Общо“ в таба: всяка колона сбира редовете, в които я има.
+   Без цена / няколко кода → в реда „няма цена“ / „няколко кода“ и не влизат
+   в разликата; броят им стои над таблиците.
+   Грешка при четене → { error: true }: червен ред, писмото тръгва. */
+var REPORT_MINUS_PRICE_BATCH = 150;
+function reportMinusPriceSum(){ return { minus: 0, nMinus: 0, real: 0, nReal: 0, diff: 0, nDiff: 0, rows: 0, noPrice: 0, multi: 0 }; }
+function reportMinusPriceAdd(t, it){
+  t.rows++;
+  if (it.minus != null) { t.minus += it.minus; t.nMinus++; }
+  if (it.realVal != null) { t.real += it.realVal; t.nReal++; }
+  if (it.diff != null) { t.diff += it.diff; t.nDiff++; }
+  if (it.multi) t.multi++;
+  else if (it.noMinus || it.noReal) t.noPrice++;
+}
+/* Чисто: movs — 955 и 956 на обектите (всички дати, с qty/uom/mat_doc/doc_item);
+   cat — { prices: { код: { price, unit } }, names: { код: име }, at }. */
+function reportMinusPriceGroup(movs, cat, stores, refISO, reasons){
+  var ms = Array.isArray(stores) ? stores : [];
+  var c = cat || {};
+  var coIds = reportMinusMultiCoIds(reasons);
+  var fromISO = reportMinusMultiAddDays(refISO, -6);
+  var calc = mnCompute((Array.isArray(movs) ? movs : []).filter(function(m){ return m && ms.indexOf(m.store_name) >= 0; }), {}, 0, { count: 1, days: 1 });
+  var by = {};
+  var keep = mnPrices;
+  mnPrices = c.prices || {};
+  try {
+    calc.all.forEach(function(r){
+      var d = String(r.posting_date || '').slice(0, 10);
+      if (d < fromISO || d > refISO || !mnCoKey(r.real_code) || reportMinusMultiIsCo(r, coIds)) return;
+      var v = mnValRow(r), one = mnRealOne(r), mat = mnCoKey(r.material);
+      (by[r.store_name] || (by[r.store_name] = [])).push({ id: r.id, date: d, material: mat, desc: r.material_desc || (c.names || {})[mat] || '',
+        real: mnCoKey(r.real_code), realOne: one, realDesc: one ? ((c.names || {})[one] || '') : '', rest: r._rest, uom: r.uom || '',
+        minus: v.minus, realVal: v.real, diff: v.diff, minusWarn: v.minusWarn || null, realWarn: v.realWarn || null,
+        noMinus: !!v.noMinus, noReal: !!v.noReal, multi: !!v.realMulti });
+    });
+  } finally { mnPrices = keep; }
+  var out = { from: fromISO, to: refISO, at: c.at || null, stores: [], total: reportMinusPriceSum() };
+  ms.forEach(function(s){
+    var items = by[s];
+    if (!items || !items.length) return;
+    items.sort(function(a, b){ return a.date.localeCompare(b.date) || a.material.localeCompare(b.material, undefined, { numeric: true }) || String(a.id).localeCompare(String(b.id)); });
+    var sum = reportMinusPriceSum();
+    items.forEach(function(it){ reportMinusPriceAdd(sum, it); reportMinusPriceAdd(out.total, it); });
+    out.stores.push({ store: s, items: items, sum: sum });
+  });
+  return out;
+}
+/* Срязване по обекти (регионалният) — сборовете наново. */
+function reportMinusPriceForStores(pr, stores){
+  if (!pr || pr.error) return pr || null;
+  var ss = (pr.stores || []).filter(function(s){ return stores.indexOf(s.store) >= 0; });
+  var total = reportMinusPriceSum();
+  ss.forEach(function(s){ s.items.forEach(function(it){ reportMinusPriceAdd(total, it); }); });
+  return Object.assign({}, pr, { stores: ss, total: total });
+}
+function reportMinusPriceHtml(pr){
+  if (!pr) return '';
+  var title = '<div class="mm-pr" style="font-size:13px;font-weight:700;color:#1E2761;margin:22px 0 4px;padding-top:12px;border-top:2px solid #e2e8f0;">Ценови разлики (минус ↔ заметнат)</div>';
+  if (pr.error) return title + '<div class="mm-pr-err" style="font-size:12px;font-weight:700;color:#C0392B;">⚠️ Цените не се заредиха</div>';
+  var at = pr.at ? String(pr.at).slice(0, 10) : '';
+  var h = title + '<div class="mm-pr-src" style="font-size:12px;color:#475569;margin-bottom:4px;">Цени от VKP2 към ' + (at ? reportMinusMultiDM(at) + '.' + at.slice(0, 4) : '—') +
+    ', без промоции. Стойност = незакритото количество × продажната цена (както сумите в таб Минуси). Седмица ' +
+    reportMinusMultiDM(pr.from) + '–' + reportMinusMultiDM(pr.to) + '.</div>';
+  var t = pr.total || reportMinusPriceSum();
+  if (!t.rows) return h + '<div class="mm-pr-empty" style="font-size:12px;color:#94a3b8;">Няма минус със заметнат код за седмицата.</div>';
+  h += '<div class="mm-pr-count" style="font-size:12px;color:#475569;margin-bottom:6px;">Редове: <b>' + t.rows + '</b>' +
+    (t.noPrice ? ' · без цена: <b class="mm-pr-noprice-n">' + t.noPrice + '</b>' : '') +
+    (t.multi ? ' · с няколко заметнати кода: <b class="mm-pr-multi-n">' + t.multi + '</b>' : '') +
+    (t.noPrice || t.multi ? ' (не влизат в разликата)' : '') + '</div>';
+  var th = function(x, a){ return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:' + (a || 'left') + ';border-bottom:2px solid #e2e8f0;">' + x + '</th>'; };
+  var td = function(x, extra){ return '<td style="padding:6px;font-size:12px;color:#1e293b;vertical-align:top;border-bottom:1px solid #eef1f6;' + (extra || '') + '">' + x + '</td>'; };
+  var gray = function(x, cls){ return '<span class="' + cls + '" style="color:#94a3b8;font-size:11px;">' + x + '</span>'; };
+  var eur = function(n, warn, none){
+    if (n == null) return td(none || '—', 'text-align:right;');
+    return td(esc(mnFmtEur(n)) + (warn ? '<div class="mm-pr-uom" title="' + escAttr(warn) + '" style="color:#b45309;font-size:11px;">⚠ мярка</div>' : ''), 'text-align:right;white-space:nowrap;');
+  };
+  var money = function(n, cnt){ return cnt ? esc(mnFmtEur(n)) : '—'; };
+  var cellS = 'padding:6px;font-size:12px;font-weight:700;color:#1e293b;border-bottom:1px solid #eef1f6;';
+  var tot = function(label, s){
+    var cell = function(n, cnt){ return '<td style="' + cellS + 'text-align:right;white-space:nowrap;">' + money(n, cnt) + '</td>'; };
+    return '<tr class="mm-pr-sum" style="background:#fff7ed;"><td colspan="3" style="' + cellS + 'text-align:right;">' + label + '</td>' +
+      cell(s.minus, s.nMinus) + '<td colspan="2" style="' + cellS + '"></td>' + cell(s.real, s.nReal) + cell(s.diff, s.nDiff) + '</tr>';
+  };
+  pr.stores.forEach(function(s){
+    h += '<div class="mm-pr-store" style="font-size:13px;font-weight:700;color:#1E2761;margin:12px 0 4px;">' + esc(s.store) + ' (' + s.items.length + ')</div>';
+    h += '<table style="width:100%;border-collapse:collapse;"><tr>' + th('Код минус') + th('Описание') + th('К-во', 'right') + th('Стойност минус', 'right') +
+      th('Заметнат код') + th('Описание') + th('Стойност заметнат', 'right') + th('Разлика (€)', 'right') + '</tr>';
+    s.items.forEach(function(it){
+      h += '<tr class="mm-pr-item">' + td(esc(it.material), 'white-space:nowrap;') + td(esc(it.desc)) +
+        td(esc(mnFmtQty(it.rest) + (it.uom ? ' ' + it.uom : '')), 'text-align:right;white-space:nowrap;') +
+        eur(it.minus, it.minusWarn, it.noMinus ? gray('няма цена', 'mm-pr-noprice') : '') +
+        td(esc(it.real), 'white-space:nowrap;') + td(esc(it.multi ? '' : it.realDesc)) +
+        eur(it.realVal, it.realWarn, it.multi ? gray('няколко кода', 'mm-pr-multi') : (it.noReal ? gray('няма цена', 'mm-pr-noprice') : '')) +
+        eur(it.diff, null, '') + '</tr>';
+    });
+    h += tot('Общо ' + esc(s.store), s.sum) + '</table>';
+  });
+  return h + '<div class="mm-pr-total" style="font-size:13px;font-weight:700;color:#1E2761;margin:12px 0 4px;padding:6px;background:#fff7ed;">Общо за седмицата: стойност минус ' +
+    money(t.minus, t.nMinus) + ' · стойност заметнат ' + money(t.real, t.nReal) + ' · разлика <span class="mm-pr-total-diff">' + money(t.diff, t.nDiff) + '</span></div>';
+}
+/* Четенията на секцията: всички движения на обектите (FIFO иска и 956 от всякакви
+   дати — както таб Минуси), после цените и имената на кодовете на седмицата,
+   на порции, и датата на последното качване на VKP2. */
+function collectMinusPriceData(stores, refISO, reasons, cb){
+  if (!stores || !stores.length) { cb(reportMinusPriceGroup([], {}, [], refISO, reasons)); return; }
+  var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
+  var fail = function(){ cb({ error: true }); };
+  reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,qty,uom,mat_doc,doc_item,posting_date,real_code,reason_id' + inStores +
+    '&mvt_type=in.(955,956)&order=id.asc').then(function(mv){
+    if (mv.partial) { fail(); return; }
+    var fromISO = reportMinusMultiAddDays(refISO, -6), seen = {}, codes = [];
+    var add = function(x){ x = mnCoKey(x); if (x && !seen[x]) { seen[x] = 1; codes.push(x); } };
+    mv.forEach(function(m){
+      var d = String(m.posting_date || '').slice(0, 10);
+      if (String(m.mvt_type) !== '955' || d < fromISO || d > refISO || !mnCoKey(m.real_code)) return;
+      add(m.material);
+      mnRevRealCodes(mnCoKey(m.real_code)).forEach(add);
+    });
+    var parts = [];
+    for (var i = 0; i < codes.length; i += REPORT_MINUS_PRICE_BATCH) parts.push(codes.slice(i, i + REPORT_MINUS_PRICE_BATCH));
+    return Promise.all(parts.map(function(p){
+      return reportGetAll('product_catalog', 'select=sap_code,product_name,sale_price,sale_price_unit&sap_code=in.(' +
+        p.map(function(x){ return '"' + encodeURIComponent(x) + '"'; }).join(',') + ')&order=sap_code.asc');
+    })).then(function(rs){
+      if (rs.some(function(r){ return !r || r.partial; })) { fail(); return; }
+      return sbGet('product_catalog', 'select=sale_price_uploaded_at&sale_price_uploaded_at=not.is.null&order=sale_price_uploaded_at.desc&limit=1').then(function(up){
+        if (!Array.isArray(up)) { fail(); return; }
+        var cat = { prices: {}, names: {}, at: up[0] ? up[0].sale_price_uploaded_at : null };
+        rs.forEach(function(r){ r.forEach(function(x){
+          if (!x) return;
+          var k = mnCoKey(x.sap_code);
+          if (x.product_name) cat.names[k] = x.product_name;
+          if (x.sale_price != null && isFinite(Number(x.sale_price))) cat.prices[k] = { price: Number(x.sale_price), unit: x.sale_price_unit || '' };
+        }); });
+        try { cb(reportMinusPriceGroup(mv, cat, stores, refISO, reasons)); } catch (e) { fail(); }
+      });
+    });
+  }).catch(fail);
+}
+/* ═══════ ПИСМО ДО ОБЕКТА — „Минуси с отворена разлика“ (23.11.2026) ═══
+   Теодор 23.11, решение Б на Тенчо: всеки обект от minus_stores получава само
+   своите редове от „Минуси с отворена разлика“ (същата секция, вкл. „Ход“),
+   БЕЗ цени. Получатели — активните потребители на обекта с роля manager и
+   имейл (по един път на имейл). Обект без имейл → пропуснат (reason no_email);
+   без редове → без писмо (no_rows); секцията с грешка → никому (od_error).
+   Пращат се от същия крон, след писмата към офиса. */
+function reportMinusStorePlan(users, minusStores){
+  var ms = Array.isArray(minusStores) ? minusStores : [];
+  return ms.map(function(s){
+    var emails = [], seen = {};
+    (Array.isArray(users) ? users : []).forEach(function(u){
+      if (!u || u.role !== 'manager' || u.active === false || u.store_name !== s) return;
+      var e = String(u.email || '').trim();
+      if (!e || seen[e.toLowerCase()]) return;
+      seen[e.toLowerCase()] = 1; emails.push(e);
+    });
+    return { store: s, emails: emails };
+  });
+}
+function reportMinusStoreJobs(plan, od){
+  return (Array.isArray(plan) ? plan : []).map(function(p){
+    var s = od && !od.error ? (od.stores || []).filter(function(x){ return x.store === p.store; })[0] : null;
+    var sub = s ? { stores: [s], total: s.items.length } : { stores: [], total: 0 };
+    var reason = !od || od.error ? 'od_error' : !p.emails.length ? 'no_email' : !sub.total ? 'no_rows' : null;
+    return { store: p.store, emails: p.emails, od: sub, send: !reason, reason: reason };
+  });
+}
+function reportMinusStoreSubject(store, ref){
+  var r = String(ref || '');
+  return 'Минуси с отворена разлика — ' + store + (r ? ' — до ' + reportMinusMultiDM(r) + '.' + r.slice(0, 4) : '');
+}
+function reportMinusStoreHtml(store, od, ref){
+  var r = String(ref || '');
+  var body = '<div class="mm-store-intro" style="font-size:13px;color:#1e293b;margin-bottom:6px;">Минусите по-долу имат неприключена разлика — приключете тези, при които ходът е ваш, в Разлики.</div>' +
+    reportMinusOdHtml(od);
+  return reportEmailShell('➖ Минуси с отворена разлика — ' + esc(store), r ? 'Към ' + reportMinusMultiDM(r) + '.' + r.slice(0, 4) : '', body, 'Автоматичен репорт · ТеМАХ Портал');
+}
 function collectMinusMultiReportData(refISO, cb){
   sbGet('app_settings', 'key=in.(minus_stores,minus_multi_count,minus_multi_days)&select=key,value').then(function(set){
     if (!Array.isArray(set)) { cb(null); return; }
@@ -5455,7 +5819,7 @@ function collectMinusMultiReportData(refISO, cb){
     var stores = String(val('minus_stores') || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
     var count = reportMinusMultiPosInt(val('minus_multi_count'), REPORT_MINUS_MULTI_COUNT);
     var days = reportMinusMultiPosInt(val('minus_multi_days'), REPORT_MINUS_MULTI_DAYS);
-    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []), co: reportMinusMultiCoGroup([], [], count, days, refISO, []), od: { stores: [], total: 0 } })); return; }
+    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []), co: reportMinusMultiCoGroup([], [], count, days, refISO, []), od: { stores: [], total: 0 }, pr: reportMinusPriceGroup([], {}, [], refISO, []) })); return; }
     var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
     var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
     return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action,reason_id,note' +
@@ -5472,8 +5836,11 @@ function collectMinusMultiReportData(refISO, cb){
           if (rs.partial) { cb(null); return; }
           /* „Минуси с отворена разлика" (19.11.2026) — грешка там НЕ спира писмото. */
           collectMinusOdData(stores, function(od){
-            cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO, rs), { week: reportMinusMultiWeek(wk, stores, refISO),
-              common: reportMinusMultiCommon(rows, stores, days, refISO, rs), co: reportMinusMultiCoGroup(rows, stores, count, days, refISO, rs), od: od }));
+            /* „Ценови разлики" (23.11.2026) — грешка там също НЕ спира писмото. */
+            collectMinusPriceData(stores, refISO, rs, function(pr){
+              cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO, rs), { week: reportMinusMultiWeek(wk, stores, refISO),
+                common: reportMinusMultiCommon(rows, stores, days, refISO, rs), co: reportMinusMultiCoGroup(rows, stores, count, days, refISO, rs), od: od, pr: pr }));
+            });
           });
         });
       });
@@ -5506,7 +5873,7 @@ function reportMinusMultiHtml(data){
       body += '</table>';
     });
   }
-  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusOdHtml(d.od) + reportMinusMultiCoHtml(d.co) + reportMinusMultiCommonHtml(d.common);
+  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusOdHtml(d.od) + reportMinusPriceHtml(d.pr) + reportMinusMultiCoHtml(d.co) + reportMinusMultiCommonHtml(d.common);
   var sub = d.from && d.ref ? 'Последните ' + d.days + ' дни: ' + reportMinusMultiDM(d.from) + ' – ' + reportMinusMultiDM(d.ref) + '.' + String(d.ref).slice(0, 4) : '';
   return reportEmailShell('➖ Минуси — повтарящи се артикули', sub, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
@@ -5597,6 +5964,8 @@ function reportMinusMultiForStores(data, stores, scoped){
       out.od = { stores: os, total: os.reduce(function(a, s){ return a + s.items.length; }, 0) };
     }
   }
+  /* „Ценови разлики" (23.11.2026) — същото срязване, сумите наново. */
+  if (data && data.pr) out.pr = reportMinusPriceForStores(data.pr, stores);
   return out;
 }
 /* Праща ли се на този получател: без обхват — винаги, и при 0 артикула (ред „Няма
@@ -5820,6 +6189,15 @@ Deno.serve(async (req: Request) => {
         var sub = reportMinusMultiForStores(mmData, p.stores, p.scoped);
         return { plan: p, sub: sub, send: reportMinusMultiShouldSend(p, sub) };
       });
+      /* v74 — писмата до обектите („Минуси с отворена разлика", само своите редове,
+         без цени): управителите (role manager, активни, с имейл) на обектите от
+         minus_stores (reportMinusStorePlan / reportMinusStoreJobs). Неуспешно
+         четене на users → писма до обекти няма, видимо в отговора. */
+      var mmMgrRes: any = await sbGet('users', 'role=eq.manager&select=email,store_name,role,active');
+      var mmMgrRead = Array.isArray(mmMgrRes);
+      var mmStoreJobs: any[] = mmMgrRead ? reportMinusStoreJobs(reportMinusStorePlan(mmMgrRes, mmData.allStores || []), mmData.od) : [];
+      var mmPrSum = function(pr: any){ return pr && !pr.error ? { rows:pr.total.rows, no_price:pr.total.noPrice, multi:pr.total.multi,
+        minus:Math.round(pr.total.minus * 100) / 100, real:Math.round(pr.total.real * 100) / 100, diff:Math.round(pr.total.diff * 100) / 100 } : null; };
       if (mmDry) {
         return new Response(JSON.stringify({ ok:true, dry_run:true, today:mmToday, from:mmData.from, ref:mmData.ref, count:mmData.count, days:mmData.days,
           subject:reportMinusMultiSubject(mmData), minus_stores:mmData.allStores, total:mmData.total, no_statement:mmData.noStatement,
@@ -5832,7 +6210,14 @@ Deno.serve(async (req: Request) => {
               reason_labels:j.sub.common.reasons.map(function(r: any){ return r.label; }) } : null,
             co_total: j.sub.co ? j.sub.co.total : null,
             od_total: j.sub.od && !j.sub.od.error ? j.sub.od.total : null, od_error: !!(j.sub.od && j.sub.od.error),
+            pr: mmPrSum(j.sub.pr), pr_error: !!(j.sub.pr && j.sub.pr.error),
             send:j.send }; }),
+          pr_error: !!(mmData.pr && mmData.pr.error), pr_at: mmData.pr && !mmData.pr.error ? mmData.pr.at : null, pr_total: mmPrSum(mmData.pr),
+          pr_stores:((mmData.pr && !mmData.pr.error && mmData.pr.stores) || []).map(function(s: any){ return { store:s.store, rows:s.sum.rows, no_price:s.sum.noPrice, multi:s.sum.multi,
+            minus:Math.round(s.sum.minus * 100) / 100, real:Math.round(s.sum.real * 100) / 100, diff:Math.round(s.sum.diff * 100) / 100 }; }),
+          managers_read: mmMgrRead,
+          store_letters: mmStoreJobs.map(function(j: any){ return { store:j.store, emails:j.emails, rows:j.od.total, send:j.send, reason:j.reason,
+            subject: j.send ? reportMinusStoreSubject(j.store, mmData.ref) : null }; }),
           stores:(mmData.stores || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { material:g.material, n:g.dates.length, dates:g.dates, statement:!!g.action }; }) }; }),
           od_error: !!(mmData.od && mmData.od.error),
           od_stores:((mmData.od && !mmData.od.error && mmData.od.stores) || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { code:g.code, minus_from:g.minusFrom,
@@ -5841,8 +6226,27 @@ Deno.serve(async (req: Request) => {
           type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var mmSend: any[] = mmJobs.filter(function(j: any){ return j.send; });
+      /* Писмата до обектите — СЛЕД писмата към офиса, и когато към офиса няма
+         какво да тръгне (v74). */
+      var mmSendStores = async function(){
+        var out: any[] = [];
+        for (const j of mmStoreJobs) {
+          if (!j.send) { out.push({ store:j.store, sent:false, reason:j.reason, emails:j.emails.length }); continue; }
+          var sr = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
+            method: 'POST',
+            headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
+            body: JSON.stringify({ to: j.emails, subject: reportMinusStoreSubject(j.store, mmData.ref), html: reportMinusStoreHtml(j.store, j.od, mmData.ref) })
+          });
+          if (!sr.ok) console.error('minus_multi: писмото до обект ' + j.store + ' не тръгна — HTTP ' + sr.status);
+          out.push({ store:j.store, sent:sr.ok, status:sr.status, emails:j.emails.length, rows:j.od.total });
+        }
+        out.filter(function(x: any){ return x.reason === 'no_email'; }).forEach(function(x: any){ console.warn('minus_multi: обект ' + x.store + ' — няма управител с имейл, писмо до обекта не е пратено'); });
+        if (!mmMgrRead) console.error('minus_multi: users (manager) не се прочетоха — писма до обектите няма');
+        return out;
+      };
       if (!mmSend.length) {
-        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', recipients:mmJobs.length, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
+        var mmStoresOnly: any[] = await mmSendStores();
+        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', recipients:mmJobs.length, managers_read:mmMgrRead, store_letters:mmStoresOnly, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var mmOut: any[] = [];
       for (const j of mmSend) {
@@ -5853,8 +6257,10 @@ Deno.serve(async (req: Request) => {
         });
         mmOut.push({ email:j.plan.email, regional:!!j.plan.regional, stores:j.plan.stores.length, total:j.sub.total, week:j.sub.week ? j.sub.week.total.cur : null, common:!!j.sub.common, sent:mmRes.ok, status:mmRes.status });
       }
+      var mmStoreOut: any[] = await mmSendStores();
       return new Response(JSON.stringify({ ok:true, sent:mmOut.every(function(x: any){ return x.sent; }), recipients:mmOut.length,
-        skipped:mmJobs.length - mmSend.length, personal:mmOut, total:mmData.total, ref:mmData.ref, regional_read:Array.isArray(mmRegRes), type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
+        skipped:mmJobs.length - mmSend.length, personal:mmOut, total:mmData.total, ref:mmData.ref, regional_read:Array.isArray(mmRegRes),
+        managers_read:mmMgrRead, store_letters:mmStoreOut, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     /* v49 — „Просрочени клиентски заявки — ЦО": ЕДНО общо писмо, ранен клон

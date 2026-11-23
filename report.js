@@ -4785,6 +4785,195 @@ function collectMinusOdData(stores, cb){
     });
   }).catch(fail);
 }
+/* ═══════ ЦЕНОВИ РАЗЛИКИ (минус ↔ заметнат) (minusi-weekly-prices-stores, 23.11.2026) ═══
+   Теодор 23.11, решение А на Тенчо: в писмото към офиса (и на регионалния — само
+   своите обекти) — минусите 955 за седмицата на писмото [ref − 6; ref] с попълнен
+   заметнат код, без клиентската поръчка (reportMinusMultiIsCo). Стойностите и
+   разликата — по ПРАВИЛОТО НА ОФИСА в таб Минуси, не второ правило: остатъкът
+   (_rest) от mnCompute (FIFO по обект + материал върху ВСИЧКИ движения 955/956)
+   и mnValRow (остатък × цена; заметнат — само ако е ЕДИН код, mnRevRealCodes;
+   разликата — от закръглените до 2 знака) с цените от product_catalog (VKP2,
+   текущите, без история и без промо — цената към деня на продажба е етап 2).
+   В браузъра това са оригиналите от minusi.js; в send-scheduled-report — копия
+   (tests/report-edge-sync.test.js). mnValRow чете глобалния mnPrices — тук се
+   подменя само за синхронното смятане и се връща (try/finally).
+   Сумите — като реда „Общо“ в таба: всяка колона сбира редовете, в които я има.
+   Без цена / няколко кода → в реда „няма цена“ / „няколко кода“ и не влизат
+   в разликата; броят им стои над таблиците.
+   Грешка при четене → { error: true }: червен ред, писмото тръгва. */
+var REPORT_MINUS_PRICE_BATCH = 150;
+function reportMinusPriceSum(){ return { minus: 0, nMinus: 0, real: 0, nReal: 0, diff: 0, nDiff: 0, rows: 0, noPrice: 0, multi: 0 }; }
+function reportMinusPriceAdd(t, it){
+  t.rows++;
+  if (it.minus != null) { t.minus += it.minus; t.nMinus++; }
+  if (it.realVal != null) { t.real += it.realVal; t.nReal++; }
+  if (it.diff != null) { t.diff += it.diff; t.nDiff++; }
+  if (it.multi) t.multi++;
+  else if (it.noMinus || it.noReal) t.noPrice++;
+}
+/* Чисто: movs — 955 и 956 на обектите (всички дати, с qty/uom/mat_doc/doc_item);
+   cat — { prices: { код: { price, unit } }, names: { код: име }, at }. */
+function reportMinusPriceGroup(movs, cat, stores, refISO, reasons){
+  var ms = Array.isArray(stores) ? stores : [];
+  var c = cat || {};
+  var coIds = reportMinusMultiCoIds(reasons);
+  var fromISO = reportMinusMultiAddDays(refISO, -6);
+  var calc = mnCompute((Array.isArray(movs) ? movs : []).filter(function(m){ return m && ms.indexOf(m.store_name) >= 0; }), {}, 0, { count: 1, days: 1 });
+  var by = {};
+  var keep = mnPrices;
+  mnPrices = c.prices || {};
+  try {
+    calc.all.forEach(function(r){
+      var d = String(r.posting_date || '').slice(0, 10);
+      if (d < fromISO || d > refISO || !mnCoKey(r.real_code) || reportMinusMultiIsCo(r, coIds)) return;
+      var v = mnValRow(r), one = mnRealOne(r), mat = mnCoKey(r.material);
+      (by[r.store_name] || (by[r.store_name] = [])).push({ id: r.id, date: d, material: mat, desc: r.material_desc || (c.names || {})[mat] || '',
+        real: mnCoKey(r.real_code), realOne: one, realDesc: one ? ((c.names || {})[one] || '') : '', rest: r._rest, uom: r.uom || '',
+        minus: v.minus, realVal: v.real, diff: v.diff, minusWarn: v.minusWarn || null, realWarn: v.realWarn || null,
+        noMinus: !!v.noMinus, noReal: !!v.noReal, multi: !!v.realMulti });
+    });
+  } finally { mnPrices = keep; }
+  var out = { from: fromISO, to: refISO, at: c.at || null, stores: [], total: reportMinusPriceSum() };
+  ms.forEach(function(s){
+    var items = by[s];
+    if (!items || !items.length) return;
+    items.sort(function(a, b){ return a.date.localeCompare(b.date) || a.material.localeCompare(b.material, undefined, { numeric: true }) || String(a.id).localeCompare(String(b.id)); });
+    var sum = reportMinusPriceSum();
+    items.forEach(function(it){ reportMinusPriceAdd(sum, it); reportMinusPriceAdd(out.total, it); });
+    out.stores.push({ store: s, items: items, sum: sum });
+  });
+  return out;
+}
+/* Срязване по обекти (регионалният) — сборовете наново. */
+function reportMinusPriceForStores(pr, stores){
+  if (!pr || pr.error) return pr || null;
+  var ss = (pr.stores || []).filter(function(s){ return stores.indexOf(s.store) >= 0; });
+  var total = reportMinusPriceSum();
+  ss.forEach(function(s){ s.items.forEach(function(it){ reportMinusPriceAdd(total, it); }); });
+  return Object.assign({}, pr, { stores: ss, total: total });
+}
+function reportMinusPriceHtml(pr){
+  if (!pr) return '';
+  var title = '<div class="mm-pr" style="font-size:13px;font-weight:700;color:#1E2761;margin:22px 0 4px;padding-top:12px;border-top:2px solid #e2e8f0;">Ценови разлики (минус ↔ заметнат)</div>';
+  if (pr.error) return title + '<div class="mm-pr-err" style="font-size:12px;font-weight:700;color:#C0392B;">⚠️ Цените не се заредиха</div>';
+  var at = pr.at ? String(pr.at).slice(0, 10) : '';
+  var h = title + '<div class="mm-pr-src" style="font-size:12px;color:#475569;margin-bottom:4px;">Цени от VKP2 към ' + (at ? reportMinusMultiDM(at) + '.' + at.slice(0, 4) : '—') +
+    ', без промоции. Стойност = незакритото количество × продажната цена (както сумите в таб Минуси). Седмица ' +
+    reportMinusMultiDM(pr.from) + '–' + reportMinusMultiDM(pr.to) + '.</div>';
+  var t = pr.total || reportMinusPriceSum();
+  if (!t.rows) return h + '<div class="mm-pr-empty" style="font-size:12px;color:#94a3b8;">Няма минус със заметнат код за седмицата.</div>';
+  h += '<div class="mm-pr-count" style="font-size:12px;color:#475569;margin-bottom:6px;">Редове: <b>' + t.rows + '</b>' +
+    (t.noPrice ? ' · без цена: <b class="mm-pr-noprice-n">' + t.noPrice + '</b>' : '') +
+    (t.multi ? ' · с няколко заметнати кода: <b class="mm-pr-multi-n">' + t.multi + '</b>' : '') +
+    (t.noPrice || t.multi ? ' (не влизат в разликата)' : '') + '</div>';
+  var th = function(x, a){ return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:' + (a || 'left') + ';border-bottom:2px solid #e2e8f0;">' + x + '</th>'; };
+  var td = function(x, extra){ return '<td style="padding:6px;font-size:12px;color:#1e293b;vertical-align:top;border-bottom:1px solid #eef1f6;' + (extra || '') + '">' + x + '</td>'; };
+  var gray = function(x, cls){ return '<span class="' + cls + '" style="color:#94a3b8;font-size:11px;">' + x + '</span>'; };
+  var eur = function(n, warn, none){
+    if (n == null) return td(none || '—', 'text-align:right;');
+    return td(esc(mnFmtEur(n)) + (warn ? '<div class="mm-pr-uom" title="' + escAttr(warn) + '" style="color:#b45309;font-size:11px;">⚠ мярка</div>' : ''), 'text-align:right;white-space:nowrap;');
+  };
+  var money = function(n, cnt){ return cnt ? esc(mnFmtEur(n)) : '—'; };
+  var cellS = 'padding:6px;font-size:12px;font-weight:700;color:#1e293b;border-bottom:1px solid #eef1f6;';
+  var tot = function(label, s){
+    var cell = function(n, cnt){ return '<td style="' + cellS + 'text-align:right;white-space:nowrap;">' + money(n, cnt) + '</td>'; };
+    return '<tr class="mm-pr-sum" style="background:#fff7ed;"><td colspan="3" style="' + cellS + 'text-align:right;">' + label + '</td>' +
+      cell(s.minus, s.nMinus) + '<td colspan="2" style="' + cellS + '"></td>' + cell(s.real, s.nReal) + cell(s.diff, s.nDiff) + '</tr>';
+  };
+  pr.stores.forEach(function(s){
+    h += '<div class="mm-pr-store" style="font-size:13px;font-weight:700;color:#1E2761;margin:12px 0 4px;">' + esc(s.store) + ' (' + s.items.length + ')</div>';
+    h += '<table style="width:100%;border-collapse:collapse;"><tr>' + th('Код минус') + th('Описание') + th('К-во', 'right') + th('Стойност минус', 'right') +
+      th('Заметнат код') + th('Описание') + th('Стойност заметнат', 'right') + th('Разлика (€)', 'right') + '</tr>';
+    s.items.forEach(function(it){
+      h += '<tr class="mm-pr-item">' + td(esc(it.material), 'white-space:nowrap;') + td(esc(it.desc)) +
+        td(esc(mnFmtQty(it.rest) + (it.uom ? ' ' + it.uom : '')), 'text-align:right;white-space:nowrap;') +
+        eur(it.minus, it.minusWarn, it.noMinus ? gray('няма цена', 'mm-pr-noprice') : '') +
+        td(esc(it.real), 'white-space:nowrap;') + td(esc(it.multi ? '' : it.realDesc)) +
+        eur(it.realVal, it.realWarn, it.multi ? gray('няколко кода', 'mm-pr-multi') : (it.noReal ? gray('няма цена', 'mm-pr-noprice') : '')) +
+        eur(it.diff, null, '') + '</tr>';
+    });
+    h += tot('Общо ' + esc(s.store), s.sum) + '</table>';
+  });
+  return h + '<div class="mm-pr-total" style="font-size:13px;font-weight:700;color:#1E2761;margin:12px 0 4px;padding:6px;background:#fff7ed;">Общо за седмицата: стойност минус ' +
+    money(t.minus, t.nMinus) + ' · стойност заметнат ' + money(t.real, t.nReal) + ' · разлика <span class="mm-pr-total-diff">' + money(t.diff, t.nDiff) + '</span></div>';
+}
+/* Четенията на секцията: всички движения на обектите (FIFO иска и 956 от всякакви
+   дати — както таб Минуси), после цените и имената на кодовете на седмицата,
+   на порции, и датата на последното качване на VKP2. */
+function collectMinusPriceData(stores, refISO, reasons, cb){
+  if (!stores || !stores.length) { cb(reportMinusPriceGroup([], {}, [], refISO, reasons)); return; }
+  var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
+  var fail = function(){ cb({ error: true }); };
+  reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,qty,uom,mat_doc,doc_item,posting_date,real_code,reason_id' + inStores +
+    '&mvt_type=in.(955,956)&order=id.asc').then(function(mv){
+    if (mv.partial) { fail(); return; }
+    var fromISO = reportMinusMultiAddDays(refISO, -6), seen = {}, codes = [];
+    var add = function(x){ x = mnCoKey(x); if (x && !seen[x]) { seen[x] = 1; codes.push(x); } };
+    mv.forEach(function(m){
+      var d = String(m.posting_date || '').slice(0, 10);
+      if (String(m.mvt_type) !== '955' || d < fromISO || d > refISO || !mnCoKey(m.real_code)) return;
+      add(m.material);
+      mnRevRealCodes(mnCoKey(m.real_code)).forEach(add);
+    });
+    var parts = [];
+    for (var i = 0; i < codes.length; i += REPORT_MINUS_PRICE_BATCH) parts.push(codes.slice(i, i + REPORT_MINUS_PRICE_BATCH));
+    return Promise.all(parts.map(function(p){
+      return reportGetAll('product_catalog', 'select=sap_code,product_name,sale_price,sale_price_unit&sap_code=in.(' +
+        p.map(function(x){ return '"' + encodeURIComponent(x) + '"'; }).join(',') + ')&order=sap_code.asc');
+    })).then(function(rs){
+      if (rs.some(function(r){ return !r || r.partial; })) { fail(); return; }
+      return sbGet('product_catalog', 'select=sale_price_uploaded_at&sale_price_uploaded_at=not.is.null&order=sale_price_uploaded_at.desc&limit=1').then(function(up){
+        if (!Array.isArray(up)) { fail(); return; }
+        var cat = { prices: {}, names: {}, at: up[0] ? up[0].sale_price_uploaded_at : null };
+        rs.forEach(function(r){ r.forEach(function(x){
+          if (!x) return;
+          var k = mnCoKey(x.sap_code);
+          if (x.product_name) cat.names[k] = x.product_name;
+          if (x.sale_price != null && isFinite(Number(x.sale_price))) cat.prices[k] = { price: Number(x.sale_price), unit: x.sale_price_unit || '' };
+        }); });
+        try { cb(reportMinusPriceGroup(mv, cat, stores, refISO, reasons)); } catch (e) { fail(); }
+      });
+    });
+  }).catch(fail);
+}
+/* ═══════ ПИСМО ДО ОБЕКТА — „Минуси с отворена разлика“ (23.11.2026) ═══
+   Теодор 23.11, решение Б на Тенчо: всеки обект от minus_stores получава само
+   своите редове от „Минуси с отворена разлика“ (същата секция, вкл. „Ход“),
+   БЕЗ цени. Получатели — активните потребители на обекта с роля manager и
+   имейл (по един път на имейл). Обект без имейл → пропуснат (reason no_email);
+   без редове → без писмо (no_rows); секцията с грешка → никому (od_error).
+   Пращат се от същия крон, след писмата към офиса. */
+function reportMinusStorePlan(users, minusStores){
+  var ms = Array.isArray(minusStores) ? minusStores : [];
+  return ms.map(function(s){
+    var emails = [], seen = {};
+    (Array.isArray(users) ? users : []).forEach(function(u){
+      if (!u || u.role !== 'manager' || u.active === false || u.store_name !== s) return;
+      var e = String(u.email || '').trim();
+      if (!e || seen[e.toLowerCase()]) return;
+      seen[e.toLowerCase()] = 1; emails.push(e);
+    });
+    return { store: s, emails: emails };
+  });
+}
+function reportMinusStoreJobs(plan, od){
+  return (Array.isArray(plan) ? plan : []).map(function(p){
+    var s = od && !od.error ? (od.stores || []).filter(function(x){ return x.store === p.store; })[0] : null;
+    var sub = s ? { stores: [s], total: s.items.length } : { stores: [], total: 0 };
+    var reason = !od || od.error ? 'od_error' : !p.emails.length ? 'no_email' : !sub.total ? 'no_rows' : null;
+    return { store: p.store, emails: p.emails, od: sub, send: !reason, reason: reason };
+  });
+}
+function reportMinusStoreSubject(store, ref){
+  var r = String(ref || '');
+  return 'Минуси с отворена разлика — ' + store + (r ? ' — до ' + reportMinusMultiDM(r) + '.' + r.slice(0, 4) : '');
+}
+function reportMinusStoreHtml(store, od, ref){
+  var r = String(ref || '');
+  var body = '<div class="mm-store-intro" style="font-size:13px;color:#1e293b;margin-bottom:6px;">Минусите по-долу имат неприключена разлика — приключете тези, при които ходът е ваш, в Разлики.</div>' +
+    reportMinusOdHtml(od);
+  return reportEmailShell('➖ Минуси с отворена разлика — ' + esc(store), r ? 'Към ' + reportMinusMultiDM(r) + '.' + r.slice(0, 4) : '', body, 'Автоматичен репорт · ТеМАХ Портал');
+}
 function collectMinusMultiReportData(refISO, cb){
   sbGet('app_settings', 'key=in.(minus_stores,minus_multi_count,minus_multi_days)&select=key,value').then(function(set){
     if (!Array.isArray(set)) { cb(null); return; }
@@ -4792,7 +4981,7 @@ function collectMinusMultiReportData(refISO, cb){
     var stores = String(val('minus_stores') || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
     var count = reportMinusMultiPosInt(val('minus_multi_count'), REPORT_MINUS_MULTI_COUNT);
     var days = reportMinusMultiPosInt(val('minus_multi_days'), REPORT_MINUS_MULTI_DAYS);
-    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []), co: reportMinusMultiCoGroup([], [], count, days, refISO, []), od: { stores: [], total: 0 } })); return; }
+    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []), co: reportMinusMultiCoGroup([], [], count, days, refISO, []), od: { stores: [], total: 0 }, pr: reportMinusPriceGroup([], {}, [], refISO, []) })); return; }
     var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
     var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
     return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action,reason_id,note' +
@@ -4809,8 +4998,11 @@ function collectMinusMultiReportData(refISO, cb){
           if (rs.partial) { cb(null); return; }
           /* „Минуси с отворена разлика" (19.11.2026) — грешка там НЕ спира писмото. */
           collectMinusOdData(stores, function(od){
-            cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO, rs), { week: reportMinusMultiWeek(wk, stores, refISO),
-              common: reportMinusMultiCommon(rows, stores, days, refISO, rs), co: reportMinusMultiCoGroup(rows, stores, count, days, refISO, rs), od: od }));
+            /* „Ценови разлики" (23.11.2026) — грешка там също НЕ спира писмото. */
+            collectMinusPriceData(stores, refISO, rs, function(pr){
+              cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO, rs), { week: reportMinusMultiWeek(wk, stores, refISO),
+                common: reportMinusMultiCommon(rows, stores, days, refISO, rs), co: reportMinusMultiCoGroup(rows, stores, count, days, refISO, rs), od: od, pr: pr }));
+            });
           });
         });
       });
@@ -4843,7 +5035,7 @@ function reportMinusMultiHtml(data){
       body += '</table>';
     });
   }
-  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusOdHtml(d.od) + reportMinusMultiCoHtml(d.co) + reportMinusMultiCommonHtml(d.common);
+  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusOdHtml(d.od) + reportMinusPriceHtml(d.pr) + reportMinusMultiCoHtml(d.co) + reportMinusMultiCommonHtml(d.common);
   var sub = d.from && d.ref ? 'Последните ' + d.days + ' дни: ' + reportMinusMultiDM(d.from) + ' – ' + reportMinusMultiDM(d.ref) + '.' + String(d.ref).slice(0, 4) : '';
   return reportEmailShell('➖ Минуси — повтарящи се артикули', sub, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
@@ -4934,6 +5126,8 @@ function reportMinusMultiForStores(data, stores, scoped){
       out.od = { stores: os, total: os.reduce(function(a, s){ return a + s.items.length; }, 0) };
     }
   }
+  /* „Ценови разлики" (23.11.2026) — същото срязване, сумите наново. */
+  if (data && data.pr) out.pr = reportMinusPriceForStores(data.pr, stores);
   return out;
 }
 /* Праща ли се на този получател: без обхват — винаги, и при 0 артикула (ред „Няма
