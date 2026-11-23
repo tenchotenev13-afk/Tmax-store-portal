@@ -551,6 +551,15 @@ function checklistPortalPlan(metric, task, comps, weekISO) {
   var wkLo = weekISO[0], wkHi = weekISO[6];
 
   var hits = {}, delta = {}, seen = {};
+  /* ДНИТЕ БЕЗ ОТМЕТКА (етап А на checklist-store-gaps, 23.11.2026) — за
+     блока „Пропуски на <обект>" в писмото. Само се ЗАПИСВАТ тук; стойността
+     и знаменателят не зависят от тях. moveDays[store]: {del:{дата}, add:{дата}}
+     — очакваните дни се местят по същите пренасяния, по които мърда delta;
+     doneDays[store] — дните, покрити от свършено отмятане (по новата дата, а
+     при пренесено в дължим ден — и по първоначалната: слятият ред покрива
+     и двете). Виж missFor() долу. */
+  var moveDays = {}, doneDays = {};
+  function mv(store) { return moveDays[store] || (moveDays[store] = { del: {}, add: {} }); }
   comps.forEach(function (c) {
     /* Липсваща completion_date отпада — 19 такива записа стоят в базата
        отпреди полето да се пълни и иначе биха се броили за всяка седмица
@@ -569,6 +578,10 @@ function checklistPortalPlan(metric, task, comps, weekISO) {
     if (c.postponed_to) {
       if (origIsDue && !effInWeek) delta[c.store_name] = (delta[c.store_name] || 0) - 1;
       else if (!origIsDue && effInWeek) delta[c.store_name] = (delta[c.store_name] || 0) + 1;
+      /* Очакваните дни: изнесено → денят отпада; внесено или преместено в
+         недължим ден от седмицата → очаква се на новата дата. */
+      if (origIsDue && (!effInWeek || !allowed[eff])) mv(c.store_name).del[orig] = 1;
+      if (effInWeek && !allowed[eff]) mv(c.store_name).add[eff] = 1;
     }
     /* Принадлежи ли явяването на ТАЗИ седмица: пренесеното — по новата си
        дата, всичко останало — по дължимия ден. */
@@ -581,10 +594,22 @@ function checklistPortalPlan(metric, task, comps, weekISO) {
     var key = (c.postponed_to && allowed[eff]) ? orig : eff;
     if (!hits[c.store_name]) hits[c.store_name] = {};
     hits[c.store_name][key] = 1;
+    var dd = doneDays[c.store_name] || (doneDays[c.store_name] = {});
+    dd[eff] = 1; dd[key] = 1;
   });
   return {
     mode: mode, denom: days.length, hits: hits,
-    denomFor: function (store) { return days.length + (delta[store] || 0); }
+    denomFor: function (store) { return days.length + (delta[store] || 0); },
+    /* Дните от показаната седмица, в които обектът дължи отмятане и няма
+       свършено — подредени ISO дати. При необичайно пренасяне (две явявания
+       в един ден) броят може да не съвпадне с M − N; тогава писмото не
+       показва дни (checklistStoreGaps сверява). */
+    missFor: function (store) {
+      var m = moveDays[store] || { del: {}, add: {} }, dd = doneDays[store] || {}, exp = {};
+      Object.keys(allowed).forEach(function (d) { if (!m.del[d]) exp[d] = 1; });
+      Object.keys(m.add).forEach(function (d) { exp[d] = 1; });
+      return Object.keys(exp).filter(function (d) { return !dd[d]; }).sort();
+    }
   };
 }
 
@@ -1013,7 +1038,10 @@ function checklistRecurringChangesFor(idx, autos, ids, weekISO) {
              нов ред само с празно portal_value е шум в базата. */
           if (!row || row.portal_value === null || row.portal_value === undefined || row.portal_value === '') return;
         } else if (row && row.portal_value === val) return;
-        changes.push({ store: store, metric_key: m.key, value: val });
+        /* miss — дните без отметка (само режим 'count'); чете го само
+           checklistLoadGapDays за писмото. */
+        changes.push({ store: store, metric_key: m.key, value: val,
+          miss: (val !== null && plan.mode === 'count' && plan.missFor) ? plan.missFor(store) : null });
       });
     });
     return changes;
@@ -2200,6 +2228,108 @@ function checklistEmailCommentsHtml(rows, metrics, stores) {
     '</table></div>';
 }
 
+/* ═══ „ПРОПУСКИ НА <ОБЕКТ>" (checklist-store-gaps, етап А, 23.11.2026) ═══
+   Решение на Тенчо 23.11.2026 (писмо и разговор с Миглена Павлова): всеки
+   обект вижда в СВОЕТО писмо най-горе своите пропуски — кое и кога.
+   САМО в писмото до обектите от таба (submitChecklistSend). Неделният отчет
+   до Теодор (report.js, send-scheduled-report), „Днес" и самият таб НЕ го
+   показват — нарочно, не пропуск.
+
+   Пропуск по ЕФЕКТИВНАТА стойност (checklistEmailCellValue — контролингът
+   бие портала, в двете посоки):
+     · „не";
+     · „N/M" с N < M (брой: справка минуси, разлики от доставка, стока за
+       връщане, стока на път …);
+     · сторната (module:wrong_receipt, „поръчки/позиции") — първото число > 0.
+   НЕ е пропуск: „да", „нямат", празно, N/N, 0/0.
+   КОГА — само за колона с portal_mode 'count' и само когато стойността е
+   от портала: дните идват от checklistPortalPlan().missFor() (същото
+   правило като N/M). Броят им се сверява с M − N; разминат ли се (замразена
+   седмица срещу днешните данни, необичайно пренасяне) — без дни. */
+var CHECKLIST_WEEKDAY_SHORT = ['нд', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+
+/* '2026-11-17' → 'вт 17.11'. */
+function checklistGapDayLabel(iso) {
+  var p = String(iso || '').split('-');
+  if (p.length !== 3) return String(iso || '');
+  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  return CHECKLIST_WEEKDAY_SHORT[d.getDay()] + ' ' + p[2] + '.' + p[1];
+}
+
+/* Стойността в клетката от портала ли е (няма ръчна корекция)? */
+function checklistEmailFromPortal(metric, row) {
+  if (!row) return false;
+  var c = metric.value_type === 'number' ? row.control_num : row.control_value;
+  return c === null || c === undefined || c === '';
+}
+
+/* Пропуските на ЕДИН обект, в реда на колоните.
+   gapDays: { 'обект|колона': [ISO дати] } или null (не са заредени).
+   → [{ metric, text, days: [ISO]|null, daysLost: bool }]
+   daysLost — колона 'count' с пропуск от портала, за която дни няма или не
+   съвпадат с M − N (за предупреждението след изпращане). */
+function checklistStoreGaps(store, rows, metrics, gapDays) {
+  var idx = {};
+  (rows || []).forEach(function (r) { if (r) idx[r.store_name + ' ' + r.metric_key] = r; });
+  var out = [];
+  (metrics || []).forEach(function (m) {
+    var row = idx[store + ' ' + m.key];
+    var txt = checklistEmailCellValue(m, row);
+    if (txt === '') return;
+    if (checklistModuleId(m) === 'wrong_receipt') {
+      var sp = String(txt).split('/');
+      var orders = parseFloat(sp[0]);
+      if (!(orders > 0)) return;
+      out.push({ metric: m, text: 'сторнирани: ' + sp[0].trim() + ' поръчки' +
+        (sp.length > 1 ? ' / ' + sp[1].trim() + ' позиции' : ''), days: null, daysLost: false });
+      return;
+    }
+    if (txt === 'не') { out.push({ metric: m, text: 'не', days: null, daysLost: false }); return; }
+    var nm = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(txt);
+    if (!nm || !(Number(nm[1]) < Number(nm[2]))) return;
+    var days = null, lost = false;
+    if (m.portal_mode === 'count' && checklistEmailFromPortal(m, row)) {
+      var d = gapDays ? gapDays[store + '|' + m.key] : null;
+      if (Array.isArray(d) && d.length && d.length === Number(nm[2]) - Number(nm[1])) days = d;
+      else lost = true;
+    }
+    out.push({ metric: m, text: txt, days: days, daysLost: lost });
+  });
+  return out;
+}
+
+/* Блокът над таблицата. Само inline стилове. */
+function checklistEmailGapsHtml(store, weekNumber, items) {
+  if (!items.length) {
+    return '<div style="margin-bottom:16px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:13px;color:#166534;font-weight:600;">' +
+      'Няма пропуски за седмицата</div>';
+  }
+  return '<div style="margin-bottom:16px;padding:12px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">' +
+    '<div style="font-size:14px;font-weight:700;color:#991b1b;margin-bottom:6px;">Пропуски на ' + escVal(store) +
+      ' за седмица ' + escVal(String(weekNumber)) + '</div>' +
+    items.map(function (it) {
+      return '<div style="padding:3px 0;font-size:13px;color:#334155;">' +
+        '<b>' + escVal(it.metric.label) + '</b>: ' + escVal(it.text) +
+        (it.days ? ' — без отметка: ' + escVal(it.days.map(checklistGapDayLabel).join(', ')) : '') +
+        '</div>';
+    }).join('') +
+    '</div>';
+}
+
+/* Дните без отметка за колоните 'count' на показаната седмица — от
+   checklistRecurringChanges (правилото на checklistComputePortalValues).
+   → Promise { 'обект|колона': [ISO дати] }. Отхвърля при провал — вика се
+   с .catch в submitChecklistSend. */
+function checklistLoadGapDays() {
+  return checklistRecurringChanges({}).then(function (changes) {
+    var out = {};
+    (changes || []).forEach(function (c) {
+      if (c && Array.isArray(c.miss)) out[c.store + '|' + c.metric_key] = c.miss;
+    });
+    return out;
+  });
+}
+
 /* ═══ ПОРЕДНИ СЕДМИЦИ С „НЕ" (етап 3Б, 23.10.2026) ═══════════════════════
    ЕДНО правило на три места: checklistNoStreak тук, reportChecklistNoStreak
    в report.js и в send-scheduled-report/index.ts — едно и също тяло, само
@@ -2337,6 +2467,11 @@ function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, no
 
   var cellCss = 'padding:6px 8px;border:1px solid #E5E9F0;font-size:12px;';
   var body = checklistEmailVersionBanner(version, note);
+  /* Писмо ДО ОБЕКТ (extra.gapStore) → неговите пропуски най-горе. */
+  if (extra && extra.gapStore) {
+    body += checklistEmailGapsHtml(extra.gapStore, weekNumber,
+      checklistStoreGaps(extra.gapStore, rows, metrics, extra.gapDays || null));
+  }
 
   /* Поредиците „не" за оцветяването — същият източник като „Изисква становище". */
   var all = rows.concat((extra && Array.isArray(extra.history)) ? extra.history : []);
@@ -2593,19 +2728,45 @@ function submitChecklistSend() {
   checklistSendBusy = true;
   renderChecklist();
 
-  Promise.all([checklistNextVersion(), checklistLoadEmailExtra(checklistYear, checklistWeek)]).then(function (pre) {
+  /* Дните без отметка за блока „Пропуски" — провал не спира изпращането:
+     писмата тръгват без дни, а след тях идва предупреждение. */
+  var gapDaysFailed = false;
+  var gapDaysP = checklistLoadGapDays().catch(function (e) {
+    console.error('Чек лист: дните без отметка не се заредиха', e);
+    gapDaysFailed = true;
+    return null;
+  });
+
+  Promise.all([checklistNextVersion(), checklistLoadEmailExtra(checklistYear, checklistWeek), gapDaysP]).then(function (pre) {
     var version = pre[0];
-    var html = checklistEmailHtml(checklistYear, checklistWeek, version,
-      checklistRows, checklistMetrics, checklistStores, note || null, pre[1]);
+    var extra = pre[1] || {};
+    var gapDays = pre[2];
     var subject = checklistSendSubject(version);
+    /* Колони 'count' с пропуск от портала, за които дни не излязоха. */
+    var daysLost = 0;
+    targets.forEach(function (r) {
+      checklistStoreGaps(r.store, checklistRows, checklistMetrics, gapDays).forEach(function (g) {
+        if (g.daysLost) daysLost++;
+      });
+    });
+    if (daysLost && !gapDaysFailed) {
+      console.error('Чек лист: дните без отметка не съвпадат с броя за ' + daysLost + ' клетки — пратено без дни');
+    }
+    var daysNote = gapDaysFailed ? ' · дните без отметка не се заредиха — писмата са без дни'
+      : daysLost ? ' · за ' + daysLost + ' клетки писмата са без дни (не съвпадат с броя)' : '';
 
     /* ПО ЕДНО ПИСМО НА ПОЛУЧАТЕЛ, не едно с всички адреси в „До".
        Обектите не бива да виждат чуждите адреси — това е и причината да не
-       се праща накуп, макар накуп да е една заявка вместо осемнайсет. */
+       се праща накуп, макар накуп да е една заявка вместо осемнайсет.
+       От 23.11.2026 и HTML-ът е по получател: блокът „Пропуски на <обект>"
+       най-горе (checklistEmailGapsHtml); таблицата е обща. */
     return Promise.all(targets.map(function (r) {
       if (typeof sendEmail !== 'function') {
         return Promise.resolve({ email: r.email, ok: false });
       }
+      var html = checklistEmailHtml(checklistYear, checklistWeek, version,
+        checklistRows, checklistMetrics, checklistStores, note || null,
+        { history: extra.history, prevResponses: extra.prevResponses, gapStore: r.store, gapDays: gapDays });
       return sendEmail([r.email], subject, html).then(function (res) {
         return { email: r.email, ok: !!(res && res.ok) };
       }).catch(function () {
@@ -2646,15 +2807,16 @@ function submitChecklistSend() {
 
         if (!res || !res.ok) {
           toast('Писмата тръгнаха (' + sent.length + '), но изпращането НЕ се записа: ' +
-            sbErrMsg(res), '#dc2626');
+            sbErrMsg(res) + daysNote, '#dc2626');
           return;
         }
         if (failed) {
           toast('Изпратени ' + sent.length + ', провалени ' + failed +
-            ' — записани са само успелите', '#dc2626');
+            ' — записани са само успелите' + daysNote, '#dc2626');
           return;
         }
-        toast('✅ Изпратено до ' + sent.length + ' обекта (версия ' + version + ')');
+        toast('✅ Изпратено до ' + sent.length + ' обекта (версия ' + version + ')' + daysNote,
+          daysNote ? '#d97706' : undefined);
       });
     });
   }).catch(function () {
