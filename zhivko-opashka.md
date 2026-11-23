@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(изтриване на данни, без схемна промяна — огледалото прави UPSERT и не трие)
+- 23.11 · kasa_reports — РЪЧНО ИЗТРИВАНЕ на ред id e6cc5cfd-f9d0-47bc-a1c5-7d0b3e41bb8a (дублиран отчет Шумен 20.11.2026, каса 2; изтрит в основната база на 23.11.2026, остава eebfd0b1-f6fd-44b1-855a-caea59fb0cdf)
+
 (в базата от миграцията checklist_transit_deadline, weekly-checklist-transit-deadline-schema.sql, версия 20261123123732, приложена 23.11.2026; data миграцията checklist_transit_history_data — версия 20261123132452, приложена 23.11.2026: 108 клетки stoka_na_pat в седмици 40, 42–45, 47 → NULL)
 - 23.11 · нова таблица weekly_checklist_snapshots — year int NOT NULL · week_number int NOT NULL · metric_key text NOT NULL (PK: year, week_number, metric_key) · taken_at timestamptz NOT NULL, default now() · taken_by text NULL (стойности 'cron' / 'freeze-late')
 - 23.11 · weekly_checklist.portal_value за metric_key 'stoka_na_pat' — нови стойности 'da' / 'ne' вместо „N/M"; в седмиците без 10-то число — NULL (колоната не се мени, само съдържанието)
