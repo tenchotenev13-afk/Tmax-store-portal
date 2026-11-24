@@ -32,6 +32,11 @@
    успешни:
      M8 rvCoUnlock не номерира редовете на отключената бланка
         → „след „Отключи": БР 2 → 2 номера, M2 → 1", „без маркер … след отключването".
+   Камера / галерия (24.11.2026) — 📷 „Снимай" → вход с capture, 🖼 „От
+   галерията" → вход с multiple; чистият код: exit 0, 62 успешни:
+     M9  махнат capture="environment" → „📷 → вход с capture…", „след пререндера 📷 пак…";
+     M10 разменени входове в rvPhotoPick → „📷 → вход с capture…", „🖼 → вход без capture…";
+     M11 rvCanPhoto без проверката за чернова → „без право: нито 📷 …, нито 🖼 …".
 */
 'use strict';
 
@@ -288,23 +293,47 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     const h = env();
     await h.w.loadRevaluation(); await ticks(5);
     const a = await addRow(h, '53531', 'БР', '1');
-    const cam = row(h, a.id).querySelector('.rv-photo-btn');
-    ok('бутон 📷 на реда в чернова', !!cam);
-    let clicked = 0;
-    $(h, 'rv-photo-file').click = () => { clicked++; };
-    realClick(h.w, cam);
-    ok('📷 отваря избора на файл', clicked === 1);
-    const inp = $(h, 'rv-photo-file');
+    // Два бутона (24.11.2026): 📷 „Снимай" → вход с capture; 🖼 „От галерията" → вход с multiple, без capture.
+    const camBtn = () => row(h, a.id).querySelector('button[title="Снимай"]');
+    const galBtn = () => row(h, a.id).querySelector('button[title="От галерията"]');
+    ok('бутон 📷 „Снимай" на реда в чернова', !!camBtn() && camBtn().textContent === '📷');
+    ok('бутон 🖼 „От галерията" на реда в чернова', !!galBtn() && galBtn().textContent === '🖼');
+    let hits = [];
+    const hook = () => mod(h).querySelectorAll('input[type=file]').forEach(el => { el.click = () => { hits.push(el); }; });
+    hook();
+    realClick(h.w, camBtn());
+    ok('📷 отваря точно един вход', hits.length === 1, String(hits.length));
+    const camInp = hits[0];
+    ok('📷 → вход с capture="environment", accept image/*, без multiple', !!camInp && camInp.getAttribute('capture') === 'environment' && camInp.getAttribute('accept') === 'image/*' && !camInp.multiple, camInp && camInp.outerHTML);
+    hits = [];
+    realClick(h.w, galBtn());
+    ok('🖼 отваря точно един вход', hits.length === 1, String(hits.length));
+    const galInp = hits[0];
+    ok('🖼 → вход без capture, с multiple, accept image/*', !!galInp && !galInp.hasAttribute('capture') && galInp.multiple && galInp.getAttribute('accept') === 'image/*', galInp && galInp.outerHTML);
+    ok('двата бутона водят до различни входове', !!camInp && camInp !== galInp);
+    // Качване през 🖼 (две снимки)
     const f1 = new h.w.File(['a'], 'a.jpg', { type: 'image/jpeg' }), f2 = new h.w.File(['b'], 'b.jpg', { type: 'image/jpeg' });
-    Object.defineProperty(inp, 'files', { value: [f1, f2], configurable: true });
-    fire(h.w, inp, 'change'); await ticks(10);
-    ok('две качвания в bulletin-files/revaluation/', h.db.uploads.length === 2 && h.db.uploads.every(u => /\/storage\/v1\/object\/bulletin-files\/revaluation\/\d+_[a-z0-9]+\.jpg$/.test(u)), h.db.uploads.join(' | '));
+    Object.defineProperty(galInp, 'files', { value: [f1, f2], configurable: true });
+    fire(h.w, galInp, 'change'); await ticks(10);
+    ok('🖼: две качвания в bulletin-files/revaluation/', h.db.uploads.length === 2 && h.db.uploads.every(u => /\/storage\/v1\/object\/bulletin-files\/revaluation\/\d+_[a-z0-9]+\.jpg$/.test(u)), h.db.uploads.join(' | '));
     const patch = h.calls.patch.filter(x => x.table === 'revaluation_items' && x.body.photos).pop();
-    ok('PATCH на реда с 2 публични адреса', !!patch && patch.body.photos.length === 2 && patch.body.photos.every(u => /\/object\/public\/bulletin-files\/revaluation\//.test(u)), patch && JSON.stringify(patch.body));
+    ok('🖼: PATCH на реда с 2 публични адреса', !!patch && patch.body.photos.length === 2 && patch.body.photos.every(u => /\/object\/public\/bulletin-files\/revaluation\//.test(u)), patch && JSON.stringify(patch.body));
     ok('2 миниатюри на реда', row(h, a.id).querySelectorAll('.rv-thumb').length === 2);
+    // Качване през 📷 (след пререндера — новите елементи)
+    hits = []; hook();
+    realClick(h.w, camBtn());
+    const camInp2 = hits[0];
+    ok('след пререндера 📷 пак → входът с capture', !!camInp2 && camInp2.getAttribute('capture') === 'environment');
+    const f3 = new h.w.File(['c'], 'c.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(camInp2, 'files', { value: [f3], configurable: true });
+    fire(h.w, camInp2, 'change'); await ticks(10);
+    ok('📷: трето качване в bulletin-files/revaluation/', h.db.uploads.length === 3 && /\/bulletin-files\/revaluation\//.test(h.db.uploads[2]), h.db.uploads.join(' | '));
+    const patch3 = h.calls.patch.filter(x => x.table === 'revaluation_items' && x.body.photos).pop();
+    ok('📷: снимката е в photos на реда (3 адреса, първите 2 запазени)', !!patch3 && patch3.body.photos.length === 3 && patch3.body.photos.slice(0, 2).join() === patch.body.photos.join(), patch3 && JSON.stringify(patch3.body));
+    ok('3 миниатюри на реда', row(h, a.id).querySelectorAll('.rv-thumb').length === 3);
     realClick(h.w, row(h, a.id).querySelector('.rv-photo-rm')); await ticks(5);
     const p2 = h.calls.patch.filter(x => x.table === 'revaluation_items' && 'photos' in x.body).pop();
-    ok('✕ маха снимката само от масива (без DELETE към storage)', p2.body.photos.length === 1 && !h.calls.del.some(u => /storage/.test(u)));
+    ok('✕ маха снимката само от масива (без DELETE към storage)', p2.body.photos.length === 2 && !h.calls.del.some(u => /storage/.test(u)));
     ok('„Подай" не иска снимка', h.w.rvRowProblems({ qty: 1, store_comment: 'x', proposed_price: 5 }).length === 0);
   }
 
@@ -320,6 +349,8 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     const th = row(h, 'i-1') && row(h, 'i-1').querySelector('.rv-thumb');
     ok('регионалният вижда миниатюрата', !!th);
     ok('без 📷 и без ✕ (бланката е подадена)', !row(h, 'i-1').querySelector('.rv-photo-btn') && !row(h, 'i-1').querySelector('.rv-photo-rm'));
+    const photoBtns = [].filter.call(mod(h).querySelectorAll('button'), b => b.title === 'Снимай' || b.title === 'От галерията' || /📷|🖼/.test(b.textContent));
+    ok('без право: нито 📷 „Снимай", нито 🖼 „От галерията" (<button>)', photoBtns.length === 0, photoBtns.map(b => b.outerHTML).join(' | '));
     realClick(h.w, th);
     const view = $(h, 'rv-photo-view');
     ok('клик → снимката на цял екран', !!view && view.querySelector('img').getAttribute('src') === items[0].photos[0]);

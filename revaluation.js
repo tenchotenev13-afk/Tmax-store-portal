@@ -365,7 +365,8 @@ function rvRender(){
   if(rvSub && !rvUnitsOk){
     h += '<div id="rv-units-load-fail" style="font-size:12px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-bottom:8px;">⚠ Номерата на бройките не се заредиха — презареди таба.</div>';
   }
-  if(rvCanPhoto()) h += '<input id="rv-photo-file" type="file" accept="image/*" multiple style="display:none;" onchange="rvPhotoUpload(this)">';
+  if(rvCanPhoto()) h += '<input id="rv-photo-cam" type="file" accept="image/*" capture="environment" style="display:none;" onchange="rvPhotoUpload(this)">' +
+    '<input id="rv-photo-file" type="file" accept="image/*" multiple style="display:none;" onchange="rvPhotoUpload(this)">';
 
   h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">';
   if(edit){
@@ -428,7 +429,8 @@ function rvRowHtml(it, edit, pink, coEdit){
       '<td>' + esc(rvFmt(it.std_price)) + '</td><td>' + esc(it.discount_pct == null ? '' : rvFmtQty(it.discount_pct)) + '</td><td>' + esc(rvFmt(it.proposed_price)) + '</td>';
   }
   if(pink) h += rvPinkCells(it, coEdit);
-  if(edit) h += '<td>' + (rvCanPhoto() ? '<button class="btn-sm rv-photo-btn" data-id="' + escAttr(it.id) + '" onclick="rvPhotoPick(this.dataset.id)" title="Добави снимка">📷</button> ' : '') +
+  if(edit) h += '<td>' + (rvCanPhoto() ? '<button class="btn-sm rv-photo-btn rv-photo-cam-btn" data-id="' + escAttr(it.id) + '" onclick="rvPhotoPick(this.dataset.id,\'cam\')" title="Снимай">📷</button> ' +
+    '<button class="btn-sm rv-photo-btn rv-photo-gal-btn" data-id="' + escAttr(it.id) + '" onclick="rvPhotoPick(this.dataset.id)" title="От галерията">🖼</button> ' : '') +
     '<button class="btn-sm" data-id="' + escAttr(it.id) + '" onclick="rvDeleteRow(this.dataset.id)" title="Изтрий ред">🗑 Изтрий ред</button></td>';
   return h + '</tr>';
 }
@@ -695,10 +697,11 @@ function rvPhotosHtml(it){
       '</span>';
   }).join('') + '</div>';
 }
-function rvPhotoPick(id){
+/* 📷 → камерата (capture), 🖼 → галерията (multiple); 24.11.2026 */
+function rvPhotoPick(id, src){
   if(!rvCanPhoto() || !rvItem(id)) return false;
   rvPhotoItemId = id;
-  var inp = document.getElementById('rv-photo-file');
+  var inp = document.getElementById(src === 'cam' ? 'rv-photo-cam' : 'rv-photo-file');
   if(inp) inp.click();
   return true;
 }
