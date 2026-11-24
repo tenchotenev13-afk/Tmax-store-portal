@@ -3,8 +3,10 @@
 
    Какво се заковава:
    - обектът: „🏢 Снабдяване: текст · автор, дд.мм чч:мм" над таблицата само
-     при запис за ТАЗИ седмица; сив ред „миналата седмица: …" при запис за
-     предишната; без запис — нищо; една заявка за двете седмици; esc();
+     при запис за ТАЗИ седмица; „🏢 Снабдяване (миналата седмица): текст ·
+     автор, дд.мм чч:мм" (същият вид, сиво-синя рамка, НЕ бледосив #94a3b8)
+     при запис за предишната; без автор и час — без висящо „ · "; без
+     запис — нищо; една заявка за двете седмици; esc();
    - ЦО, supply/admin: блок „🏢 Коментар на Снабдяването" под матрицата, поле
      и „💾" на всеки обект от списъка ✅/⬜; РЕАЛЕН клик -> ЕДИН POST към
      supply_store_notes?on_conflict=template_id,store_name,week_start с
@@ -31,6 +33,15 @@
       -> co_note null" пада.
    M6 supplySaveCoNote: печатът се обновява и при грешка (if(!res.ok) без
       return) -> „при грешка няма „✓ Запазено"" пада.
+
+   Мутации (24.11.2026, редът за миналата седмица — всяка поотделно върху
+   supply.js; всяка събаря теста с exit 1, чистият код минава с exit 0):
+   M7 .sup-co-prev: върнат стар стил font-size:12px;color:#94a3b8 ->
+      „не е бледосив" пада.
+   M8 .sup-co-prev: изпуснат metaHtml(old) -> „автор и час на миналата
+      седмица" пада (секции 1 и 2).
+   M9 .sup-co-prev: „🏢 Снабдяване (миналата седмица): " -> „миналата
+      седмица: " -> „сиво-синият ред …" пада (секции 1 и 2).
 
    Пускане: node tests/supply-co-note.test.js . */
 'use strict';
@@ -100,7 +111,14 @@ const coPosts = h => h.calls.post.filter(p => p.table === 'supply_store_notes' |
       ok('<b> не е рендиран (esc)', !!cur && !cur.querySelector('b'));
       ok('white-space:pre-line', !!cur && /white-space:pre-line/.test(cur.getAttribute('style')));
       const old = m.querySelector('.sup-co-prev');
-      ok('сив ред „миналата седмица: …"', !!old && old.textContent === 'миналата седмица: миналия път: 1 мокет', old && old.textContent);
+      ok('ред „🏢 Снабдяване (миналата седмица): …" с автор и час', !!old &&
+        old.textContent === '🏢 Снабдяване (миналата седмица): миналия път: 1 мокет · Мария, 12.10 09:05', old && old.textContent);
+      const os = (old && old.getAttribute('style')) || '';
+      ok('миналата седмица: не е бледосив (#94a3b8)', !!old && !/94a3b8/i.test(os), os);
+      ok('миналата седмица: 13px, лява рамка 3px сиво-синя, фон, padding', !!old &&
+        /font-size:13px/.test(os) && /border-left:3px solid #64748b/.test(os) && /background:#f8fafc/.test(os) && /padding:6px 10px/.test(os), os);
+      ok('миналата седмица: авторът е в muted 12px', !!old && !!old.querySelector('span') &&
+        old.querySelector('span').getAttribute('style').indexOf('color:var(--muted)') >= 0 && /font-size:12px/.test(old.querySelector('span').getAttribute('style')));
       ok('сивият ред е след текущия, и двата — преди таблицата',
         !!cur && !!old && m.innerHTML.indexOf('sup-co-cur') < m.innerHTML.indexOf('sup-co-prev') &&
         m.innerHTML.indexOf('sup-co-prev') < m.innerHTML.indexOf('<table'));
@@ -123,7 +141,18 @@ const coPosts = h => h.calls.post.filter(p => p.table === 'supply_store_notes' |
     prev = h2.w.supplyAddDays(h2.w.supplyWeekStart(), -7);
     h2.w.loadSupply(); await ticks(6);
     ok('само предишна: няма „🏢 Снабдяване"', !mod(h2).querySelector('.sup-co-cur'));
-    ok('само предишна: сивият ред е там', (mod(h2).querySelector('.sup-co-prev') || {}).textContent === 'миналата седмица: старо');
+    ok('само предишна: сиво-синият ред е там', (mod(h2).querySelector('.sup-co-prev') || {}).textContent === '🏢 Снабдяване (миналата седмица): старо · М, 12.10 09:05',
+      (mod(h2).querySelector('.sup-co-prev') || {}).textContent);
+
+    let prev4;
+    const h4 = env(STORE, () => [
+      { template_id: 'tpl-fl', store_name: 'Сливен', week_start: prev4, co_note: 'без подпис', co_note_by: null, co_note_at: null }
+    ]);
+    prev4 = h4.w.supplyAddDays(h4.w.supplyWeekStart(), -7);
+    h4.w.loadSupply(); await ticks(6);
+    const o4 = mod(h4).querySelector('.sup-co-prev');
+    ok('без автор и час: няма висящо „ · "', !!o4 && o4.textContent === '🏢 Снабдяване (миналата седмица): без подпис' && o4.textContent.indexOf(' · ') < 0,
+      o4 && o4.textContent);
 
     let wk;
     const h3 = env(STORE, () => [

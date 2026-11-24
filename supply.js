@@ -291,8 +291,11 @@ function renderSupplyStore(){
 }
 
 /* Коментарът на Снабдяването над таблицата на бланката. Само ако има непразен
-   текст: за ТАЗИ седмица — „🏢 Снабдяване: …"; за предишната — сив ред
-   „миналата седмица: …". Без запис -> празен низ. */
+   текст: за ТАЗИ седмица — „🏢 Снабдяване: …" (синя рамка); за предишната —
+   „🏢 Снабдяване (миналата седмица): …" със същия вид, но сиво-синя рамка
+   (24.11.2026 — бледосивият ред без автор не се забелязваше на живо). И двата
+   носят „ · <автор>, <дд.мм чч:мм>"; без автор и час — без „ · ".
+   Без запис -> празен низ. */
 function supplyStoreCoNoteHtml(t){
   var prev = supplyAddDays(supplyWeek, -7);
   function find(w){
@@ -300,15 +303,18 @@ function supplyStoreCoNoteHtml(t){
       return n.template_id === t.id && n.week_start === w && n.co_note && String(n.co_note).trim() !== '';
     });
   }
+  function metaHtml(n){
+    var meta = [n.co_note_by ? esc(n.co_note_by) : '', supplyFmtDM(n.co_note_at)].filter(Boolean).join(', ');
+    return meta ? ' · <span style="color:var(--muted);font-size:12px;">' + meta + '</span>' : '';
+  }
   var cur = find(supplyWeek), old = find(prev), h = '';
   if(cur){
-    var meta = [cur.co_note_by ? esc(cur.co_note_by) : '', supplyFmtDM(cur.co_note_at)].filter(Boolean).join(', ');
     h += '<div class="sup-co-cur" style="font-size:13px;background:#eff6ff;border-left:3px solid #2563eb;padding:6px 10px;border-radius:4px;margin-bottom:6px;white-space:pre-line;">' +
-      '🏢 Снабдяване: ' + esc(String(cur.co_note).trim()) + (meta ? ' · <span style="color:var(--muted);font-size:12px;">' + meta + '</span>' : '') + '</div>';
+      '🏢 Снабдяване: ' + esc(String(cur.co_note).trim()) + metaHtml(cur) + '</div>';
   }
   if(old){
-    h += '<div class="sup-co-prev" style="font-size:12px;color:#94a3b8;margin-bottom:8px;white-space:pre-line;">миналата седмица: ' +
-      esc(String(old.co_note).trim()) + '</div>';
+    h += '<div class="sup-co-prev" style="font-size:13px;background:#f8fafc;border-left:3px solid #64748b;padding:6px 10px;border-radius:4px;margin-bottom:8px;white-space:pre-line;">' +
+      '🏢 Снабдяване (миналата седмица): ' + esc(String(old.co_note).trim()) + metaHtml(old) + '</div>';
   }
   return h;
 }
