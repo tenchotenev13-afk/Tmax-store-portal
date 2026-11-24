@@ -19,7 +19,7 @@
 - 23.11 · нова таблица revaluation_unit_counters — store_name text NOT NULL (PK) · last_num integer NOT NULL, default 0
 - 23.11 · revaluation_items.photos — text[], NULL, без default
 
-(промяна само в данни, weekly-checklist-label-razliki-schema.sql)
+(промяна само в данни, weekly-checklist-label-razliki-schema.sql; миграция weekly_checklist_label_razliki — версия 20261124100125, приложена 24.11.2026)
 - 23.11 · weekly_checklist_metrics — промяна само в данни (label на razliki_dostavka → „Разлики логистични складове"), без промяна за огледалото
 
 (изтриване на данни, без схемна промяна — огледалото прави UPSERT и не трие)
