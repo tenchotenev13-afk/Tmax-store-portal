@@ -458,6 +458,84 @@
   };
 
   // Кой е в графика за месеца: не е напуснал преди първия ден и не е назначен след последния.
+  /* ── Отпуски по фирмената политика (етап В, 24.11.2026) ───────────────────
+     „Основен файл в 1.0“ — позволените периоди за платен отпуск. Решения на Тенчо 23.11.2026:
+     всяко „О“ = 1 ден, без значение от деня от седмицата; поредните — почивните дни между О НЕ
+     прекъсват серията, прекъсва я само работна смяна (работна буква или свободни часове).
+     Нищо от това не спира „Подай“ — само предупреждение. Числата са в app_settings
+     (grafik_leave_policy), тук са само резервните стойности. */
+  E.LEAVE_POLICY = { summer_months: [5, 6, 7, 8], max_consecutive: 5, max_total: 7, probation_months: 6 };
+  E.leavePolicy = function (raw) {
+    var p = {}, d = E.LEAVE_POLICY, v = raw && typeof raw === 'object' ? raw : {};
+    var int = function (x, def) { var n = +x; return isFinite(n) && n >= 0 && Math.floor(n) === n ? n : def; };
+    var sm = Array.isArray(v.summer_months) ? v.summer_months.map(Number).filter(function (m) { return m >= 1 && m <= 12 && Math.floor(m) === m; }) : null;
+    p.summer_months = sm && sm.length ? sm : d.summer_months.slice();
+    p.max_consecutive = int(v.max_consecutive, d.max_consecutive);
+    p.max_total = int(v.max_total, d.max_total);
+    p.probation_months = int(v.probation_months, d.probation_months);
+    return p;
+  };
+  // „Назначен на“ + N месеца (31.08 + 6 → 28.02 / 29.02 — краят на месеца, ако денят го няма).
+  E.addMonths = function (s, n) {
+    var y = +s.slice(0, 4), m = +s.slice(5, 7) - 1 + n, d = +s.slice(8, 10);
+    y += Math.floor(m / 12); m = ((m % 12) + 12) % 12;
+    var last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return ymd(y, m + 1, Math.min(d, last));
+  };
+  function isWorkCell(L) { return E.WORK_LETTERS.indexOf(L) >= 0 || E.isHours(L); }
+  function fmtDays(days) { return days.map(function (s) { return ddmm(s); }).join(', '); }
+  // policy — E.leavePolicy(...); M — monthInfo на отворения месец; staff — {hired_on};
+  // letters — буквите на човека за месеца; before — [{ym, letters}] за летните месеци от
+  // годината ПРЕДИ този (липсващ месец — просто го няма: нито О, нито прекъсване).
+  // Връща [{type, day, days:[номер на ден в месеца], text}] — days са дните за оцветяване.
+  E.leaveWarnings = function (policy, M, staff, letters, before) {
+    var P = policy || E.leavePolicy(null), out = [], L = letters || [];
+    var summer = P.summer_months.indexOf(M.month) >= 0;
+    var curO = [];
+    for (var i = 0; i < M.days; i++) if (L[i] === 'О') curO.push(i + 1);
+    if (!curO.length) return out;
+    if (summer) {
+      // Хронологично: летните месеци преди този + този.
+      var seq = [];
+      (before || []).slice().sort(function (a, b) { return a.ym < b.ym ? -1 : 1; }).forEach(function (b) {
+        if (!b || !b.ym || b.ym.slice(0, 4) !== String(M.year) || b.ym >= M.ym) return;
+        if (P.summer_months.indexOf(+b.ym.slice(5, 7)) < 0) return;
+        var bm = E.monthInfo(b.ym, []);
+        for (var k = 0; k < bm.days; k++) seq.push({ date: bm.dates[k], L: (b.letters || [])[k] || '', cur: false, day: k + 1 });
+      });
+      for (var j = 0; j < M.days; j++) seq.push({ date: M.dates[j], L: L[j] || '', cur: true, day: j + 1 });
+      // 1) Общо за лятото: дните на текущия месец след позволения брой.
+      var n = 0, over = [];
+      seq.forEach(function (x) { if (x.L === 'О') { n++; if (x.cur && n > P.max_total) over.push(x); } });
+      if (over.length) {
+        out.push({ type: 'leave_total', day: over[0].day, days: over.map(function (x) { return x.day; }),
+          text: 'О общо за лятото: ' + n + ' дни (позволени ' + P.max_total + ') — над лимита: ' + fmtDays(over.map(function (x) { return x.date; })) });
+      }
+      // 2) Поредни: серия О, прекъсната само от работна смяна.
+      var run = [];
+      var flush = function () {
+        if (run.length > P.max_consecutive && run.some(function (x) { return x.cur; })) {
+          var cd = run.filter(function (x) { return x.cur; });
+          out.push({ type: 'leave_series', day: cd[0].day, days: cd.map(function (x) { return x.day; }),
+            text: run.length + ' поредни дни О (' + ddmm(run[0].date) + '–' + ddmm(run[run.length - 1].date) + ') — позволени ' + P.max_consecutive });
+        }
+        run = [];
+      };
+      seq.forEach(function (x) { if (x.L === 'О') run.push(x); else if (isWorkCell(x.L)) flush(); });
+      flush();
+    }
+    // 3) Първите N месеца от „Назначен на“ — само предупреждение (ВТР чл. 22: след 4 месеца стаж).
+    if (staff && staff.hired_on && P.probation_months > 0) {
+      var until = E.addMonths(String(staff.hired_on).slice(0, 10), P.probation_months);
+      var early = curO.filter(function (d) { return M.dates[d - 1] < until; });
+      if (early.length) {
+        out.push({ type: 'leave_probation', day: early[0], days: early,
+          text: 'О в първите ' + P.probation_months + ' месеца от назначаването (до ' + ddmm(addDays(until, -1)) + '): ' + fmtDays(early.map(function (d) { return M.dates[d - 1]; })) });
+      }
+    }
+    return out.sort(function (a, b) { return a.day - b.day; });
+  };
+
   E.inMonth = function (M, staff) {
     return !(staff.left_on && staff.left_on < M.start) && !(staff.hired_on && staff.hired_on > M.end);
   };

@@ -507,5 +507,51 @@ var onlySun = new Array(30).fill(''); [1, 8, 15, 22, 29].forEach(function (d) { 
 var hs = E.normHint(P11, M11, HS, onlySun, {});
 check('подсказка с „добави“ никога не слага ЛД в неделя', !hs || hs.kind !== 'add' || hs.letter !== 'ЛД' || hs.days.every(function (d) { return M11.dow[d - 1] !== 7; }));
 
+// ── Етап В (24.11.2026): отпуските по фирмената политика ────────────────────
+console.log('\n=== В. Отпуски: лято (поредни / общо), първите 6 месеца ===');
+var LP = E.leavePolicy(null);
+check('В: настройката по подразбиране — май–август, 5 поредни, 7 общо, 6 месеца', JSON.stringify(LP) === JSON.stringify({ summer_months: [5, 6, 7, 8], max_consecutive: 5, max_total: 7, probation_months: 6 }), JSON.stringify(LP));
+check('В: настройката от app_settings бие подразбирането; боклук → подразбирането',
+  JSON.stringify(E.leavePolicy({ summer_months: [6, 7], max_consecutive: 3, max_total: 10, probation_months: 4 })) === JSON.stringify({ summer_months: [6, 7], max_consecutive: 3, max_total: 10, probation_months: 4 }) &&
+  JSON.stringify(E.leavePolicy({ summer_months: [], max_consecutive: 'x', max_total: -1, probation_months: 2.5 })) === JSON.stringify(LP) &&
+  JSON.stringify(E.leavePolicy({ max_total: 0 })) === JSON.stringify({ summer_months: [5, 6, 7, 8], max_consecutive: 5, max_total: 0, probation_months: 6 }));
+check('В: addMonths — 31.08 + 6 → 28.02 / 29.02 (високосна), 15.05 + 6 → 15.11', E.addMonths('2026-08-31', 6) === '2027-02-28' && E.addMonths('2027-08-31', 6) === '2028-02-29' && E.addMonths('2026-05-15', 6) === '2026-11-15' && E.addMonths('2026-11-30', 3) === '2027-02-28');
+var MJ = E.monthInfo('2026-06', []), MN = E.monthInfo('2026-11', []);   // юни 2026: 1.06 е понеделник
+var Lw = function (days, map) { var a = new Array(days).fill(''); Object.keys(map).forEach(function (d) { a[+d - 1] = map[d]; }); return a; };
+var lv = function (M, L, before, staff, pol) { return E.leaveWarnings(pol || LP, M, staff || {}, L, before || []); };
+// Като истински график: в делниците без О — П (работна смяна), иначе празните дни не прекъсват серията.
+var Lp = function (ym, map) { var mi = E.monthInfo(ym, []), a = mi.dow.map(function (w) { return w <= 5 ? 'П' : ''; }); Object.keys(map).forEach(function (d) { a[+d - 1] = map[d]; }); return a; };
+var ty = function (ws) { return ws.map(function (w) { return w.type; }).join(); };
+check('В: (предпоставка) 1.06.2026 е понеделник, 6–7.06 — събота / неделя', MJ.dow[0] === 1 && MJ.dow[5] === 6 && MJ.dow[6] === 7);
+check('В: юни, 5 поредни О (пон–пет) — точно на лимита, без предупреждение', lv(MJ, Lw(30, { 1: 'О', 2: 'О', 3: 'О', 4: 'О', 5: 'О' })).length === 0);
+var w6 = lv(MJ, Lw(30, { 1: 'О', 2: 'О', 3: 'О', 4: 'О', 5: 'О', 6: 'О' }));
+check('В: 6 поредни О → leave_series „6 поредни дни О (01.06–06.06) — позволени 5“, дните 1–6', ty(w6) === 'leave_series' && w6[0].text === '6 поредни дни О (01.06–06.06) — позволени 5' && w6[0].days.join() === '1,2,3,4,5,6' && w6[0].day === 1, JSON.stringify(w6));
+var wWe = lv(MJ, Lw(30, { 1: 'О', 2: 'О', 3: 'О', 4: 'О', 5: 'О', 8: 'О' }));
+check('В: почивните дни между О НЕ прекъсват (пон–пет + следващия пон = 6)', ty(wWe) === 'leave_series' && /^6 поредни дни О \(01\.06–08\.06\)/.test(wWe[0].text), JSON.stringify(wWe));
+check('В: работна смяна прекъсва (О×3, П, О×3)', lv(MJ, Lw(30, { 1: 'О', 2: 'О', 3: 'О', 4: 'П', 5: 'О', 8: 'О', 9: 'О' })).length === 0);
+check('В: свободни часове прекъсват (О×3, „6“, О×3)', lv(MJ, Lw(30, { 1: 'О', 2: 'О', 3: 'О', 4: '6', 5: 'О', 8: 'О', 9: 'О' })).length === 0);
+check('В: Б не прекъсва и не се брои (О О Б О О О О → 6 О)', /^6 поредни дни О/.test((lv(MJ, Lw(30, { 1: 'О', 2: 'О', 3: 'Б', 4: 'О', 5: 'О', 8: 'О', 9: 'О' }))[0] || {}).text || ''));
+var May = Lw(31, { 28: 'О', 29: 'О', 30: 'О', 31: 'О' });
+var wX = lv(MJ, Lw(30, { 1: 'О', 2: 'О' }), [{ ym: '2026-05', letters: May }]);
+check('В: серия през границата 28.05–02.06 (4 + 2) → 6; оцветяват се само дните на юни', ty(wX) === 'leave_series' && /^6 поредни дни О \(28\.05–02\.06\)/.test(wX[0].text) && wX[0].days.join() === '1,2', JSON.stringify(wX));
+check('В: серия само в май (6 О) не се показва в юни', lv(MJ, Lw(30, { 15: 'О' }), [{ ym: '2026-05', letters: Lp('2026-05', { 4: 'О', 5: 'О', 6: 'О', 7: 'О', 8: 'О', 11: 'О' }) }]).filter(function (w) { return w.type === 'leave_series'; }).length === 0);
+// Общо за лятото: 5 в май (на отделни дни) + 2 в юни = 7 — на лимита; трети в юни → 8.
+var May5 = Lp('2026-05', { 4: 'О', 11: 'О', 18: 'О', 25: 'О', 27: 'О' });
+check('В: общо 7 (5 в май + 2 в юни) — на лимита, без предупреждение', lv(MJ, Lp('2026-06', { 10: 'О', 17: 'О' }), [{ ym: '2026-05', letters: May5 }]).length === 0);
+var wT = lv(MJ, Lp('2026-06', { 10: 'О', 17: 'О', 24: 'О' }), [{ ym: '2026-05', letters: May5 }]);
+check('В: общо 8 → leave_total, „над лимита: 24.06“, оцветен само 24-ти', ty(wT) === 'leave_total' && wT[0].text === 'О общо за лятото: 8 дни (позволени 7) — над лимита: 24.06' && wT[0].days.join() === '24', JSON.stringify(wT));
+check('В: О в събота / неделя също се брои (всяко О = 1 ден)', lv(MJ, Lw(30, { 6: 'О', 7: 'О', 13: 'О' }), [{ ym: '2026-05', letters: May5 }]).some(function (w) { return w.type === 'leave_total' && w.days.join() === '13'; }));
+check('В: месеци от друга година, извън лятото и от бъдещето — не се броят',
+  lv(MJ, Lw(30, { 10: 'О', 17: 'О', 24: 'О' }), [{ ym: '2025-05', letters: May5 }, { ym: '2026-04', letters: Lw(30, { 1: 'О', 2: 'О', 3: 'О', 6: 'О', 7: 'О' }) }, { ym: '2026-07', letters: Lw(31, { 1: 'О', 2: 'О', 3: 'О', 6: 'О', 7: 'О' }) }]).length === 0);
+check('В: ноември — правилата за лятото не важат (10 поредни О — нищо)', lv(MN, Lw(30, { 2: 'О', 3: 'О', 4: 'О', 5: 'О', 6: 'О', 9: 'О', 10: 'О', 11: 'О', 12: 'О', 13: 'О' })).length === 0);
+// Първите 6 месеца: назначен 15.05.2026 → до 14.11 включително.
+var wP = lv(MN, Lw(30, { 13: 'О', 14: 'О', 16: 'О' }), [], { hired_on: '2026-05-15' });
+check('В: първите 6 месеца (назначен 15.05) — О на 13 и 14.11 да, 16.11 не; текстът „до 14.11“', ty(wP) === 'leave_probation' && wP[0].days.join() === '13,14' && wP[0].text === 'О в първите 6 месеца от назначаването (до 14.11): 13.11, 14.11', JSON.stringify(wP));
+check('В: назначен преди повече от 6 месеца / без дата — нищо', lv(MN, Lw(30, { 13: 'О' }), [], { hired_on: '2026-05-13' }).length === 0 && lv(MN, Lw(30, { 13: 'О' }), [], {}).length === 0);
+var wAll = lv(MJ, Lw(30, { 1: 'О', 2: 'О', 3: 'О', 4: 'О', 5: 'О', 8: 'О' }), [{ ym: '2026-05', letters: Lw(31, { 4: 'О', 11: 'О' }) }], { hired_on: '2026-03-01' });
+check('В: трите наведнъж — подредени по ден (поредни, общо, първите 6 месеца)', ty(wAll).split(',').sort().join() === 'leave_probation,leave_series,leave_total' && wAll.every(function (w, i) { return !i || wAll[i - 1].day <= w.day; }), ty(wAll));
+check('В: настройка с 3 поредни → 4 О е над лимита', ty(lv(MJ, Lw(30, { 1: 'О', 2: 'О', 3: 'О', 4: 'О' }), [], {}, E.leavePolicy({ max_consecutive: 3 }))) === 'leave_series');
+check('В: без нито едно О в месеца — нищо (и без да чете предишните)', lv(MJ, Lw(30, { 1: 'П' }), [{ ym: '2026-05', letters: Lw(31, { 1: 'О', 4: 'О', 5: 'О', 6: 'О', 7: 'О', 8: 'О', 11: 'О', 12: 'О' }) }]).length === 0);
+
 console.log('\n' + ok + ' успешни, ' + fail + ' неуспешни');
 process.exit(fail ? 1 : 0);

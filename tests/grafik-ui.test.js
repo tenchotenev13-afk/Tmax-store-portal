@@ -2035,5 +2035,66 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('управител: отметките се виждат, но са заключени, без onchange; извикване на ръка — без заявка', !!mcb && mcb.disabled && !mcb.getAttribute('onchange') && S.calls.filter(c => c.action === 'sector_update').length === before);
   }
 
+  section('25. Етап В — отпуските по фирмената политика (24.11.2026): „Отпуски“, червено О, не спира „Подай“');
+  {
+    // Юни 2026 (1.06 — понеделник). В делниците без О — П (работна смяна).
+    const wk = (ym, map) => { const mi = W0.GrafikEngine.monthInfo(ym, []); const a = mi.dow.map(w => (w <= 5 ? 'П' : '')); Object.keys(map).forEach(d => { a[+d - 1] = map[d]; }); return a; };
+    const W0 = env(MGR).w;   // само за monthInfo
+    const mk = (extra) => {
+      const S = makeServer();
+      S.months['Кърджали|2026-05-01'] = { id: 'm-may', store_name: 'Кърджали', month: '2026-05-01', status: 'submitted' };
+      S.months['Кърджали|2026-06-01'] = { id: 'm-jun', store_name: 'Кърджали', month: '2026-06-01', status: 'draft' };
+      // Иван: 28–29.05 (чт–пт) + 1–4.06 → 6 поредни. Мария: 5 О в май + 10, 17, 24.06 → 8 общо. Петя (назначена 01.03): О на 15.06 — първите 6 месеца.
+      S.rows.push({ month_id: 'm-may', staff_id: 'st-1', letters: wk('2026-05', { 28: 'О', 29: 'О' }), locked: {} },
+        { month_id: 'm-may', staff_id: 'st-2', letters: wk('2026-05', { 4: 'О', 11: 'О', 18: 'О', 25: 'О', 27: 'О' }), locked: {} },
+        { month_id: 'm-jun', staff_id: 'st-1', letters: wk('2026-06', { 1: 'О', 2: 'О', 3: 'О', 4: 'О' }), locked: {} },
+        { month_id: 'm-jun', staff_id: 'st-2', letters: wk('2026-06', { 10: 'О', 17: 'О', 24: 'О' }), locked: {} },
+        { month_id: 'm-jun', staff_id: 'st-3', letters: wk('2026-06', { 15: 'О' }), locked: {} });
+      S.staff.filter(s => s.id === 'st-3')[0].hired_on = '2026-03-01';
+      (extra || (() => {}))(S);
+      return S;
+    };
+    const open = async (S, settings) => {
+      const x = env(MGR, { server: S });
+      x.setData('app_settings', settings === undefined ? [] : settings);
+      x.w.grMonth = '2026-06'; await load(x); await ticks(4);
+      return x;
+    };
+    const S = mk(); const x = await open(S); const d = x.doc, W = x.w;
+    const lm = S.calls.filter(c => c.action === 'load_month').map(c => c.month);
+    ok('В: за юни се тегли май (летен, по-ранен), не април / юли', lm.indexOf('2026-05') >= 0 && lm.indexOf('2026-04') < 0 && lm.indexOf('2026-07') < 0, lm.join());
+    const lr = Array.from(d.querySelectorAll('#gr-warn-tbl tr.gr-warn[data-cat="leave"]'));
+    const by = t => lr.filter(tr => tr.classList.contains('gr-warn-' + t));
+    ok('В: категория „Отпуски“ — заглавие и три реда (поредни, общо, първите 6 месеца)', !!d.querySelector('#gr-warn-tbl tr.gr-wcat[data-cat="leave"]') && /^Отпуски \(3\)/.test(d.querySelector('#gr-warn-tbl tr.gr-wcat[data-cat="leave"]').textContent) &&
+      by('leave_series').length === 1 && by('leave_total').length === 1 && by('leave_probation').length === 1, lr.map(tr => tr.className).join(' | '));
+    ok('В: Иван — „6 поредни дни О (28.05–04.06) — позволени 5“', wName(by('leave_series')[0]) === 'ИВАН' && by('leave_series')[0].querySelector('.gr-w-what').textContent === '6 поредни дни О (28.05–04.06) — позволени 5' &&
+      /до 5 поредни дни О/.test(by('leave_series')[0].querySelector('.gr-w-todo').textContent));
+    ok('В: Мария — „О общо за лятото: 8 дни (позволени 7) — над лимита: 24.06“', wName(by('leave_total')[0]) === 'МАРИЯ' && by('leave_total')[0].querySelector('.gr-w-what').textContent === 'О общо за лятото: 8 дни (позволени 7) — над лимита: 24.06');
+    ok('В: Петя — първите 6 месеца, „само предупреждение … ВТР чл. 22“', wName(by('leave_probation')[0]) === 'ПЕТЯ' && /до 31\.08/.test(by('leave_probation')[0].querySelector('.gr-w-what').textContent) && /ВТР чл\. 22/.test(by('leave_probation')[0].querySelector('.gr-w-todo').textContent),
+      by('leave_probation')[0] && by('leave_probation')[0].textContent);
+    ok('В: нито един ред „Отпуски“ не е с 🚫; „Подай“ не ги брои', lr.every(tr => !tr.hasAttribute('data-block') && !/🚫/.test(tr.textContent)) && W.grSubmitIssues().length > 0 && !W.grSubmitIssues().some(t => /поредни дни О|общо за лятото|първите \d+ месеца/.test(t)));
+    const bgOf = (id, dd) => ((d.getElementById('gr-row-' + id).querySelectorAll('td.gr-c')[dd - 1].getAttribute('style') || '').match(/background:(#[0-9A-Fa-f]{6})/) || [])[1] || '';
+    ok('В: червено О — Иван 1–4.06, Мария 24.06, Петя 15.06; Мария 10.06 — обичайното О', ['st-1|1', 'st-1|4', 'st-2|24', 'st-3|15'].every(k => bgOf(k.split('|')[0], +k.split('|')[1]).toUpperCase() === '#FF8080') && bgOf('st-2', 10).toUpperCase() === '#FFF2CC',
+      ['st-1|1', 'st-2|24', 'st-3|15', 'st-2|10'].map(k => bgOf(k.split('|')[0], +k.split('|')[1])).join());
+    ok('В: подсказката на клетката носи текста', /6 поредни дни О/.test(d.getElementById('gr-row-st-1').querySelectorAll('td.gr-c')[0].getAttribute('title')));
+    const iv = W.grCalc.rows.filter(z => z.staff.id === 'st-1')[0];
+    ok('В: снимката при „Подай“ не се мени — warnings е само от двигателя, без отпуските', iv.leave.length === 1 && W.grSnapshot().rows.filter(r => r.staff_id === 'st-1')[0].warnings === iv.warnings.length && !iv.warnings.some(w => /^leave_/.test(w.type)));
+    // Работен ден по средата на серията → предупреждението изчезва (бързо обновяване).
+    const ri = Array.from(d.querySelectorAll('#gr-grid tbody tr[id^="gr-row-"]')).map(tr => tr.id).indexOf('gr-row-st-1');
+    W.grSelect(ri, 1); typeIn(x, 'П'); key(x, 'Enter');
+    ok('В: П на 2.06 за Иван → без „поредни“, 1.06 вече не е червено', !d.querySelector('#gr-warn-tbl tr.gr-warn-leave_series') && bgOf('st-1', 1).toUpperCase() !== '#FF8080');
+    // Настройката от app_settings бие числата в кода.
+    const y = await open(mk(), [{ value: JSON.stringify({ max_consecutive: 7, max_total: 9 }) }]);
+    ok('В: app_settings {max_consecutive: 7, max_total: 9} → нито „поредни“, нито „общо“; първите 6 месеца остават',
+      !y.doc.querySelector('#gr-warn-tbl tr.gr-warn-leave_series') && !y.doc.querySelector('#gr-warn-tbl tr.gr-warn-leave_total') && !!y.doc.querySelector('#gr-warn-tbl tr.gr-warn-leave_probation'));
+    const z = await open(mk(), [{ value: 'не е JSON' }]);
+    ok('В: повредена настройка → числата от кода (пак „поредни“ и „общо“)', !!z.doc.querySelector('#gr-warn-tbl tr.gr-warn-leave_series') && !!z.doc.querySelector('#gr-warn-tbl tr.gr-warn-leave_total'));
+    // Май (първият летен) — нищо за теглене назад; ноември — извън лятото, нищо.
+    const Sm = mk(); const xm = env(MGR, { server: Sm }); xm.setData('app_settings', []); xm.w.grMonth = '2026-05'; await load(xm); await ticks(4);
+    ok('В: май — без допълнителни load_month (няма по-ранен летен месец)', Sm.calls.filter(c => c.action === 'load_month').map(c => c.month).every(m => m === '2026-05' || m === '2026-04'));
+    const Sn = mk(); const xn = env(MGR, { server: Sn }); xn.setData('app_settings', []); await load(xn); await ticks(4);
+    ok('В: ноември — без допълнителни load_month за лятото', Sn.calls.filter(c => c.action === 'load_month').every(c => c.month === '2026-11' || c.month === '2026-10'));
+  }
+
   report();
 })();

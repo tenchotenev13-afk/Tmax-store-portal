@@ -33,6 +33,7 @@ var grData = null;          // load_month
 var grRows = {};            // staff_id → {letters:[], locked:{}}
 var grCalc = null;          // GrafikEngine.computeMonth(...)
 var grPrev = null;          // предходният месец {setup, ym, rows} — за седмицата през границата (или null)
+var grLeave = { policy: null, before: {} };   // етап В: настройката и летните месеци преди отворения {staff_id: [{ym, letters}]}
 var grSel = { r: 0, d: 0 }; // избрана клетка (ред в grVisible, ден 0..days-1)
 var grEdit = '';            // буфер при въвеждане
 var grAnc = null;           // котвата на избора (Shift+клик / Shift+стрелки); null = само избраната клетка
@@ -235,7 +236,7 @@ function grLoadMonth(seq){
     (grData.rows || []).forEach(function(r){ grRows[r.staff_id] = { letters: (r.letters || []).slice(), locked: r.locked || {} }; });
     grDirty = {}; grSaveState = ''; grSaved = {};
     (grData.rows || []).forEach(function(r){ grSaved[r.staff_id] = 1; });
-    return grLoadPrev(seq, res.data).then(function(){ return grChLoad(); }).then(function(){
+    return Promise.all([grLoadPrev(seq, res.data), grLoadLeave(seq)]).then(function(){ return grChLoad(); }).then(function(){
       if(seq !== grLoadSeq) return;
       grRecalc();
       grRender();
@@ -360,6 +361,31 @@ function grLoadPrev(seq, cur){
   });
 }
 
+/* Етап В (24.11.2026): настройката (app_settings.grafik_leave_policy — JSON; липсва → числата от
+   двигателя) и летните месеци ОТ ТАЗИ ГОДИНА ПРЕДИ отворения (load_month за всеки — ТРЗ получават
+   подаденото, останалите — черновата; няма го → просто не се брои). Извън лятото — нищо не се тегли. */
+function grLoadLeave(seq){
+  var store = grStore, ym = grMonth;
+  var polP = typeof sbGet === 'function'
+    ? sbGet('app_settings', 'key=eq.grafik_leave_policy&select=value&limit=1', true).then(function(rows){
+        var v = rows && rows[0] && rows[0].value; try { return v ? JSON.parse(v) : null; } catch(e){ return null; }
+      }, function(){ return null; })
+    : Promise.resolve(null);
+  return polP.then(function(raw){
+    var pol = GrafikEngine.leavePolicy(raw), m = +ym.slice(5, 7);
+    var months = pol.summer_months.indexOf(m) < 0 ? [] : pol.summer_months.filter(function(x){ return x < m; })
+      .sort(function(a, b){ return a - b; }).map(function(x){ return ym.slice(0, 4) + '-' + grPad(x); });
+    return Promise.all(months.map(function(pym){
+      return grApi('load_month', { store: store, month: pym }).then(function(res){ return { ym: pym, rows: res.ok && res.data ? res.data.rows || [] : [] }; });
+    })).then(function(list){
+      if(seq !== grLoadSeq) return;
+      var before = {};
+      list.forEach(function(x){ x.rows.forEach(function(r){ (before[r.staff_id] = before[r.staff_id] || []).push({ ym: x.ym, letters: r.letters || [] }); }); });
+      grLeave = { policy: pol, before: before };
+    });
+  });
+}
+
 /* ─── Изчисляване ──────────────────────────────────────── */
 function grRecalc(){
   if(!grData){ grCalc = null; grVisible = []; return; }
@@ -371,6 +397,13 @@ function grRecalc(){
     return { staff: s, letters: r.letters, locked: r.locked };
   });
   grCalc = GrafikEngine.computeMonth(grData.setup || {}, grMonth, input, grPrev);
+  /* Етап В: отпуските по фирмената политика — отделно от x.warnings, за да не пипа снимката при
+     „Подай“, присъствената и Excel. Само предупреждение, не спира „Подай“. */
+  var pol = grLeave.policy || GrafikEngine.leavePolicy(null);
+  grCalc.rows.forEach(function(x){
+    var r = grRows[x.staff.id] || { letters: [] };
+    x.leave = GrafikEngine.leaveWarnings(pol, grCalc.month, x.staff, r.letters || [], grLeave.before[x.staff.id] || []);
+  });
   /* Групите по сектор са САМО на екрана: grCalc.rows остава по sort_order, затова снимката при
      „Подай“, Excel за ТРЗ и печатът не се променят. grVisible / grSel.r са по реда на екрана. */
   grOrder = grViewOrder();
@@ -713,6 +746,9 @@ function grRowHtml(ci, r, ctx){
   x.changed.forEach(function(c){ changed[c.day] = c; });
   var warnDays = {}, sunLd = {};
   x.warnings.forEach(function(w){ (warnDays[w.day] = warnDays[w.day] || []).push(w.text); if(w.type === 'sunday_ld') sunLd[w.day] = 1; });
+  /* Етап В: О извън фирмената политика — червено (същото като ЛД в неделя), текстът — в подсказката. */
+  var leaveBad = {};
+  (x.leave || []).forEach(function(w){ (w.days || []).forEach(function(dd){ leaveBad[dd] = 1; (warnDays[dd] = warnDays[dd] || []).push(w.text); }); });
   /* Напуска през месеца — маркиран (бланката: L5:L80, светлосиньо). */
   var leaving = s.left_on && s.left_on >= M.start && s.left_on <= M.end;
   /* А5: в изгледа по сектори — колоната на деня без човек в сектора е с червена рамка (и светлочервено, ако клетката няма свой цвят). */
@@ -728,7 +764,7 @@ function grRowHtml(ci, r, ctx){
        назначението — сиво; после празник и събота/неделя. Автоматично сменен код — жълто, най-отгоре. */
     /* Подаден месец: денят с промяна („Промени“) — оранжев, най-отгоре (бланката: присъствената). */
     var dev = chMap[s.id + '|' + (d + 1)];
-    var bg = dev ? GR_CH_FILL : ch ? '#fde68a' : sunLd[d + 1] ? GR_GRID_FILL.bad : L === 'О' ? GR_GRID_FILL.o : L === 'Б' ? GR_GRID_FILL.b :
+    var bg = dev ? GR_CH_FILL : ch ? '#fde68a' : sunLd[d + 1] || leaveBad[d + 1] ? GR_GRID_FILL.bad : L === 'О' ? GR_GRID_FILL.o : L === 'Б' ? GR_GRID_FILL.b :
       outside ? GR_GRID_FILL.outside : (hol ? '#fee2e2' : (w >= 6 ? '#f1f5f9' : ''));
     var title = M.dates[d] + (code ? ' · ' + code : '') + (dev ? ' · промяна: ' + (dev.planned_letter || 'почивка') + ' → ' + dev.actual + ' (' + dev.reason + ')' : '') + (ch ? ' · автоматично: ' + ch.from + ' → ' + ch.to : '') + (lk ? ' · заключен' : '') + (warnDays[d + 1] ? ' · ⚠ ' + warnDays[d + 1].join('; ') : '');
     var sel = (grSel.r === r && grSel.d === d);
@@ -914,6 +950,14 @@ function grWarnItems(){
       var key = w.type + ':' + w.day;
       if(seen[key]) return; seen[key] = 1;
       list.push({ cat: GR_WARN_CAT[w.type] || 'missing', t: w.type, name: name, day: dm(w.day), what: w.text, todo: GR_WARN_TODO[w.type] || '', block: w.type === 'sunday_ld' });
+    });
+    /* Етап В — отпуските по фирмената политика: само предупреждение (без 🚫). */
+    (x.leave || []).forEach(function(w){
+      var pol = grLeave.policy || GrafikEngine.leavePolicy(null);
+      list.push({ cat: 'leave', t: w.type, name: name, day: dm(w.day), what: w.text,
+        todo: w.type === 'leave_series' ? 'сложи работен ден между отпуските — до ' + pol.max_consecutive + ' поредни дни О'
+          : w.type === 'leave_total' ? 'намали отпуска през лятото — до ' + pol.max_total + ' дни О общо'
+          : 'само предупреждение — по ВТР чл. 22 отпуск се ползва след 4 месеца стаж; провери с ТРЗ' });
     });
   });
   (grCalc.notes || []).forEach(function(n){ list.push({ cat: 'missing', t: 'month', name: '—', day: '—', what: n, todo: 'нищо — само за сведение' }); });
