@@ -14,6 +14,11 @@
 
 ## Чака изпращане
 
+(в базата от миграцията revaluation_units, revaluation-units-schema.sql, версия 20261123201403, приложена 23.11.2026)
+- 23.11 · нова таблица revaluation_units — id uuid NOT NULL, default gen_random_uuid() (PK) · item_id uuid NOT NULL (→ revaluation_items.id) · submission_id uuid NOT NULL (→ revaluation_submissions.id) · store_name text NOT NULL · unit_no text NOT NULL, уникален · created_at timestamptz NOT NULL, default now()
+- 23.11 · нова таблица revaluation_unit_counters — store_name text NOT NULL (PK) · last_num integer NOT NULL, default 0
+- 23.11 · revaluation_items.photos — text[], NULL, без default
+
 (изтриване на данни, без схемна промяна — огледалото прави UPSERT и не трие)
 - 23.11 · kasa_reports — РЪЧНО ИЗТРИВАНЕ на ред id e6cc5cfd-f9d0-47bc-a1c5-7d0b3e41bb8a (дублиран отчет Шумен 20.11.2026, каса 2; изтрит в основната база на 23.11.2026, остава eebfd0b1-f6fd-44b1-855a-caea59fb0cdf)
 

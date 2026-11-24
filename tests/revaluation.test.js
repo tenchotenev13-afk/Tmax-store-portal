@@ -112,6 +112,11 @@ function env(o) {
     if (m !== 'POST' || !/revaluation_/.test(url)) return p;
     return p.then(r => {
       if (!r.ok) return r;
+      /* Номерата на бройките (етап 2, 23.11.2026): масив редове, unit_no от „тригера". */
+      if (/revaluation_units/.test(url)) {
+        const rows = [].concat(JSON.parse(init.body)).map(b => Object.assign({ id: 'u-' + (++idSeq), unit_no: b.store_name + '-П' + idSeq }, b));
+        return { ok: true, status: 201, json: () => Promise.resolve(rows), text: () => Promise.resolve(JSON.stringify(rows)) };
+      }
       /* подразбиращите се от базата (PostgREST ги връща с return=representation) */
       const defs = /revaluation_submissions/.test(url) ? { status: 'draft', no_items: false } : {};
       const row = Object.assign({ id: 'id-' + (++idSeq) }, defs, JSON.parse(init.body));
@@ -241,10 +246,13 @@ async function imported(o) {
   section('2. Повторен импорт на същия файл → обновява, не дублира');
   {
     const h = await imported();
-    const before = h.calls.post.length;
+    /* само редовете на бланката — повишеното количество (60) дава нови номера
+       в revaluation_units, което е нарочно (етап 2, 23.11.2026) */
+    const itemPosts = () => h.calls.post.filter(x => x.table === 'revaluation_items').length;
+    const before = itemPosts();
     const file2 = zstock(1514); file2[1][6] = 60; file2[1][10] = 18.99;
     await h.w.rvImportAoa(file2); await ticks(3);
-    ok('0 нови POST-а', h.calls.post.length === before, h.calls.post.length - before);
+    ok('0 нови POST-а', itemPosts() === before, itemPosts() - before);
     ok('5 реда, не 10', h.w.rvItems.length === 5, h.w.rvItems.length);
     const p = h.calls.patch.filter(x => x.table === 'revaluation_items');
     ok('5 PATCH-а', p.length === 5);

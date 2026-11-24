@@ -88,6 +88,7 @@ const TESTS = [
   'revaluation-approve.test.js',
   'revaluation-repeat-qty.test.js',
   'revaluation-scan.test.js',
+  'revaluation-units.test.js',
   'xlsx-real-datenf.test.js',
   'revision-schedule.test.js',
   'minusi.test.js',

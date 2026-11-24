@@ -49,7 +49,10 @@ const DELETE_ALLOWED = [
   'picking_pallet_items', 'picking_pallets', 'picking_shipments',
   'product_catalog', 'recurring_task_periods', 'recurring_task_skips',
   'recurring_task_versions', 'recurring_tasks', 'report_recipients',
-  'revaluation_campaigns', 'revaluation_items', 'revision_schedule',
+  // revaluation_units — от 23.11.2026 (Преоценка етап 2): намалено qty трие
+  // най-големите номера на реда (rvUnitsSyncNow); grant delete в
+  // revaluation-units-schema.sql.
+  'revaluation_campaigns', 'revaluation_items', 'revaluation_units', 'revision_schedule',
   'stock_diff_swaps', 'stock_differences', 'stock_returns', 'storno_notes',
   'stores', 'subtask_completions', 'supply_no_need', 'task_completions',
   'task_subtasks', 'transfer_cargo', 'transfers', 'transport_orders',
@@ -134,12 +137,12 @@ ok('няма триене извън DELETE_ALLOWED', extra.length === 0,
 ok('няма запис в DELETE_ALLOWED без код', unused.length === 0,
    '\n      ' + unused.map(t => t + ' → махни от DELETE_ALLOWED (и revoke delete в нова миграция)').join('\n      '));
 ok('DELETE_ALLOWED без повторения', new Set(DELETE_ALLOWED).size === DELETE_ALLOWED.length);
-/* 45 от anon-revoke-delete-schema.sql + loading_lists (18.11.2026). */
-ok('46 таблици (45 от anon-revoke-delete-schema.sql + loading_lists)', DELETE_ALLOWED.length === 46, 'реално: ' + DELETE_ALLOWED.length);
+/* 45 от anon-revoke-delete-schema.sql + loading_lists (18.11.2026) + revaluation_units (23.11.2026, нова таблица). */
+ok('47 таблици (45 от anon-revoke-delete-schema.sql + loading_lists + revaluation_units)', DELETE_ALLOWED.length === 47, 'реално: ' + DELETE_ALLOWED.length);
 
 /* Таблици, отнети на 02.11 и върнати по-късно с ОТДЕЛНА миграция. Всяка трябва
    да има grant delete в посочения schema файл — иначе записът тук е лъжа. */
-const REGRANTED = { loading_lists: 'loading-list-delete-draft-schema.sql' };
+const REGRANTED = { loading_lists: 'loading-list-delete-draft-schema.sql', revaluation_units: 'revaluation-units-schema.sql' };
 section('Върнатите по-късно — grant в своята миграция');
 Object.keys(REGRANTED).forEach(t => {
   const f = path.join(ROOT, REGRANTED[t]);

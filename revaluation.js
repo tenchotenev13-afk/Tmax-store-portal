@@ -242,6 +242,7 @@ function loadRevaluation(){
 function rvLoadSheet(){
   var seq = ++rvLoadSeq;
   rvBad = {}; rvErr = {}; rvImportFails = [];
+  rvUnits = {}; rvUnitErr = {}; rvUnitsOk = true;
   var c = rvCampaign();
   if(!c || !rvStore){ rvSub = null; rvItems = []; rvRender(); return Promise.resolve(); }
   return sbGet('revaluation_submissions', 'campaign_id=eq.' + c.id + '&store_name=eq.' + encodeURIComponent(rvStore) + '&select=*')
@@ -249,8 +250,15 @@ function rvLoadSheet(){
       if(seq !== rvLoadSeq) return;
       rvSub = (subs && subs[0]) || null;
       if(!rvSub){ rvItems = []; return; }
-      return sbGet('revaluation_items', 'submission_id=eq.' + rvSub.id + '&select=*&order=sort_order.asc,created_at.asc')
-        .then(function(items){ if(seq === rvLoadSeq) rvItems = Array.isArray(items) ? items : []; });
+      return Promise.all([
+        sbGet('revaluation_items', 'submission_id=eq.' + rvSub.id + '&select=*&order=sort_order.asc,created_at.asc'),
+        sbGetOk('revaluation_units', 'submission_id=eq.' + rvSub.id + '&select=id,item_id,unit_no&order=created_at.asc,unit_no.asc')
+      ]).then(function(r){
+        if(seq !== rvLoadSeq) return;
+        rvItems = Array.isArray(r[0]) ? r[0] : [];
+        rvUnitsOk = !!r[1].ok;
+        if(r[1].ok) rvUnitsSet(r[1].rows);
+      });
     }).then(function(){
       /* Баджът „в SAP" гледа и product_catalog — само кодовете на бланката (30.10.2026). */
       if(seq === rvLoadSeq && rvIsCoViewer() && rvItems.length) return rvLoadCat(rvItems.map(function(it){ return it.new_sap_code; }));
@@ -354,6 +362,10 @@ function rvRender(){
   if(rvImportFails.length){
     h += '<div id="rv-import-fails" style="font-size:12px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-bottom:8px;">⚠ Не са записани: ' + esc(rvImportFails.join(', ')) + '</div>';
   }
+  if(rvSub && !rvUnitsOk){
+    h += '<div id="rv-units-load-fail" style="font-size:12px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-bottom:8px;">⚠ Номерата на бройките не се заредиха — презареди таба.</div>';
+  }
+  if(rvCanPhoto()) h += '<input id="rv-photo-file" type="file" accept="image/*" multiple style="display:none;" onchange="rvPhotoUpload(this)">';
 
   h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">';
   if(edit){
@@ -394,8 +406,9 @@ function rvRowHtml(it, edit, pink, coEdit){
   var h = '<tr id="rv-row-' + escAttr(it.id) + '" style="' + bg + '">';
   h += '<td style="font-family:DM Mono,monospace;">' + esc(it.sap_code) + badge +
     (bad ? '<div class="rv-bad" style="font-size:10px;color:#b91c1c;">' + esc(bad.join(' · ')) + '</div>' : '') +
-    (err ? '<div class="rv-err" style="font-size:10px;color:#b91c1c;">⚠ ' + esc(err) + '</div>' : '') + '</td>';
-  h += '<td>' + esc(it.product_name) + '</td>';
+    (err ? '<div class="rv-err" style="font-size:10px;color:#b91c1c;">⚠ ' + esc(err) + '</div>' : '') +
+    rvUnitsHtml(it) + '</td>';
+  h += '<td>' + esc(it.product_name) + rvPhotosHtml(it) + '</td>';
   /* В екрана на ЦО МЕ се показва както ще излезе в износа (по SAP); ако не
      може да се сведе — жълт маркер. */
   var unitCell = esc(it.unit);
@@ -415,7 +428,8 @@ function rvRowHtml(it, edit, pink, coEdit){
       '<td>' + esc(rvFmt(it.std_price)) + '</td><td>' + esc(it.discount_pct == null ? '' : rvFmtQty(it.discount_pct)) + '</td><td>' + esc(rvFmt(it.proposed_price)) + '</td>';
   }
   if(pink) h += rvPinkCells(it, coEdit);
-  if(edit) h += '<td><button class="btn-sm" data-id="' + escAttr(it.id) + '" onclick="rvDeleteRow(this.dataset.id)" title="Изтрий ред">🗑 Изтрий ред</button></td>';
+  if(edit) h += '<td>' + (rvCanPhoto() ? '<button class="btn-sm rv-photo-btn" data-id="' + escAttr(it.id) + '" onclick="rvPhotoPick(this.dataset.id)" title="Добави снимка">📷</button> ' : '') +
+    '<button class="btn-sm" data-id="' + escAttr(it.id) + '" onclick="rvDeleteRow(this.dataset.id)" title="Изтрий ред">🗑 Изтрий ред</button></td>';
   return h + '</tr>';
 }
 
@@ -499,7 +513,8 @@ function rvEdit(id, field, val){
     }
     Object.keys(p).forEach(function(k){ it[k] = p[k]; });
     delete rvErr[id]; delete rvBad[id];
-    rvRender(); return true;
+    if(field !== 'qty'){ rvRender(); return true; }
+    return rvUnitsSync(it).then(function(){ rvRender(); return true; });
   });
 }
 function rvDeleteRow(id){
@@ -512,6 +527,7 @@ function rvDeleteRow(id){
     }
     rvItems = rvItems.filter(function(x){ return x.id !== id; });
     delete rvBad[id]; delete rvErr[id];
+    delete rvUnits[id]; delete rvUnitErr[id];   /* номерата падат в базата с on delete cascade */
     rvRender(); return true;
   });
 }
@@ -537,6 +553,216 @@ function rvApplyPctAll(){
     rvRender(); return rvItems.length - fails;
   });
 }
+
+/* ─── Номера на бройките (етап 2 от 3, 23.11.2026) ─────────
+   revaluation_units (revaluation-units-schema.sql): МЕ БР (бр., бр, БР —
+   rvSapUnit) → по един номер на бройка (ceil(qty)); друга МЕ → един номер на
+   реда. Номерът '<обект>-П0042' дава тригерът в базата — клиентът праща само
+   item_id и чете номера от отговора. rvUnitsSync сверява реда с базата и
+   добавя липсващите / трие НАЙ-ГОЛЕМИТЕ излишни (номерата не се
+   преизползват, дупки са допустими). Вика се при нов ред (ръчно, скенер,
+   ZSTOCK) и при промяна на qty (rvEdit, повторен ZSTOCK) — тоест само докато
+   бланката е редактируема (rvCanEdit: чернова; регионалният — и подадена).
+   Изтрит ред → номерата падат с on delete cascade. Провал НЕ се поглъща:
+   червен toast + маркер на реда „без номер — опитай пак" (rvUnitsHtml).
+   Обработените (processed) бланки нямат номера и маркер не се показва.
+   Износът за SAP, MM41, VK11, писмото „Готово" и История НЕ носят номерата и
+   снимките — те са за етикетите в етап 3 (решение на Тенчо, 23.11.2026). */
+var rvUnits = {};      /* item_id → [{id, item_id, unit_no}], по номер */
+var rvUnitErr = {};    /* item_id → съобщение от провален rvUnitsSync */
+var rvUnitsOk = true;  /* false = номерата на бланката не се заредиха */
+var rvUnitsBusy = {};  /* item_id → обещанието на последния rvUnitsSync (един по един) */
+function rvUnitNum(u){ var m = /(\d+)$/.exec(String((u && u.unit_no) || '')); return m ? parseInt(m[1], 10) : 0; }
+function rvUnitsSort(list){ return list.slice().sort(function(a, b){ return rvUnitNum(a) - rvUnitNum(b); }); }
+function rvUnitsSet(rows){
+  rvUnits = {};
+  (rows || []).forEach(function(u){ (rvUnits[u.item_id] = rvUnits[u.item_id] || []).push(u); });
+  Object.keys(rvUnits).forEach(function(k){ rvUnits[k] = rvUnitsSort(rvUnits[k]); });
+}
+function rvUnitsWant(it){
+  if(!it) return 0;
+  if(rvSapUnit(it.unit).unit !== 'БР') return 1;
+  var q = Number(it.qty);
+  return isFinite(q) && q > 0 ? Math.ceil(q - 1e-9) : 0;
+}
+/* Номерира ли се бланката изобщо — processed е стара, преди етап 2. */
+function rvUnitsApply(){ return !!rvSub && rvSub.status !== 'processed'; }
+/* POST на няколко реда наведнъж с return=representation — sbPostReturn връща само първия. */
+function rvPostRows(t, rows){
+  var url = API + '/' + t;
+  return fetch(url, { method: 'POST', headers: Object.assign({}, H, { 'Prefer': 'return=representation' }), body: JSON.stringify(rows) })
+    .then(function(r){
+      return r.json().catch(function(){ return null; }).then(function(d){
+        if(!r.ok) return sbWriteFail('rvPostRows', url, r.status, d);
+        return { ok: true, rows: Array.isArray(d) ? d : (d ? [d] : []) };
+      });
+    }).catch(sbNetFail('rvPostRows', url));
+}
+function rvUnitsSync(it, quiet){
+  var id = it.id;
+  var p = (rvUnitsBusy[id] || Promise.resolve()).then(function(){ return rvUnitsSyncNow(it, quiet); });
+  rvUnitsBusy[id] = p;
+  return p;
+}
+/* true = редът има точно колкото трябва номера. */
+function rvUnitsSyncNow(it, quiet){
+  var id = it.id, want = rvUnitsWant(it);
+  var fail = function(msg){
+    rvUnitErr[id] = msg;
+    if(!quiet) toast('Номерата на бройките: ' + msg, '#dc2626');
+    return false;
+  };
+  return sbGetOk('revaluation_units', 'item_id=eq.' + id + '&select=id,item_id,unit_no&order=created_at.asc').then(function(res){
+    if(!res.ok) return fail('не се прочетоха — ' + res.error);
+    var have = rvUnitsSort(res.rows);
+    rvUnits[id] = have;
+    if(have.length < want){
+      var rows = [];
+      for(var i = have.length; i < want; i++) rows.push({ item_id: id, submission_id: it.submission_id, store_name: it.store_name });
+      return rvPostRows('revaluation_units', rows).then(function(r){
+        if(!r.ok) return fail('не са създадени — ' + sbErrMsg(r));
+        rvUnits[id] = rvUnitsSort(have.concat(r.rows));
+        if(rvUnits[id].length !== want) return fail('създадени ' + r.rows.length + ' от ' + rows.length);
+        delete rvUnitErr[id]; return true;
+      });
+    }
+    if(have.length > want){
+      var extra = have.slice(want);
+      return sbDelete('revaluation_units', 'id=in.(' + extra.map(function(u){ return u.id; }).join(',') + ')').then(function(r){
+        if(!r.ok || r.count === 0) return fail('излишните не са изтрити — ' + (r.ok ? '0 реда' : sbErrMsg(r)));
+        rvUnits[id] = have.slice(0, want);
+        delete rvUnitErr[id]; return true;
+      });
+    }
+    delete rvUnitErr[id]; return true;
+  });
+}
+function rvUnitsRetry(id){
+  var it = rvItem(id);
+  if(!it || !rvUnitsCanRetry()) return Promise.resolve(false);
+  return rvUnitsSync(it).then(function(ok){
+    if(ok) toast('Номерата са създадени');
+    rvRender(); return ok;
+  });
+}
+function rvUnitsCanRetry(){ return rvUnitsApply() && (rvCanEdit() || rvCoCanEdit()); }
+/* „Кърджали-П0042 … П0044, П0047" — поредиците се свиват, обектът се пише веднъж. */
+function rvUnitsLabel(list){
+  if(!list || !list.length) return '';
+  var short = function(u){ var s = String(u.unit_no), k = s.lastIndexOf('-П'); return k >= 0 ? s.slice(k + 1) : s; };
+  var parts = [], i = 0;
+  while(i < list.length){
+    var j = i;
+    while(j + 1 < list.length && rvUnitNum(list[j + 1]) === rvUnitNum(list[j]) + 1) j++;
+    var a = i === 0 ? String(list[i].unit_no) : short(list[i]);
+    parts.push(j > i ? a + ' … ' + short(list[j]) : a);
+    i = j + 1;
+  }
+  return parts.join(', ');
+}
+function rvUnitsHtml(it){
+  if(!rvUnitsApply() || !rvUnitsOk) return '';
+  var list = rvUnits[it.id] || [];
+  var h = list.length ? '<div class="rv-units" style="font-size:10px;color:#475569;white-space:normal;">№ ' + esc(rvUnitsLabel(list)) + '</div>' : '';
+  var want = rvUnitsWant(it);
+  if(list.length !== want || rvUnitErr[it.id]){
+    h += '<div class="rv-unit-miss" style="font-size:10px;color:#b91c1c;font-weight:700;">' +
+      (list.length > want ? 'излишни номера' : 'без номер') + ' — опитай пак' +
+      (rvUnitsCanRetry() ? ' <button class="btn-sm rv-unit-retry" data-id="' + escAttr(it.id) + '" onclick="rvUnitsRetry(this.dataset.id)" style="font-size:10px;padding:1px 6px;">🔁 Опитай пак</button>' : '') + '</div>';
+  }
+  return h;
+}
+
+/* ─── Снимки на реда (етап 2, 23.11.2026) ─────────────────
+   revaluation_items.photos text[] — публичните адреси. Качване — само докато
+   бланката е чернова и редактируема (rvCanPhoto); компресия през canvas
+   (diffCompressImage от stock-differences.js), bucket 'bulletin-files',
+   префикс 'revaluation/' (като Разлики — 'differences/'). Махане = само от
+   масива, файлът остава в bucket-а. Снимката е по избор — „Подай" не я иска.
+   Регионалният и ЦО виждат миниатюрите; клик → цял екран (rvPhotoView). */
+var RV_PHOTO_BKT = 'bulletin-files';
+var rvPhotoItemId = null;
+function rvCanPhoto(){ return rvCanEdit() && !!rvSub && rvSub.status === 'draft'; }
+function rvPhotoList(it){ return Array.isArray(it && it.photos) ? it.photos.filter(Boolean) : rvParseList(it && it.photos); }
+function rvPhotosHtml(it){
+  var list = rvPhotoList(it);
+  if(!list.length) return '';
+  var rm = rvCanPhoto();
+  return '<div class="rv-photos" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">' + list.map(function(url, k){
+    return '<span style="position:relative;display:inline-block;">' +
+      '<img class="rv-thumb" src="' + escAttr(url) + '" data-id="' + escAttr(it.id) + '" data-k="' + k + '" onclick="rvPhotoView(this.dataset.id,+this.dataset.k)" alt="снимка" style="width:44px;height:44px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;cursor:zoom-in;">' +
+      (rm ? '<button class="rv-photo-rm" data-id="' + escAttr(it.id) + '" data-k="' + k + '" onclick="rvPhotoRemove(this.dataset.id,+this.dataset.k)" title="Махни снимката" style="position:absolute;top:-6px;right:-6px;border:none;border-radius:50%;width:16px;height:16px;line-height:14px;font-size:10px;padding:0;background:#dc2626;color:#fff;cursor:pointer;">✕</button>' : '') +
+      '</span>';
+  }).join('') + '</div>';
+}
+function rvPhotoPick(id){
+  if(!rvCanPhoto() || !rvItem(id)) return false;
+  rvPhotoItemId = id;
+  var inp = document.getElementById('rv-photo-file');
+  if(inp) inp.click();
+  return true;
+}
+function rvPhotoPut(file){
+  var compress = typeof diffCompressImage === 'function' ? diffCompressImage(file, 1600, 0.75) : Promise.resolve(file);
+  return compress.then(function(blob){
+    var path = 'revaluation/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.jpg';
+    return fetch(SB_URL + '/storage/v1/object/' + RV_PHOTO_BKT + '/' + path, {
+      method: 'POST',
+      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'image/jpeg', 'x-upsert': 'true' },
+      body: blob
+    }).then(function(r){ return r.ok ? SB_URL + '/storage/v1/object/public/' + RV_PHOTO_BKT + '/' + path : null; },
+      function(){ return null; });
+  });
+}
+function rvPhotoUpload(input){
+  var files = Array.prototype.slice.call((input && input.files) || []);
+  var id = rvPhotoItemId;
+  if(input) input.value = '';
+  var it = rvItem(id);
+  if(!files.length || !it || !rvCanPhoto()) return Promise.resolve(0);
+  files = files.filter(function(f){ return !f.type || f.type.indexOf('image/') === 0; });
+  if(!files.length){ toast('Само снимки', '#dc2626'); return Promise.resolve(0); }
+  toast('⏳ Качване на ' + files.length + (files.length === 1 ? ' снимка' : ' снимки') + '…');
+  return Promise.all(files.map(rvPhotoPut)).then(function(urls){
+    var ok = urls.filter(Boolean), lost = urls.length - ok.length;
+    if(!ok.length){ toast('Снимките не са качени', '#dc2626'); return 0; }
+    var next = rvPhotoList(it).concat(ok);
+    return sbPatch('revaluation_items', 'id=eq.' + id, { photos: next, updated_at: new Date().toISOString() }).then(function(res){
+      if(!res.ok){ toast('Снимките са качени, но не са записани към реда: ' + sbErrMsg(res), '#dc2626'); return 0; }
+      it.photos = next;
+      if(lost) toast(lost + ' от ' + urls.length + ' снимки не са качени', '#dc2626');
+      else toast(ok.length === 1 ? 'Снимката е добавена' : 'Снимките са добавени');
+      rvRender(); return ok.length;
+    });
+  });
+}
+function rvPhotoRemove(id, k){
+  var it = rvItem(id);
+  if(!it || !rvCanPhoto()) return Promise.resolve(false);
+  var list = rvPhotoList(it);
+  if(k < 0 || k >= list.length) return Promise.resolve(false);
+  if(!confirm('Да махна снимката от реда?')) return Promise.resolve(false);
+  var next = list.slice(0, k).concat(list.slice(k + 1));
+  return sbPatch('revaluation_items', 'id=eq.' + id, { photos: next.length ? next : null, updated_at: new Date().toISOString() }).then(function(res){
+    if(!res.ok){ toast('Снимката не е махната: ' + sbErrMsg(res), '#dc2626'); return false; }
+    it.photos = next.length ? next : null;
+    rvRender(); return true;
+  });
+}
+function rvPhotoView(id, k){
+  var url = rvPhotoList(rvItem(id))[k];
+  if(!url) return false;
+  rvPhotoClose();
+  var d = document.createElement('div');
+  d.id = 'rv-photo-view';
+  d.setAttribute('onclick', 'rvPhotoClose()');
+  d.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.9);display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:12px;';
+  d.innerHTML = '<img src="' + escAttr(url) + '" alt="снимка" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;">' +
+    '<button onclick="rvPhotoClose()" style="position:absolute;top:12px;right:12px;font-size:20px;border:none;background:#fff;border-radius:50%;width:36px;height:36px;cursor:pointer;">✕</button>';
+  document.body.appendChild(d);
+  return true;
+}
+function rvPhotoClose(){ var d = document.getElementById('rv-photo-view'); if(d && d.parentNode) d.parentNode.removeChild(d); }
 
 /* ─── Ръчен ред + автодопълване ────────────────────────── */
 function rvToggleAdd(){ rvShowAdd = !rvShowAdd; rvAcRes = []; rvRender(); }
@@ -746,10 +972,12 @@ function rvAddRow(){
       /* Формата остава отворена и празна, фокусът — в полето за код:
          следващото сканиране (ръчен скенер) влиза направо. */
       rvAcRes = []; rvEanRes = [];
-      toast('Редът е добавен');
-      rvRender();
-      rvFocus('rv-a-code');
-      return true;
+      return rvUnitsSync(res.row).then(function(ok){
+        if(ok) toast('Редът е добавен');   /* иначе червеният toast от rvUnitsSync остава */
+        rvRender();
+        rvFocus('rv-a-code');
+        return true;
+      });
     });
   });
 }
@@ -832,6 +1060,10 @@ function rvImportAoa(aoa){
      количества се долепя към обобщението, вместо да е отделен toast. */
   var dupMsg = parsed.dupes ? ' · ' + parsed.dupes + (parsed.dupes === 1 ? ' код се срещаше' : ' кода се срещаха') + ' повече от веднъж — количествата са събрани' : '';
   rvImportFails = [];
+  /* Номерата на бройките (етап 2): тих режим на rvUnitsSync — един червен
+     toast накрая вместо по един на ред; маркерът стои на всеки засегнат ред. */
+  out.unitFails = 0;
+  var rvCountUnitFail = function(ok){ if(!ok) out.unitFails++; };
   return rvEnsureSub().then(function(sub){
     if(!sub){ rvRender(); return out; }
     var sort = rvNextSort();
@@ -844,18 +1076,19 @@ function rvImportAoa(aoa){
           var p = { qty: x.qty, std_price: x.std, updated_at: new Date().toISOString() };
           if(ex.discount_pct != null) p.proposed_price = rvPriceFromPct(x.std, Number(ex.discount_pct));
           return sbPatch('revaluation_items', 'id=eq.' + ex.id, p).then(function(res){
-            if(res.ok){ Object.keys(p).forEach(function(k){ ex[k] = p[k]; }); out.updated++; }
+            if(res.ok){ Object.keys(p).forEach(function(k){ ex[k] = p[k]; }); out.updated++; return rvUnitsSync(ex, true).then(rvCountUnitFail); }
             else { out.failed++; rvImportFails.push(x.code); rvErr[ex.id] = 'импортът не е записан: ' + sbErrMsg(res); }
           });
         }
         return sbPostReturn('revaluation_items', rvItemBody(sub, x.code, x.name, x.unit, x.qty, x.std, null, sort++)).then(function(res){
-          if(res.ok && res.row){ rvItems.push(res.row); out.added++; }
+          if(res.ok && res.row){ rvItems.push(res.row); out.added++; return rvUnitsSync(res.row, true).then(rvCountUnitFail); }
           else { out.failed++; rvImportFails.push(x.code); }
         });
       });
     });
     return chain.then(function(){
-      if(out.failed) toast(out.failed + ' реда не са записани — виж списъка над таблицата' + dupMsg, '#dc2626');
+      var unitMsg = out.unitFails ? ' · ' + out.unitFails + (out.unitFails === 1 ? ' ред е без номера' : ' реда са без номера') + ' — „опитай пак" на реда' : '';
+      if(out.failed || out.unitFails) toast((out.failed ? out.failed + ' реда не са записани — виж списъка над таблицата' : 'Импорт: нови ' + out.added + ', обновени ' + out.updated) + unitMsg + dupMsg, '#dc2626');
       else if(warnNoNo) toast('Обектът няма номер — заводът във файла не е проверен. Нови: ' + out.added + ', обновени: ' + out.updated + dupMsg, '#d97706');
       else if(dupMsg) toast('Импорт: нови ' + out.added + ', обновени ' + out.updated + dupMsg, '#d97706');
       else toast('Импорт: нови ' + out.added + ', обновени ' + out.updated);
@@ -1482,8 +1715,15 @@ function rvCoUnlock(){
   return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
     if(!res.ok){ toast('Бланката не е отключена: ' + sbErrMsg(res), '#dc2626'); return false; }
     Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
-    toast('Бланката е отключена');
-    rvRender(); return true;
+    /* Обработена бланка отпреди етап 2 (23.11.2026) няма номера на бройките —
+       отключена става чернова и се номерира наведнъж, вместо маркер на всеки ред. */
+    var fails = 0, chain = Promise.resolve();
+    rvItems.forEach(function(it){ chain = chain.then(function(){ return rvUnitsSync(it, true).then(function(ok){ if(!ok) fails++; }); }); });
+    return chain.then(function(){
+      if(fails) toast('Бланката е отключена · ' + fails + (fails === 1 ? ' ред е без номера' : ' реда са без номера') + ' — „опитай пак" на реда', '#dc2626');
+      else toast('Бланката е отключена');
+      rvRender(); return true;
+    });
   });
 }
 
