@@ -19,6 +19,9 @@
 - 23.11 · нова таблица revaluation_unit_counters — store_name text NOT NULL (PK) · last_num integer NOT NULL, default 0
 - 23.11 · revaluation_items.photos — text[], NULL, без default
 
+(промяна само в данни, weekly-checklist-label-razliki-schema.sql)
+- 23.11 · weekly_checklist_metrics — промяна само в данни (label на razliki_dostavka → „Разлики логистични складове"), без промяна за огледалото
+
 (изтриване на данни, без схемна промяна — огледалото прави UPSERT и не трие)
 - 23.11 · kasa_reports — РЪЧНО ИЗТРИВАНЕ на ред id e6cc5cfd-f9d0-47bc-a1c5-7d0b3e41bb8a (дублиран отчет Шумен 20.11.2026, каса 2; изтрит в основната база на 23.11.2026, остава eebfd0b1-f6fd-44b1-855a-caea59fb0cdf)
 
