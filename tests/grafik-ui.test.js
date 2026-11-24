@@ -60,6 +60,7 @@ function makeServer(opt) {
     if (u.role === 'manager') return { kind: 'manager', stores: [{ name: u.store_name, can_edit: true }] };
     return { kind: 'viewer', stores: [{ name: u.store_name, can_edit: false }] };
   };
+  S.canReturn = (M, st, mo, kept) => !!mo && !kept && (mo.status === 'submitted' || mo.status === 'approved') && (M.kind === 'trz' || M.kind === 'admin' || (mo.status === 'submitted' && M.kind === 'regional' && M.stores.some(s => s.name === st)));
   S.handle = (u, b) => {
     S.calls.push(b); S.log.push('→' + b.action);
     // Списъкът beta (grafik_access) — проверява се при ВСЯКА заявка, както в handler.ts.
@@ -74,15 +75,17 @@ function makeServer(opt) {
         // само формата на отговора; логиката е заключена в handler.test.ts.
         const m = b.month + '-01', scope = ['Кърджали', 'Шумен'];
         let list = scope.filter(st => M.kind === 'admin' || M.kind === 'trz' || M.stores.some(s => s.name === st)).map(st => {
-          const mo = S.months[key(st, m)], kept = M.kind === 'trz' && !!mo && !!mo.keep, sub = !!mo && (mo.status === 'submitted' || kept);
+          const mo = S.months[key(st, m)], kept = M.kind === 'trz' && !!mo && !!mo.keep, sub = !!mo && (mo.status === 'submitted' || mo.status === 'approved' || kept);
           return { store: st, company: '"ТЕМАКС ТЪРГОВСКИ ЦЕНТЪР ЗА ДОМА 3" ЕООД', status: mo ? (kept ? 'submitted' : mo.status) : null,
             submitted_at: mo ? (kept ? mo.keep.submitted_at : mo.submitted_at || null) : null,
             submitted_by_name: mo ? (kept ? mo.keep.submitted_by_name : mo.submitted_by_name || null) : null, reopened: mo && mo.reopened ? mo.reopened : null, rows: mo ? S.rows.filter(r => r.month_id === mo.id).length : 0,
             staff: S.staff.filter(s => s.store_name === st && !s.left_on).length, can_edit: canEdit(st),
             last_at: mo ? mo.last_at || null : null, last_by: mo ? mo.last_by || null : null, off_norm: sub ? (mo.off_norm || []) : null,
-            changes: sub ? (S.changes || []).filter(c => c.month_id === mo.id).length : null, changes_open: sub ? (S.changes || []).filter(c => c.month_id === mo.id && !c.trz_done).length : null };
+            changes: sub ? (S.changes || []).filter(c => c.month_id === mo.id).length : null, changes_open: sub ? (S.changes || []).filter(c => c.month_id === mo.id && !c.trz_done).length : null,
+            ...(S.stageB ? { can_approve: (M.kind === 'trz' || M.kind === 'admin') && !!mo && mo.status === 'submitted' && !kept, can_return: S.canReturn(M, st, mo, kept),
+              approved_by_name: mo && mo.status === 'approved' ? mo.approved_by_name : null, approved_at: mo && mo.status === 'approved' ? mo.approved_at : null } : {}) };
         });
-        if (M.kind === 'trz') list = list.filter(s => s.status === 'submitted').map(s => Object.assign(s, { staff: 0 }));
+        if (M.kind === 'trz') list = list.filter(s => s.status === 'submitted' || s.status === 'approved').map(s => Object.assign(s, { staff: 0 }));
         return { status: 200, body: { ok: true, month: m, stores: list, no_company: M.kind === 'admin' ? ['Пазарджик'] : [] } };
       }
       case 'load_month': {
@@ -90,11 +93,12 @@ function makeServer(opt) {
         const kept = M.kind === 'trz' && !!mo0 && mo0.status === 'draft' && !!mo0.keep;
         const mo = kept ? Object.assign({}, mo0, { status: 'submitted', snapshot: mo0.keep.snapshot, submitted_by_name: mo0.keep.submitted_by_name, submitted_at: mo0.keep.submitted_at }) : mo0;
         const moRows = kept ? mo0.keep.rows : (mo ? S.rows.filter(r => r.month_id === mo.id) : []);
-        if (M.kind === 'trz' && (!mo || mo.status !== 'submitted')) return { status: 404, body: { ok: false, reason: 'not_submitted', message: 'Графикът за този месец още не е подаден.' } };
+        if (M.kind === 'trz' && (!mo || (mo.status !== 'submitted' && mo.status !== 'approved'))) return { status: 404, body: { ok: false, reason: 'not_submitted', message: 'Графикът за този месец още не е подаден.' } };
         const pm = (() => { const y = +b.month.slice(0, 4), mm = +b.month.slice(5); const p = mm === 1 ? (y - 1) + '-12' : y + '-' + String(mm - 1).padStart(2, '0'); return S.months[key(b.store, p + '-01')]; })();
         return { status: 200, body: { ok: true, store: b.store, month: m, can_edit: canEdit(b.store) && (!mo || mo.status === 'draft'),
           // can_reopen — по вида достъп (ТРЗ е admin по роля, но не връща в чернова)
           can_reopen: M.kind === 'admin' && !!mo && mo.status === 'submitted', status: mo ? mo.status : 'draft', month_row: mo || null,
+          ...(S.stageB ? { can_approve: (M.kind === 'trz' || M.kind === 'admin') && !!mo && mo.status === 'submitted' && !kept, can_return: S.canReturn(M, b.store, mo, kept) } : {}),
           reopened: mo0 && mo0.reopened ? mo0.reopened : null,
           staff: S.staff.filter(s => s.store_name === b.store), rows: moRows,
           prev_rows: pm ? S.rows.filter(r => r.month_id === pm.id) : [],
@@ -128,6 +132,22 @@ function makeServer(opt) {
         mo.reopened = { at: '2026-11-06T09:30:00Z', by_name: u.display_name };
         mo.status = 'draft'; mo.snapshot = null; mo.submitted_by_name = null; mo.submitted_at = null;
         return { status: 200, body: { ok: true, status: 'draft' } };
+      }
+      case 'approve': {
+        if (!(M.kind === 'trz' || M.kind === 'admin')) return { status: 403, body: { ok: false, reason: 'forbidden', message: 'Одобряват ТРЗ и admin.' } };
+        const results = (b.stores || [b.store]).map(st => { const mo = S.months[key(st, b.month + '-01')];
+          if (!mo || mo.status !== 'submitted') return { store: st, ok: false, reason: 'not_submitted', message: 'Графикът не е подаден.' };
+          mo.status = 'approved'; mo.approved_by_name = u.display_name; mo.approved_at = '2026-11-07T08:00:00Z'; return { store: st, ok: true }; });
+        return { status: 200, body: { ok: true, results, approved: results.filter(r => r.ok).length } };
+      }
+      case 'return': {
+        const mo = S.months[key(b.store, b.month + '-01')];
+        if (!b.comment || !String(b.comment).trim()) return { status: 400, body: { ok: false, reason: 'bad_request', message: 'Напиши коментар — какво да поправи обектът.' } };
+        if (!S.canReturn(M, b.store, mo, false)) return { status: 403, body: { ok: false, reason: 'forbidden', message: 'Нямате права да връщате графика на този обект.' } };
+        mo.keep = { snapshot: mo.snapshot, submitted_by_name: mo.submitted_by_name, submitted_at: mo.submitted_at, rows: JSON.parse(JSON.stringify(S.rows.filter(r => r.month_id === mo.id))) };
+        mo.reopened = { at: '2026-11-08T09:30:00Z', by_name: u.display_name, comment: String(b.comment).trim() };
+        mo.status = 'draft'; mo.snapshot = null; mo.submitted_by_name = null; mo.submitted_at = null; mo.approved_by_name = null; mo.approved_at = null;
+        return { status: 200, body: { ok: true, status: 'draft', comment: mo.reopened.comment } };
       }
       case 'sector_save': {
         if (!canEdit(b.store) || (u.role !== 'admin' && !u.is_regional)) return { status: 403, body: { ok: false, reason: 'forbidden', message: 'Сектор добавят регионалният и admin.' } };
@@ -380,8 +400,8 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   h.w.grSelect(2, 0); typeIn(h, '9'); key(h, 'Enter');               // 1.11 (нд) — 9 свободни ч.
   realClick(h.w, btn(M, 'Подай')); await ticks(8);
   const bl2 = Array.from(h.doc.querySelectorAll('#gr-submit-issues li')).map(li => li.textContent);
-  ok('свободни часове → спира: „Петя Петрова: 9 свободни ч. на 01.11 — сложи код“',
-    bl2.indexOf('Петя Петрова: 9 свободни ч. на 01.11 — сложи код') >= 0 && !h.S.calls.some(c => c.action === 'submit'), bl2.join(' | '));
+  ok('свободни часове → спира: „Петя Петрова: 01.11 — написано е число 9, избери смяна (П, ЛД…)“',
+    bl2.indexOf('Петя Петрова: 01.11 — написано е число 9, избери смяна (П, ЛД…)') >= 0 && !h.S.calls.some(c => c.action === 'submit'), bl2.join(' | '));
   realClick(h.w, btn(h.doc.getElementById('gr-submit-modal'), 'Затвори'));
   h.w.grSelect(2, 0); key(h, 'Delete');
   await wait(1000); await ticks();
@@ -1778,9 +1798,10 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
       ok('1: „ИВАН · 03.11 · написано е число 6 · избери смяна (П, ЛД…)“ в предупрежденията', tr.length === 1 && wName(tr[0]) === 'ИВАН' &&
         tr[0].querySelector('.gr-w-day').textContent === '03.11' && tr[0].querySelector('.gr-w-what').textContent === 'написано е число 6' &&
         tr[0].querySelector('.gr-w-todo').textContent === 'избери смяна (П, ЛД…)' && tr[0].getAttribute('data-cat') === 'missing' && tr[0].getAttribute('data-block') === '1', tr.map(e => e.textContent).join(' | '));
-      // При „Подай“ текстът остава досегашният — същият като отказа на сървъра (grafik-api submitIssues); сменя се с деплоя на етап Б.
-      const iss = x.w.grSubmitIssues().filter(t => /свободни ч\./.test(t));
-      ok('1: при „Подай“ — досегашният текст (като сървъра)', iss.length === 1 && iss[0] === 'Иван Иванов Иванов: 6 свободни ч. на 03.11 — сложи код', JSON.stringify(iss));
+      // При „Подай“ — същият прост текст, дословно като отказа на сървъра (grafik-api submitIssues, етап Б 24.11.2026).
+      const iss = x.w.grSubmitIssues().filter(t => /написано е число/.test(t));
+      ok('1: при „Подай“ — „Иван Иванов Иванов: 03.11 — написано е число 6, избери смяна (П, ЛД…)“ (като сървъра)', iss.length === 1 && iss[0] === 'Иван Иванов Иванов: 03.11 — написано е число 6, избери смяна (П, ЛД…)', JSON.stringify(iss));
+      ok('1: …и без стария текст „свободни ч. … сложи код“', !x.w.grSubmitIssues().some(t => /свободни ч\..*сложи код/.test(t)));
     }
     // 3 — ТРЗ: „📆 График“ отваря подаден обект, не обекта по подразбиране; няма подаден → съобщение.
     {
@@ -2094,6 +2115,77 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('В: май — без допълнителни load_month (няма по-ранен летен месец)', Sm.calls.filter(c => c.action === 'load_month').map(c => c.month).every(m => m === '2026-05' || m === '2026-04'));
     const Sn = mk(); const xn = env(MGR, { server: Sn }); xn.setData('app_settings', []); await load(xn); await ticks(4);
     ok('В: ноември — без допълнителни load_month за лятото', Sn.calls.filter(c => c.action === 'load_month').every(c => c.month === '2026-11' || c.month === '2026-10'));
+  }
+
+  section('26. Етап Б — одобрение от ТРЗ (24.11.2026): масово, „↩ Върни с коментар“, лентата при обекта');
+  {
+    const mk = (stageB) => {
+      const S = makeServer(); S.stageB = stageB;
+      const snap = { rows: [], header: {} };
+      S.months['Кърджали|2026-11-01'] = { id: 'm-bk', store_name: 'Кърджали', month: '2026-11-01', status: 'submitted', submitted_by_name: 'Управител Кърджали', submitted_at: '2026-11-02T10:00:00Z', snapshot: snap, off_norm: [] };
+      S.months['Шумен|2026-11-01'] = { id: 'm-bs', store_name: 'Шумен', month: '2026-11-01', status: 'submitted', submitted_by_name: 'Регионален', submitted_at: '2026-11-03T10:00:00Z', snapshot: snap, off_norm: [] };
+      return S;
+    };
+    const ovRow = (h, st) => Array.from(h.doc.querySelectorAll('#gr-ov-tbl tbody tr')).filter(tr => tr.querySelector('b') && tr.querySelector('b').textContent === st)[0];
+    const S = mk(true);
+    const t = env(TRZ, { server: S, beta: BETA_ALL }); await load(t);
+    realClick(t.w, btn(mod(t), 'Обекти')); await ticks(6);
+    ok('ТРЗ „🏬 Обекти“: две подадени — с отметки и „✔ Одобри избраните (0)“; брояч „0 одобрени · 2 чакат одобрение · 0 върнати“',
+      t.doc.querySelectorAll('#gr-ov-tbl input.gr-ov-sel').length === 2 && !!t.doc.getElementById('gr-ov-approve-sel') && t.doc.getElementById('gr-ov-sel-n').textContent === '0' &&
+      /0 одобрени · 2 чакат одобрение · 0 върнати/.test(t.doc.getElementById('gr-ov-sum').textContent), t.doc.getElementById('gr-ov-sum') && t.doc.getElementById('gr-ov-sum').textContent);
+    ok('ТРЗ: по ред „✔ Одобри“ и „↩ Върни…“; колона „Коментар“', !!btn(ovRow(t, 'Кърджали'), '✔ Одобри') && !!btn(ovRow(t, 'Кърджали'), 'Върни') &&
+      Array.from(t.doc.querySelectorAll('#gr-ov-tbl th')).some(th => th.textContent === 'Коментар'));
+    realClick(t.w, btn(mod(t), 'Одобри избраните')); await ticks(4);
+    ok('нищо отметнато → съобщение, без заявка', t.calls.toast.some(x => /Отметни поне един/.test(x)) && !S.calls.some(c => c.action === 'approve'));
+    const all = t.doc.getElementById('gr-ov-all'); all.checked = true; t.w.eval('(function(){' + all.getAttribute('onchange') + '})').call(all);
+    ok('„всички“ → 2 избрани', t.doc.getElementById('gr-ov-sel-n').textContent === '2');
+    realClick(t.w, btn(mod(t), 'Одобри избраните')); await ticks(8);
+    const ap = S.calls.filter(c => c.action === 'approve').slice(-1)[0];
+    ok('масово: approve { stores: [Кърджали, Шумен], month: 2026-11 }', !!ap && JSON.stringify(ap.stores) === '["Кърджали","Шумен"]' && ap.month === '2026-11', JSON.stringify(ap));
+    ok('…и двата „✔✔ Одобрен“ от ТРЗ; без отметки; брояч „2 одобрени“', /✔✔ Одобрен/.test(ovRow(t, 'Кърджали').textContent) && /от ТРЗ/.test(ovRow(t, 'Шумен').textContent) &&
+      t.doc.querySelectorAll('#gr-ov-tbl input.gr-ov-sel').length === 0 && /^· 2 одобрени · 0 чакат/.test(t.doc.getElementById('gr-ov-sum').textContent) && t.calls.toast.some(x => /Одобрени: 2/.test(x)));
+    // Връщане на одобрения Кърджали с коментар.
+    realClick(t.w, btn(ovRow(t, 'Кърджали'), 'Върни')); await ticks(1);
+    ok('„↩ Върни…“ → прозорец с поле за коментар', !!t.doc.getElementById('gr-return-modal') && !!t.doc.getElementById('gr-return-text'));
+    realClick(t.w, t.doc.getElementById('gr-return-send')); await ticks(2);
+    ok('празен коментар → съобщение, без заявка', t.calls.toast.some(x => /Напиши коментар/.test(x)) && !S.calls.some(c => c.action === 'return'));
+    t.doc.getElementById('gr-return-text').value = 'Иван на 05.11 — няма смяна';
+    realClick(t.w, t.doc.getElementById('gr-return-send')); await ticks(8);
+    const rt = S.calls.filter(c => c.action === 'return').slice(-1)[0];
+    ok('return { store: Кърджали, month: 2026-11, comment } → прозорецът се затваря', !!rt && rt.store === 'Кърджали' && rt.month === '2026-11' && rt.comment === 'Иван на 05.11 — няма смяна' &&
+      !t.doc.querySelector('#gr-return-modal.open'), JSON.stringify(rt));
+    ok('Обекти: Кърджали „↩ Върнат“, коментарът в колоната; брояч „1 върнати“', /↩ Върнат/.test(ovRow(t, 'Кърджали').querySelector('.gr-ov-st').textContent) &&
+      ovRow(t, 'Кърджали').querySelector('.gr-ov-comment').textContent === 'Иван на 05.11 — няма смяна' && /1 върнати/.test(t.doc.getElementById('gr-ov-sum').textContent) &&
+      !btn(ovRow(t, 'Кърджали'), '✔ Одобри'), ovRow(t, 'Кърджали').textContent);
+    // Обектът вижда лентата и редактира.
+    const m = env(MGR, { server: S }); await load(m);
+    const bn = m.doc.getElementById('gr-return-banner');
+    ok('обектът: лента „↩ Върнат за корекция от ТРЗ …: Иван на 05.11 — няма смяна“ над графика, чернова', !!bn && /от ТРЗ/.test(bn.textContent) && m.doc.getElementById('gr-return-comment').textContent === 'Иван на 05.11 — няма смяна' &&
+      /Чернова/.test(m.doc.getElementById('gr-status').textContent) && !!btn(mod(m), 'Подай'), bn && bn.textContent);
+    ok('обектът: без „✔ Одобри“ и без „↩ Върни“', !m.doc.getElementById('gr-approve-btn') && !m.doc.getElementById('gr-return-btn'));
+    // Admin одобрява от самия график (Кърджали наново подаден).
+    Object.assign(S.months['Кърджали|2026-11-01'], { status: 'submitted', submitted_by_name: 'Управител Кърджали', submitted_at: '2026-11-09T10:00:00Z', snapshot: { rows: [], header: {} } });
+    delete S.months['Кърджали|2026-11-01'].keep; delete S.months['Кърджали|2026-11-01'].reopened;
+    const a = env(ADM, { server: S }); await load(a);
+    ok('admin, подаден: „✔ Одобри“ и „↩ Върни с коментар“; без стария „↩ Върни в чернова“', !!a.doc.getElementById('gr-approve-btn') && !!a.doc.getElementById('gr-return-btn') && !btn(mod(a), 'Върни в чернова'));
+    realClick(a.w, a.doc.getElementById('gr-approve-btn')); await ticks(8);
+    ok('admin „✔ Одобри“ → статус „✔✔ Одобрен от Тенчо“, „подаден от Управител Кърджали“; „✔ Одобри“ изчезва', /^✔✔ Одобрен от Тенчо/.test(a.doc.getElementById('gr-status').textContent) &&
+      /подаден от Управител Кърджали/.test(mod(a).textContent) && !a.doc.getElementById('gr-approve-btn') && !!a.doc.getElementById('gr-return-btn'), a.doc.getElementById('gr-status').textContent);
+    ok('одобрен: Excel / печат — от снимката (не „ЧЕРНОВА“), присъствената — достъпна, „Промени“ — заредени', a.w.grExportModel() && a.w.grExportModel().draft === false && !!btn(mod(a), 'Присъствена') &&
+      S.calls.some(c => c.action === 'changes_list' && c.store === 'Кърджали'));
+    // Регионалният: одобрен Шумен — без „↩ Върни“.
+    const r = env(REG, { server: S, beta: BETA_ALL }); await load(r);
+    ok('регионален, одобрен Шумен: без „↩ Върни“ и без „✔ Одобри“', r.w.grStore === 'Шумен' && r.w.grData.status === 'approved' && !r.doc.getElementById('gr-return-btn') && !r.doc.getElementById('gr-approve-btn'));
+    // Сървър отпреди етап Б (без can_return) — старият бутон остава.
+    const old = env(ADM, { server: mk(false) }); await load(old);
+    ok('сървър без can_return → старият „↩ Върни в чернова“, без новите бутони', !!btn(mod(old), 'Върни в чернова') && !old.doc.getElementById('gr-return-btn') && !old.doc.getElementById('gr-approve-btn'));
+    // Масово с отказ за един обект.
+    const S2 = mk(true); const t2 = env(TRZ, { server: S2, beta: BETA_ALL }); await load(t2);
+    realClick(t2.w, btn(mod(t2), 'Обекти')); await ticks(6);
+    const boxes = t2.doc.querySelectorAll('#gr-ov-tbl input.gr-ov-sel'); boxes.forEach(c => { c.checked = true; });
+    S2.months['Шумен|2026-11-01'].status = 'draft';    // междувременно върнат — сървърът отказва само него
+    realClick(t2.w, btn(mod(t2), 'Одобри избраните')); await ticks(8);
+    ok('масово, единият вече не е подаден → „Одобрени: 1 · без 1: Шумен (…)“', t2.calls.toast.some(x => /Одобрени: 1 · без 1: Шумен \(Графикът не е подаден\.\)/.test(x)), t2.calls.toast.slice(-2).join(' | '));
   }
 
   report();

@@ -38,6 +38,15 @@
 (в базата от миграцията grafik_sector_coverage, grafik-sector-coverage-schema.sql, версия 20261124081201, приложена 24.11.2026; таблицата е без anon — виж бележката при grafik_schema)
 - 24.11 · grafik_sectors.track_coverage — boolean, NOT NULL, default true
 
+(в базата от миграцията grafik_approve, grafik-approve-schema.sql, версия 20261124103940, приложена 24.11.2026; таблицата е без anon — виж бележката при grafik_schema)
+- 24.11 · grafik_months.status — нова стойност на статус 'approved' (одобрен от ТРЗ)
+- 24.11 · grafik_months.approved_at — timestamptz, NULL, без default
+- 24.11 · grafik_months.approved_by — text, NULL, без default
+- 24.11 · grafik_months.approved_by_name — text, NULL, без default
+- 24.11 · grafik_months.return_comment — text, NULL, без default
+- 24.11 · grafik_months.returned_at — timestamptz, NULL, без default
+- 24.11 · grafik_months.returned_by_name — text, NULL, без default
+
 ## Потвърдено 23.11.2026
 
 (в базата от миграцията reads_as_code, reads-as-code-schema.sql, версия 20261123113626, приложена 23.11.2026)

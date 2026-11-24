@@ -6,7 +6,7 @@ import { HttpError, type AccessRow, type AdminTable, type ChangeRow, type Repo, 
 
 // Само безопасни колони — никога password_hash / history_pin_hash.
 const USER_COLS = "id,email,display_name,store_name,role,is_regional,assigned_stores,active";
-const MONTH_COLS = "id,store_name,month,status,submitted_at,submitted_by,submitted_by_name,snapshot,updated_at";
+const MONTH_COLS = "id,store_name,month,status,submitted_at,submitted_by,submitted_by_name,snapshot,updated_at,approved_at,approved_by,approved_by_name,return_comment,returned_at,returned_by_name";   // approved_* / return* — етап Б (миграция grafik_approve)
 
 // deno-lint-ignore no-explicit-any
 type R = { data: any; error: { message: string; code?: string } | null };

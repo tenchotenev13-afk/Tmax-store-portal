@@ -28,8 +28,11 @@ export type Access = {
 };
 export type Dated = { valid_from: string | null; valid_to: string | null };
 export type MonthRow = {
-  id: string; store_name: string; month: string; status: "draft" | "submitted";
+  id: string; store_name: string; month: string; status: "draft" | "submitted" | "approved";
   submitted_at: string | null; submitted_by: string | null; submitted_by_name: string | null;
+  // Етап Б (24.11.2026, миграция grafik_approve): одобрение от ТРЗ и последното „↩ Върни с коментар“.
+  approved_at?: string | null; approved_by?: string | null; approved_by_name?: string | null;
+  return_comment?: string | null; returned_at?: string | null; returned_by_name?: string | null;
   snapshot: unknown; updated_at?: string;
 };
 export type RowRec = { id?: string; month_id: string; staff_id: string; letters: string[]; locked: Record<string, string>; sort_order?: number; updated_at?: string; updated_by?: string | null };
@@ -292,7 +295,7 @@ export function submitIssues(staff: Staff[], rows: RowRec[], snapRows: Record<st
       if (norm !== 0) out.push(name + ": " + (r ? "редът в графика е празен" : "няма ред в графика за месеца") + (norm ? " (0 ч. вместо " + hrs(norm) + " ч.)" : ""));
     } else if (sr.diff !== 0) out.push(name + ": " + hrs(Number(sr.official)) + " ч. вместо " + hrs(Number(sr.target)) + " ч.");
     letters.forEach((v, i) => {
-      if (typeof v === "string" && HOURS_RE.test(v)) out.push(name + ": " + v + " свободни ч. на " + p2(i + 1) + "." + p2(month) + " — сложи код");
+      if (typeof v === "string" && HOURS_RE.test(v)) out.push(name + ": " + p2(i + 1) + "." + p2(month) + " — написано е число " + v + ", избери смяна (П, ЛД…)");   // етап Б (24.11.2026): като grSubmitIssues в grafik.js
       else if (v === "ЛД" && (dow0 + i) % 7 === 0) out.push(name + ": ЛД в неделя на " + p2(i + 1) + "." + p2(month) + " — ползвай ЗД");
     });
   }
@@ -317,13 +320,24 @@ function addDay(start: string, day: number): string {
 // save_rows отказва при подаден месец) и staff (персоналът на обекта към този момент — договор,
 // дати, сектор; иначе мрежата на ТРЗ би се смятала по персонала, сменен в черновата). ТРЗ продължават да виждат тази версия и промените ѝ
 // („върнат за корекция от … на …“), отметките „Отразено в ТРЗ“ остават. Новото подаване я заменя.
-export type Reopened = { at: string; by: string; by_name: string; submitted_at: string | null; submitted_by: string | null; submitted_by_name: string | null };
+export type Reopened = { at: string; by: string; by_name: string; submitted_at: string | null; submitted_by: string | null; submitted_by_name: string | null; comment?: string; was?: string };
+// Етап Б: „подаден“ и „одобрен“ са едно и също за всичко, освен за самото одобряване —
+// заключен за редакция, видим за ТРЗ, с „Промени“, присъствена и Excel.
+export function isFiled(month: MonthRow | null | undefined): boolean { return !!month && (month.status === "submitted" || month.status === "approved"); }
+// Кой връща (решение на Тенчо 23.11.2026, т.3): ТРЗ и admin — подаден и одобрен;
+// регионалният (и admin) — подаден в свой обект, както „↩ Върни в чернова“ досега.
+export function canReturn(acc: Access, store: string, month: MonthRow | null | undefined): boolean {
+  if (!isFiled(month)) return false;
+  if (acc.kind === "trz" || acc.canAdmin) return true;
+  return month!.status === "submitted" && acc.canReopen && canEdit(acc, store);
+}
+export function canApprove(acc: Access): boolean { return acc.kind === "trz" || acc.canAdmin; }
 export function reopenedOf(month: MonthRow | null | undefined): Reopened | null {
   if (!month || month.status !== "draft" || !isObj(month.snapshot) || !isObj(month.snapshot.reopened)) return null;
   return month.snapshot.reopened as Reopened;
 }
 // Подаден или върнат с пазено подаване — това виждат ТРЗ.
-export function hasSubmission(month: MonthRow | null | undefined): boolean { return !!month && (month.status === "submitted" || !!reopenedOf(month)); }
+export function hasSubmission(month: MonthRow | null | undefined): boolean { return isFiled(month) || !!reopenedOf(month); }
 // Върнатият месец, както изглеждаше подаден: статус, кой и кога, снимката (без letters / staff),
 // редовете от letters и персоналът към връщането (null — няма го в снимката).
 export function lastSubmittedView(month: MonthRow): { month_row: MonthRow; rows: RowRec[]; staff: Staff[] | null } | null {
@@ -340,12 +354,34 @@ export function lastSubmittedView(month: MonthRow): { month_row: MonthRow; rows:
   }));
   return { month_row: { ...month, status: "submitted", submitted_at: r.submitted_at, submitted_by: r.submitted_by, submitted_by_name: r.submitted_by_name, snapshot: snap }, rows, staff };
 }
+// Връщане в чернова — „↩ Върни в чернова“ (reopen) и „↩ Върни с коментар“ (return, етап Б).
+// Последното подаване се пази в снимката (reopenedOf / lastSubmittedView) — за ТРЗ; одобрението
+// се нулира; коментарът — в колоните (последното връщане) и в reopened.
+async function returnToDraft(repo: Repo, acc: Access, store: string, m: { start: string }, month: MonthRow, comment: string | null) {
+  const at = new Date().toISOString();
+  const letters: Record<string, { letters: string[]; locked: Record<string, string> }> = {};
+  (await repo.listRows(month.id)).forEach((r) => { letters[r.staff_id] = { letters: r.letters || [], locked: r.locked || {} }; });
+  const keptStaff = JSON.parse(JSON.stringify(await repo.listStaff(store))) as Staff[];   // копие — както в jsonb
+  const reopened: Reopened = { at, by: acc.email, by_name: acc.name, submitted_at: month.submitted_at, submitted_by: month.submitted_by, submitted_by_name: month.submitted_by_name, was: month.status };
+  if (comment) reopened.comment = comment;
+  const ok = await repo.updateMonth(month.id, {
+    status: "draft", submitted_at: null, submitted_by: null, submitted_by_name: null,
+    approved_at: null, approved_by: null, approved_by_name: null,
+    return_comment: comment, returned_at: at, returned_by_name: acc.name,
+    snapshot: { ...(isObj(month.snapshot) ? month.snapshot : {}), letters, staff: keptStaff, reopened }, updated_at: at,
+  }, month.status);
+  if (!ok) throw new HttpError(409, "not_submitted", "Графикът не е подаден.");
+  // Решение а: промените остават за новото подаване; броят им — за предупреждението в екрана.
+  const kept = (await repo.listChanges(month.id)).length;
+  await audit(repo, acc, comment ? "grafik_return" : "grafik_reopen", store, { month: m.start, was: month.status, was_submitted_by: month.submitted_by, was_submitted_at: month.submitted_at, was_approved_by: month.approved_by || null, comment, changes_kept: kept });
+  return { status: "draft", changes: kept, comment };
+}
 // Подаденият месец на обекта — иначе 409 (промените се въвеждат само след подаване).
 // allowReopened — четене и „Отразено в ТРЗ“ върху пазеното подаване на върнат месец.
 async function submittedMonth(repo: Repo, store: string, ym: unknown, allowReopened = false) {
   const m = needMonth(ym);
   const month = await repo.getMonth(store, m.start);
-  if (!month || !(month.status === "submitted" || (allowReopened && reopenedOf(month)))) throw new HttpError(409, "not_submitted", "Промените се въвеждат след подаване на графика.");
+  if (!month || !(isFiled(month) || (allowReopened && reopenedOf(month)))) throw new HttpError(409, "not_submitted", "Промените се въвеждат след подаване на графика.");
   return { m, month };
 }
 // Всички проверки на един ред „Промени“ → „по график“ (буква и официален код).
@@ -491,7 +527,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const names = await repo.storeNames();
       const visible = acc.readAll ? names : names.filter((n) => acc.read.indexOf(n) >= 0);
       return {
-        kind: acc.kind, email: acc.email, name: acc.name, can_admin: acc.canAdmin, can_reopen: acc.canReopen,
+        kind: acc.kind, email: acc.email, name: acc.name, can_admin: acc.canAdmin, can_reopen: acc.canReopen, can_approve: canApprove(acc),
         stores: visible.map((n) => ({ name: n, can_edit: canEdit(acc, n) })),
       };
     }
@@ -532,8 +568,11 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       return {
         store, month: m.start, days: m.days, can_edit: canEdit(acc, store) && (!month || month.status === "draft"),
         can_reopen: acc.canReopen && canEdit(acc, store) && !!month && month.status === "submitted",
+        // Етап Б: „✔ Одобри“ — ТРЗ / admin на подаден; „↩ Върни с коментар“ — виж canReturn.
+        can_approve: canApprove(acc) && !!month && month.status === "submitted",
+        can_return: canReturn(acc, store, month),
         status: view ? "submitted" : month ? month.status : "draft", month_row: monthRow, staff: view && view.staff ? view.staff : staff, rows, setup,
-        reopened: reo ? { at: reo.at, by_name: reo.by_name } : null,
+        reopened: reo ? { at: reo.at, by_name: reo.by_name, comment: reo.comment || null } : null,
         // Ритъмът от предходния месец — както досега: само за тези, които редактират (не ТРЗ).
         prev_rows: wantPrev && acc.kind !== "trz" ? pRows : [],
         // Предишният месец за ВТР чл. 19 през границата (първата седмица) — вместо втора заявка
@@ -674,26 +713,56 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
     }
 
     case "reopen": {
+      // Старият бутон „↩ Върни в чернова“ (без коментар) — за браузъри отпреди етап Б; само подаден.
       const store = await needStore(repo, acc, b.store, "edit");
       if (!acc.canReopen) throw new HttpError(403, "forbidden", "Връщане в чернова — само admin и регионалният.");
       const m = needMonth(b.month);
       const month = await repo.getMonth(store, m.start);
       if (!month || month.status !== "submitted") throw new HttpError(409, "not_submitted", "Графикът не е подаден.");
-      // Последното подаване се пази в снимката (reopenedOf / lastSubmittedView) — за ТРЗ.
-      const at = new Date().toISOString();
-      const letters: Record<string, { letters: string[]; locked: Record<string, string> }> = {};
-      (await repo.listRows(month.id)).forEach((r) => { letters[r.staff_id] = { letters: r.letters || [], locked: r.locked || {} }; });
-      const keptStaff = JSON.parse(JSON.stringify(await repo.listStaff(store))) as Staff[];   // копие — както в jsonb
-      const reopened: Reopened = { at, by: acc.email, by_name: acc.name, submitted_at: month.submitted_at, submitted_by: month.submitted_by, submitted_by_name: month.submitted_by_name };
-      const ok = await repo.updateMonth(month.id, {
-        status: "draft", submitted_at: null, submitted_by: null, submitted_by_name: null,
-        snapshot: { ...(isObj(month.snapshot) ? month.snapshot : {}), letters, staff: keptStaff, reopened }, updated_at: at,
-      }, "submitted");
-      if (!ok) throw new HttpError(409, "not_submitted", "Графикът не е подаден.");
-      // Решение а: промените остават за новото подаване; броят им — за предупреждението в екрана.
-      const kept = (await repo.listChanges(month.id)).length;
-      await audit(repo, acc, "grafik_reopen", store, { month: m.start, was_submitted_by: month.submitted_by, was_submitted_at: month.submitted_at, changes_kept: kept });
-      return { status: "draft", changes: kept };
+      return await returnToDraft(repo, acc, store, m, month, null);
+    }
+
+    case "return": {
+      // Етап Б (24.11.2026): „↩ Върни с коментар“ — коментарът е задължителен и стига до обекта
+      // (лентата над графика, докато е чернова). Кой — canReturn (решение на Тенчо 23.11, т.3).
+      if (typeof b.store !== "string" || !b.store) throw new HttpError(400, "bad_request", "Липсва обект.");
+      const store = await needStore(repo, acc, b.store, "read");
+      const m = needMonth(b.month);
+      const comment = typeof b.comment === "string" ? b.comment.trim().replace(/[ \t]+/g, " ") : "";
+      if (!comment) throw new HttpError(400, "bad_request", "Напиши коментар — какво да поправи обектът.");
+      if (comment.length > 500) throw new HttpError(400, "bad_request", "Коментарът е до 500 знака.");
+      const month = await repo.getMonth(store, m.start);
+      if (!isFiled(month)) throw new HttpError(409, "not_submitted", "Графикът не е подаден.");
+      if (!canReturn(acc, store, month)) {
+        throw new HttpError(403, "forbidden", month!.status === "approved" ? "Одобрен график връщат ТРЗ и admin." : "Нямате права да връщате графика на този обект.");
+      }
+      return await returnToDraft(repo, acc, store, m, month!, comment);
+    }
+
+    case "approve": {
+      // Етап Б: „✔ Одобри“ — ТРЗ и admin (резерв); един обект (store) или много (stores) за месеца.
+      // Само подаден; всеки обект поотделно — отказът на един не спира другите.
+      if (!canApprove(acc)) throw new HttpError(403, "forbidden", "Одобряват ТРЗ и admin.");
+      const m = needMonth(b.month);
+      const list = Array.isArray(b.stores) ? b.stores : typeof b.store === "string" ? [b.store] : null;
+      if (!list || !list.length) throw new HttpError(400, "bad_request", "Липсва обект.");
+      if (list.length > 100) throw new HttpError(400, "bad_request", "Най-много 100 обекта наведнъж.");
+      const names = await repo.storeNames();
+      const results: { store: string; ok: boolean; reason?: string; message?: string }[] = [];
+      for (const s of Array.from(new Set(list.map((x) => String(x))))) {
+        if (names.indexOf(s) < 0) { results.push({ store: s, ok: false, reason: "bad_request", message: "Няма такъв обект." }); continue; }
+        const month = await repo.getMonth(s, m.start);
+        if (!month || month.status !== "submitted") {
+          results.push({ store: s, ok: false, reason: month && month.status === "approved" ? "approved" : "not_submitted", message: month && month.status === "approved" ? "Вече е одобрен." : "Графикът не е подаден." });
+          continue;
+        }
+        const at = new Date().toISOString();
+        const ok = await repo.updateMonth(month.id, { status: "approved", approved_at: at, approved_by: acc.email, approved_by_name: acc.name, updated_at: at }, "submitted");
+        if (!ok) { results.push({ store: s, ok: false, reason: "not_submitted", message: "Графикът не е подаден." }); continue; }
+        await audit(repo, acc, "grafik_approve", s, { month: m.start, submitted_by: month.submitted_by, submitted_at: month.submitted_at });
+        results.push({ store: s, ok: true });
+      }
+      return { month: m.start, results, approved: results.filter((r) => r.ok).length };
     }
 
     // ── „Промени“ ──────────────────────────────────────────────────────────
@@ -796,7 +865,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const months = (await repo.listMonths(m.start, visible))
         .filter((r) => acc.kind !== "trz" || hasSubmission(r));
       // ТРЗ: върнатият месец е „подаден“ с последното подаване; за останалите е чернова (с бележка „върнат“).
-      const asSub = (r: MonthRow) => r.status === "submitted" || (acc.kind === "trz" && !!reopenedOf(r));
+      const asSub = (r: MonthRow) => isFiled(r) || (acc.kind === "trz" && !!reopenedOf(r));
       const stats = await repo.rowStats(months.map((r) => r.id));
       const chs = await repo.changeStats(months.filter(asSub).map((r) => r.id));   // П3: „промени / неотразени“
       // „Служители“ — активните в месеца (назначен до края му, не напуснал преди началото му; 20.11.2026).
@@ -812,7 +881,11 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
           store: n, company: sc.company[n], status: r ? (trzReo ? "submitted" : r.status) : null,
           submitted_at: r ? (trzReo ? reo!.submitted_at : r.submitted_at) : null,
           submitted_by_name: r ? (trzReo ? reo!.submitted_by_name : r.submitted_by_name) : null, rows: st ? st.rows : 0,
-          reopened: reo ? { at: reo.at, by_name: reo.by_name } : null,
+          reopened: reo ? { at: reo.at, by_name: reo.by_name, comment: reo.comment || null } : null,
+          // Етап Б: одобрението и правата за масовото одобряване / връщане в „🏬 Обекти“.
+          approved_at: r && r.status === "approved" ? r.approved_at || null : null,
+          approved_by_name: r && r.status === "approved" ? r.approved_by_name || null : null,
+          can_approve: canApprove(acc) && !!r && r.status === "submitted", can_return: canReturn(acc, n, r),
           staff: (staffN as Record<string, number>)[n] || 0, can_edit: canEdit(acc, n),
           last_at: st ? st.last_at : null, last_by: lastBy ? (who[lastBy] || lastBy) : null,
           off_norm: sub ? snapshotOffNorm(r!.snapshot) : null,

@@ -391,7 +391,7 @@ Deno.test("submit: празен ред, липсващ ред и свободн�
   eq([x.status, x.body.reason], [409, "off_norm"], "отказ");
   eq(x.body.issues, [
     nm(r, ids[0]) + ": редът в графика е празен (0 ч. вместо 168 ч.)",
-    nm(r, ids[1]) + ": 9 свободни ч. на 05.11 — сложи код",
+    nm(r, ids[1]) + ": 05.11 — написано е число 9, избери смяна (П, ЛД…)",
     "Нов Новев: няма ред в графика за месеца (0 ч. вместо 88 ч.)",
   ], "трите — с имената");
   eq((await sub(r, snap(ids))).body.reason, "bad_snapshot", "човек без ред не може просто да изпадне от снимката");
@@ -1012,4 +1012,88 @@ Deno.test("overview 20.11: служителите — назначени и не
   eq(await n("2026-11"), k.length + 2, "ноември: + напуска 15.11 и от 30.11; без напуснал октомври, от декември и от януари");
   eq(await n("2026-12"), k.length + 2, "декември: + от декември и от 30.11; без двамата напуснали и от януари");
   eq(await n("2027-01"), k.length + 3, "януари: + от декември, от 30.11 и от януари");
+});
+
+// ── Етап Б (24.11.2026): одобрение от ТРЗ и „↩ Върни с коментар“ ─────────────────
+Deno.test("approve: ТРЗ и admin, един или масово, само подаден; manager / регионален — не", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const sh = await filled(r, "Шумен", U.regSh);
+  eq((await call(r, U.regSh, { action: "submit", store: "Шумен", month: "2026-11", snapshot: snap(sh) })).status, 200, "Шумен подаден");
+  await filled(r, "Добрич", U.regSh);                                      // Добрич — чернова
+  const ap = (u: User, f: Record<string, unknown>) => call(r, u, { action: "approve", month: "2026-11", ...f });
+  eq((await ap(U.mgrK, { store: "Кърджали" })).body.reason, "forbidden", "manager");
+  eq((await ap(U.regSh, { store: "Шумен" })).body.reason, "forbidden", "регионален");
+  eq((await ap(U.trz, {})).body.reason, "bad_request", "без обект");
+  const x = (await ap(U.trz, { stores: ["Кърджали", "Шумен", "Добрич", "Няма такъв", "Кърджали"] })).body;
+  eq(x.results.map((q: { store: string; ok: boolean; reason?: string }) => q.store + ":" + (q.ok ? "ok" : q.reason)), ["Кърджали:ok", "Шумен:ok", "Добрич:not_submitted", "Няма такъв:bad_request"], "масово: всеки поотделно, без дубликати");
+  eq(x.approved, 2, "одобрени 2");
+  const k = r.months.filter((m) => m.store_name === "Кърджали")[0];
+  eq([k.status, k.approved_by, k.approved_by_name, !!k.approved_at, k.submitted_by_name], ["approved", "trz@temax.bg", "ТРЗ", true, "Управител Кърджали"], "Кърджали — одобрен от ТРЗ, подаването остава");
+  eq((await ap(U.admin, { store: "Кърджали" })).body.results[0].reason, "approved", "вече одобрен");
+  eq(r.audits.filter((a) => a.event === "grafik_approve").length, 2, "audit за двата");
+  // Одобреният: заключен за обекта, с „Промени“; ТРЗ го виждат; правата в load_month.
+  const t = (await call(r, U.trz, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  eq([t.status, t.can_approve, t.can_return, t.can_edit], ["approved", false, true, false], "ТРЗ: одобрен, само „Върни“");
+  const mg = (await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  eq([mg.status, mg.can_edit, mg.can_approve, mg.can_return, mg.month_row.approved_by_name], ["approved", false, false, false, "ТРЗ"], "обектът: одобрен, заключен");
+  eq((await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30(["П"]) }] })).status, 409, "save_rows — отказ");
+  eq((await call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: snap(ids) })).status, 409, "submit — отказ");
+  eq((await chg(r, U.mgrK, { staff_id: ids[0], day: 3, actual: "Б", reason: "болничен" })).status, 200, "„Промени“ — да (както при подаден)");
+  eq((await call(r, U.mgrK, { action: "reopen", store: "Кърджали", month: "2026-11" })).body.reason, "forbidden", "старият reopen — manager не");
+  eq((await call(r, U.admin, { action: "reopen", store: "Кърджали", month: "2026-11" })).body.reason, "not_submitted", "старият reopen — само подаден, не одобрен");
+  // Обзор и me.
+  const o = (await call(r, U.trz, { action: "overview", month: "2026-11" })).body.stores;
+  const ok = o.filter((s: { store: string }) => s.store === "Кърджали")[0];
+  eq([ok.status, ok.approved_by_name, ok.can_approve, ok.can_return, Array.isArray(ok.off_norm), ok.changes], ["approved", "ТРЗ", false, true, true, 1], "обзор ТРЗ: одобрен, с извън нормата и промените");
+  eq(o.map((s: { store: string }) => s.store).sort(), ["Кърджали", "Шумен"], "ТРЗ: Добрич (чернова) го няма");
+  const ad = (await call(r, U.admin, { action: "overview", month: "2026-11" })).body.stores.filter((s: { store: string }) => s.store === "Шумен")[0];
+  eq([ad.status, ad.can_approve, ad.can_return], ["approved", false, true], "admin: одобрен Шумен — само „Върни“");
+  const rg = (await call(r, U.regSh, { action: "overview", month: "2026-11" })).body.stores.filter((s: { store: string }) => s.store === "Шумен")[0];
+  eq([rg.status, rg.can_approve, rg.can_return], ["approved", false, false], "регионален: одобрен — без бутони");
+  const me = async (u: User) => (await call(r, u, { action: "me" })).body.can_approve;
+  eq([await me(U.trz), await me(U.admin), await me(U.regSh), await me(U.mgrK)], [true, true, false, false], "me.can_approve");
+});
+
+Deno.test("return: коментар задължителен; одобрен — ТРЗ и admin; подаден — и регионалният", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const sh = await filled(r, "Шумен", U.regSh);
+  await call(r, U.regSh, { action: "submit", store: "Шумен", month: "2026-11", snapshot: snap(sh) });
+  const ret = (u: User, store: string, comment?: unknown) => call(r, u, { action: "return", store, month: "2026-11", ...(comment === undefined ? {} : { comment }) });
+  eq((await ret(U.trz, "Кърджали")).body.reason, "bad_request", "без коментар");
+  eq((await ret(U.trz, "Кърджали", "   ")).body.reason, "bad_request", "празен коментар");
+  eq((await ret(U.trz, "Кърджали", "x".repeat(501))).body.reason, "bad_request", "над 500 знака");
+  eq((await ret(U.mgrK, "Кърджали", "моля")).body.reason, "forbidden", "manager — не");
+  eq((await ret(U.regSh, "Кърджали", "моля")).body.reason, "forbidden_store", "регионален — чужд обект");
+  // Регионалният: подаден — да; одобрен — не.
+  await call(r, U.trz, { action: "approve", month: "2026-11", store: "Шумен" });
+  const rj = await ret(U.regSh, "Шумен", "моля");
+  eq([rj.status, rj.body.reason, rj.body.message], [403, "forbidden", "Одобрен график връщат ТРЗ и admin."], "регионален — одобрен не");
+  // ТРЗ връща одобрения Кърджали с коментар.
+  await call(r, U.admin, { action: "approve", month: "2026-11", store: "Кърджали" });
+  const x = await ret(U.trz, "Кърджали", "  Иван на 5.11   — няма смяна  ");
+  eq([x.status, x.body.status, x.body.comment], [200, "draft", "Иван на 5.11 — няма смяна"], "ТРЗ връща одобрен; интервалите се свиват");
+  const k = r.months.filter((m) => m.store_name === "Кърджали")[0];
+  const reo = (k.snapshot as Record<string, Record<string, unknown>>).reopened;
+  eq([k.status, k.approved_at, k.approved_by_name, k.submitted_by, k.return_comment, k.returned_by_name, reo.comment, reo.was, reo.submitted_by_name],
+    ["draft", null, null, null, "Иван на 5.11 — няма смяна", "ТРЗ", "Иван на 5.11 — няма смяна", "approved", "Управител Кърджали"], "чернова; одобрението — нулирано; коментарът — в колоните и в reopened");
+  eq(r.audits.filter((a) => a.event === "grafik_return").length, 1, "audit grafik_return");
+  // Обектът вижда коментара и може да редактира; ТРЗ — последното подаване с коментара.
+  const mg = (await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  eq([mg.status, mg.can_edit, mg.reopened.comment, mg.reopened.by_name], ["draft", true, "Иван на 5.11 — няма смяна", "ТРЗ"], "обектът: чернова с коментара");
+  const t = (await call(r, U.trz, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  eq([t.status, t.reopened.comment, t.can_approve, t.can_return], ["submitted", "Иван на 5.11 — няма смяна", false, false], "ТРЗ: последното подаване, без бутони");
+  const ot = (await call(r, U.trz, { action: "overview", month: "2026-11" })).body.stores.filter((s: { store: string }) => s.store === "Кърджали")[0];
+  eq([ot.status, ot.reopened.comment, ot.can_approve, ot.can_return], ["submitted", "Иван на 5.11 — няма смяна", false, false], "обзор ТРЗ: върнат — с коментара, без бутони");
+  eq((await ret(U.trz, "Кърджали", "пак")).body.reason, "not_submitted", "чернова — не");
+  // Новото подаване: лентата изчезва (reopened), коментарът остава в колоните като история.
+  eq((await call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: snap(ids) })).status, 200, "ново подаване");
+  const m2 = (await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  eq([m2.status, m2.reopened, m2.month_row.return_comment, m2.can_approve], ["submitted", null, "Иван на 5.11 — няма смяна", false], "подаден наново: без лента; историята в колоната");
+  eq((await call(r, U.trz, { action: "approve", month: "2026-11", store: "Кърджали" })).body.approved, 1, "и пак може да се одобри");
+  // Регионалният връща свой подаден (Шумен е одобрен → първо ТРЗ го връща, после подаване).
+  eq((await ret(U.trz, "Шумен", "провери Шумен")).status, 200, "ТРЗ връща одобрения Шумен");
+  await call(r, U.regSh, { action: "submit", store: "Шумен", month: "2026-11", snapshot: snap(sh) });
+  eq((await ret(U.regSh, "Шумен", "сам си го връщам")).status, 200, "регионален — свой подаден, с коментар");
 });

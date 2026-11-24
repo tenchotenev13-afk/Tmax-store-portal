@@ -136,6 +136,8 @@ function grStaffById(id){
   return null;
 }
 function grCanEdit(){ return !!(grData && grData.can_edit); }
+/* Подаден или одобрен (етап Б) — заключен, със снимка, „Промени“, присъствена. */
+function grFiled(){ return !!grData && (grData.status === 'submitted' || grData.status === 'approved'); }
 /* „👁 Официален график“ (етап А4, 23.11.2026): клетките показват кодовете (Д1/З…), колоните
    Офиц. / Цел се връщат; само за четене. Помни се в браузъра; за ТРЗ — включен по подразбиране. */
 var grOfficial = null;
@@ -285,6 +287,36 @@ function grLoadMonthTrz(){
   var seq = ++grLoadSeq;
   return grTrzEnsure().then(function(ok){ if(ok && seq === grLoadSeq) return grLoadMonth(); });
 }
+/* Етап Б — „🏬 Обекти“: отметки на подадените, „✔ Одобри избраните“, по ред „✔ Одобри“ / „↩ Върни…“. */
+function grOvSelected(){
+  return Array.prototype.map.call(document.querySelectorAll('#gr-ov-tbl input.gr-ov-sel'), function(c){ return c; })
+    .filter(function(c){ return c.checked; }).map(function(c){ return (grOverview.stores || [])[+c.getAttribute('data-i')]; })
+    .filter(function(s){ return s && s.can_approve; });
+}
+function grOvSelCount(){
+  var n = grOvSelected().length, el = document.getElementById('gr-ov-sel-n');
+  if(el) el.textContent = String(n);
+  return n;
+}
+function grOvSelectAll(on){
+  Array.prototype.forEach.call(document.querySelectorAll('#gr-ov-tbl input.gr-ov-sel'), function(c){ c.checked = !!on; });
+  grOvSelCount();
+}
+function grApproveSelected(){
+  var sel = grOvSelected();
+  if(!sel.length){ toast('Отметни поне един подаден обект.', '#dc2626'); return; }
+  return grApprove(sel.map(function(s){ return s.store; })).then(function(){ return grLoadOverview(); });
+}
+function grApproveAt(i){
+  var s = grOverview && (grOverview.stores || [])[i];
+  if(!s || !s.can_approve) return;
+  return grApprove([s.store]).then(function(){ return grLoadOverview(); });
+}
+function grReturnAt(i){
+  var s = grOverview && (grOverview.stores || [])[i];
+  if(!s || !s.can_return) return;
+  return grReturnOpen(s.store);
+}
 function grOpenStoreAt(i){
   var s = grOverview && (grOverview.stores || [])[i];
   if(!s) return;
@@ -300,31 +332,54 @@ function grFmtAt(iso){
 function grOverviewHtml(){
   if(!grOverview) return '<div class="card" style="color:#94a3b8;">⏳ Зареждане...</div>';
   var list = grOverview.stores || [], trz = !!grMe && grMe.kind === 'trz';
-  var sub = list.filter(function(s){ return s.status === 'submitted'; }).length;
+  var filed = function(s){ return s.status === 'submitted' || s.status === 'approved'; };
+  /* Етап Б: „върнат“ = чернова с коментар (ТРЗ я виждат като последното подаване + етикета). */
+  var returned = function(s){ return !!(s.reopened && s.reopened.comment); };
+  var cnt = { approved: 0, submitted: 0, returned: 0, draft: 0, none: 0 };
+  list.forEach(function(s){
+    if(returned(s)) cnt.returned++;
+    else if(s.status === 'approved') cnt.approved++;
+    else if(s.status === 'submitted') cnt.submitted++;
+    else if(s.status === 'draft') cnt.draft++;
+    else cnt.none++;
+  });
+  var sub = cnt.approved + cnt.submitted;
+  var canBulk = list.some(function(s){ return s.can_approve; });
   var h = '<div class="card" id="gr-overview"><div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;">' +
     '<b>Обекти — ' + escVal(grMonthLabel(grMonth)) + '</b>' +
     '<span id="gr-ov-count" style="color:#64748b;font-size:12px;">' + (trz ? sub + ' подадени' : sub + ' подадени от ' + list.length) + '</span>' +
-    (trz ? '<span style="color:#64748b;font-size:12px;">· ТРЗ: само подадените графици, без редакция</span>' : '') + '</div>';
+    '<span id="gr-ov-sum" style="color:#64748b;font-size:12px;">· ' + [cnt.approved + ' одобрени', cnt.submitted + ' чакат одобрение', cnt.returned + ' върнати'].concat(trz ? [] : [cnt.draft + ' чернови', cnt.none + ' не са започнати']).join(' · ') + '</span>' +
+    (trz ? '<span style="color:#64748b;font-size:12px;">· ТРЗ: само подадените графици, без редакция</span>' : '') +
+    (canBulk ? '<span style="flex:1"></span><button class="btn btn-green" id="gr-ov-approve-sel" onclick="grApproveSelected()">✔ Одобри избраните (<span id="gr-ov-sel-n">0</span>)</button>' : '') + '</div>';
   if(!list.length){
     h += '<div id="gr-ov-empty" style="color:#64748b;padding:8px 0;">' + (trz ? 'Няма подадени графици за ' + escVal(grMonthLabel(grMonth)) : 'Няма обекти за показване.')   /* grMonthLabel завършва на „г.“ */ + '</div>';
   } else {
-    h += '<div class="tbl-wrap"><table id="gr-ov-tbl"><thead><tr><th>Обект</th><th>Статус</th><th>' + (trz ? 'Подаден' : 'Подаден / последна промяна') + '</th>' +
-      (trz ? '' : '<th>Служители</th>') + '<th>Извън нормата</th><th>Промени</th><th></th></tr></thead><tbody>';
+    h += '<div class="tbl-wrap"><table id="gr-ov-tbl"><thead><tr>' +
+      (canBulk ? '<th><input type="checkbox" id="gr-ov-all" title="Всички подадени" onchange="grOvSelectAll(this.checked)"></th>' : '') +
+      '<th>Обект</th><th>Статус</th><th>' + (trz ? 'Подаден' : 'Подаден / последна промяна') + '</th>' +
+      (trz ? '' : '<th>Служители</th>') + '<th>Извън нормата</th><th>Промени</th><th>Коментар</th><th></th></tr></thead><tbody>';
     list.forEach(function(s, i){
-      var st = s.status === 'submitted' ? '<span class="gr-ov-st" style="background:#dcfce7;color:#166534;border-radius:10px;padding:1px 8px;font-weight:600;">✔ Подаден</span>'
+      var st = returned(s) ? '<span class="gr-ov-st gr-ov-returned" style="background:#ffedd5;color:#9a3412;border-radius:10px;padding:1px 8px;font-weight:600;">↩ Върнат</span>'
+        : s.status === 'approved' ? '<span class="gr-ov-st gr-ov-approved" style="background:#166534;color:#fff;border-radius:10px;padding:1px 8px;font-weight:600;">✔✔ Одобрен</span>' +
+          (s.approved_by_name ? '<div style="font-size:11px;color:#64748b;margin-top:2px;">от ' + escVal(s.approved_by_name) + (s.approved_at ? ' · ' + escVal(grFmtAt(s.approved_at)) : '') + '</div>' : '')
+        : s.status === 'submitted' ? '<span class="gr-ov-st" style="background:#dcfce7;color:#166534;border-radius:10px;padding:1px 8px;font-weight:600;">✔ Подаден</span>'
         : s.status === 'draft' ? '<span class="gr-ov-st" style="background:#fef3c7;color:#92400e;border-radius:10px;padding:1px 8px;font-weight:600;">✎ Чернова</span>'
         : '<span class="gr-ov-st" style="color:#94a3b8;">— не е започнат</span>';
       st += s.reopened ? '<div style="margin-top:3px;">' + grReopenedHtml(s.reopened) + '</div>' : '';
-      var when = s.status === 'submitted' ? (s.submitted_by_name ? 'от ' + escVal(s.submitted_by_name) + ' · ' : '') + escVal(grFmtAt(s.submitted_at))
+      var when = filed(s) ? (s.submitted_by_name ? 'от ' + escVal(s.submitted_by_name) + ' · ' : '') + escVal(grFmtAt(s.submitted_at))
         : s.last_at ? escVal(s.last_by || '') + ' · ' + escVal(grFmtAt(s.last_at)) : '<span style="color:#94a3b8;">—</span>';
-      var off = s.status !== 'submitted' ? '<span style="color:#94a3b8;font-size:12px;">само за подадени</span>'
+      var off = !filed(s) ? '<span style="color:#94a3b8;font-size:12px;">само за подадени</span>'
         : !Array.isArray(s.off_norm) ? '<span style="color:#94a3b8;">—</span>'                 // сървър без off_norm — не твърдим „на нормата“
         : s.off_norm.length ? '<div class="gr-ov-off" style="color:#dc2626;font-size:12px;">' + s.off_norm.map(function(t){ return escVal(t); }).join('<br>') + '</div>'
         : '<span style="color:#16a34a;font-weight:600;">всички на нормата</span>';
-      h += '<tr id="gr-ov-' + i + '"><td><b>' + escVal(s.store) + '</b><div style="color:#94a3b8;font-size:11px;">' + escVal(s.company || '') + '</div></td><td>' + st + '</td>' +
+      var acts = (s.can_approve ? '<button class="btn-sm gr-ov-approve" onclick="grApproveAt(' + i + ')">✔ Одобри</button> ' : '') +
+        (s.can_return ? '<button class="btn-sm gr-ov-return" onclick="grReturnAt(' + i + ')">↩ Върни…</button> ' : '');
+      h += '<tr id="gr-ov-' + i + '">' + (canBulk ? '<td>' + (s.can_approve ? '<input type="checkbox" class="gr-ov-sel" data-i="' + i + '" onchange="grOvSelCount()">' : '') + '</td>' : '') +
+        '<td><b>' + escVal(s.store) + '</b><div style="color:#94a3b8;font-size:11px;">' + escVal(s.company || '') + '</div></td><td>' + st + '</td>' +
         '<td class="gr-ov-when" style="font-size:12px;">' + when + '</td>' + (trz ? '' : '<td>' + (+s.staff || 0) + '</td>') + '<td>' + off + '</td>' +
-        '<td class="gr-ov-ch" style="font-size:12px;">' + (s.status === 'submitted' && typeof s.changes === 'number' ? s.changes + (s.changes ? ' · <span style="color:' + (s.changes_open ? '#dc2626' : '#16a34a') + ';">неотразени ' + (s.changes_open || 0) + '</span>' : '') : '<span style="color:#94a3b8;">—</span>') + '</td>' +
-        '<td><button class="btn-sm" onclick="grOpenStoreAt(' + i + ')">Отвори →</button></td></tr>';
+        '<td class="gr-ov-ch" style="font-size:12px;">' + (filed(s) && typeof s.changes === 'number' ? s.changes + (s.changes ? ' · <span style="color:' + (s.changes_open ? '#dc2626' : '#16a34a') + ';">неотразени ' + (s.changes_open || 0) + '</span>' : '') : '<span style="color:#94a3b8;">—</span>') + '</td>' +
+        '<td class="gr-ov-comment" style="font-size:12px;max-width:260px;white-space:pre-wrap;">' + (returned(s) ? escVal(s.reopened.comment) : '') + '</td>' +
+        '<td style="white-space:nowrap;">' + acts + '<button class="btn-sm" onclick="grOpenStoreAt(' + i + ')">Отвори →</button></td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -508,8 +563,13 @@ function grStatusBadge(){
   return grStatusBadgeBase() + grReopenedHtml(grData.reopened, 'gr-reopened');
 }
 function grStatusBadgeBase(){
+  var m = grData.month_row || {};
+  if(grData.status === 'approved'){
+    return '<span id="gr-status" class="gr-st-approved" style="background:#166534;color:#fff;border-radius:10px;padding:2px 10px;font-weight:600;">✔✔ Одобрен' +
+      (m.approved_by_name ? ' от ' + escVal(m.approved_by_name) : '') + (m.approved_at ? ' · ' + escVal(fmtDate(String(m.approved_at).slice(0, 10))) : '') + '</span>' +
+      (m.submitted_by_name ? ' <span style="color:#64748b;font-size:12px;">подаден от ' + escVal(m.submitted_by_name) + (m.submitted_at ? ' · ' + escVal(fmtDate(String(m.submitted_at).slice(0, 10))) : '') + '</span>' : '');
+  }
   if(grData.status === 'submitted'){
-    var m = grData.month_row || {};
     return '<span id="gr-status" style="background:#dcfce7;color:#166534;border-radius:10px;padding:2px 10px;font-weight:600;">✔ Подаден' +
       (m.submitted_by_name ? ' от ' + escVal(m.submitted_by_name) : '') + (m.submitted_at ? ' · ' + escVal(fmtDate(String(m.submitted_at).slice(0, 10))) : '') + '</span>';
   }
@@ -635,13 +695,18 @@ function grGridPageHtml(){
   }
   if(grCanEdit()) h += '<button class="btn btn-green" onclick="grSubmit()">📤 Подай</button>';
   h += '<button class="btn-sm" id="gr-official-btn" onclick="grToggleOfficial()" title="' + (grOfficialOn() ? 'Обратно към буквите (редакция)' : 'Кодовете по ВТР и официалните часове — само за преглед') + '">' + (grOfficialOn() ? '✎ Буквите' : '👁 Официален график') + '</button>';
-  if(grData.can_reopen) h += '<button class="btn-sm" onclick="grReopen()">↩ Върни в чернова</button>';
+  /* Етап Б: „✔ Одобри“ (ТРЗ / admin, подаден) и „↩ Върни с коментар“ (can_return от grafik-api).
+     Сървър отпреди етап Б (без can_return) — старият „↩ Върни в чернова“. */
+  if(grData.can_approve) h += '<button class="btn btn-green" id="gr-approve-btn" onclick="grApproveOne()">✔ Одобри</button>';
+  if(grData.can_return) h += '<button class="btn-sm" id="gr-return-btn" onclick="grReturnOpen(grStore)">↩ Върни с коментар</button>';
+  else if(grData.can_return === undefined && grData.can_reopen) h += '<button class="btn-sm" onclick="grReopen()">↩ Върни в чернова</button>';
   /* 1д: файл за ТРЗ и печат — за всеки, който вижда графика (засега само beta списъка). */
   h += '<button class="btn-sm" id="gr-group-btn" onclick="grToggleGroup()" title="Редовете — по сектори или един общ списък (само на екрана; печатът и Excel са по реда на персонала)">' + (grGroupMode() === 'sector' ? '☰ Плосък списък' : '▤ По сектори') + '</button>';
   h += '<button class="btn-sm" onclick="grExportTrz()" title="Excel файл по образеца на ТРЗ">📥 Excel за ТРЗ</button>';
   h += '<button class="btn-sm" onclick="grPrintGrafik()" title="График за явяване на работа — A4 хоризонтално, с подписи">🖨 Печат</button>';
-  if(grData.status === 'submitted') h += grPresenceButtons();
+  if(grFiled()) h += grPresenceButtons();
   h += '</div>';
+  h += grReturnBannerHtml();
   h += '<div id="gr-warn-box">' + grWarningsHtml() + '</div>';
   /* Подсказката е НАД мрежата: кутията на мрежата залепва под лентата и трябва да е последна в
      модула — иначе редът под нея я избутва нагоре при скрол докрай (index.html, .gr-grid-wrap). */
@@ -1390,7 +1455,7 @@ function grSubmitIssues(){
     else if(x.diff !== 0) out.push(name + ': ' + grHrsTxt(x.official) + ' ч. вместо ' + grHrsTxt(x.target) + ' ч.');
     var L = (grRows[x.staff.id] || {}).letters || [];
     for(var d = 0; d < M.days; d++){
-      if(GrafikEngine.isHours(L[d] || '')) out.push(name + ': ' + L[d] + ' свободни ч. на ' + grPad(d + 1) + '.' + grPad(M.month) + ' — сложи код');
+      if(GrafikEngine.isHours(L[d] || '')) out.push(name + ': ' + grPad(d + 1) + '.' + grPad(M.month) + ' — написано е число ' + L[d] + ', избери смяна (П, ЛД…)');   // етап Б: като grafik-api submitIssues
       else if(L[d] === 'ЛД' && M.dow[d] === 7) out.push(name + ': ЛД в неделя на ' + grPad(d + 1) + '.' + grPad(M.month) + ' — ползвай ЗД');
     }
   });
@@ -1403,6 +1468,52 @@ function grSubmitBlocked(issues){
     '<ul id="gr-submit-issues" style="margin:6px 0 0 18px;font-size:13px;">' + issues.map(function(t){ return '<li>' + escVal(t) + '</li>'; }).join('') + '</ul>' +
     '<p id="gr-submit-hint" style="font-size:13px;margin:10px 0 0;">' + escVal(GR_SUBMIT_HINT) + '</p>' +
     '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-submit-modal\')">Затвори</button></div></div></div>');
+}
+/* ─── Етап Б: одобрение от ТРЗ (24.11.2026) ───────────────
+   Решения на Тенчо 23.11: одобряват ТРЗ и admin; одобрен връщат ТРЗ и admin; регионалният —
+   само подаден; коментарът при връщане е задължителен и стига до обекта САМО на екрана
+   (лентата над графика, докато е чернова). Правата решава grafik-api (can_approve / can_return). */
+function grReturnBannerHtml(){
+  var ro = grData && grData.reopened;
+  if(!ro || !ro.comment) return '';
+  return '<div class="card" id="gr-return-banner" style="border-left:4px solid #ea580c;background:#fff7ed;">' +
+    '<b style="color:#9a3412;">↩ Върнат за корекция' + (ro.by_name ? ' от ' + escVal(ro.by_name) : '') + (ro.at ? ' на ' + escVal(grFmtAt(ro.at)) : '') + ':</b> ' +
+    '<span id="gr-return-comment" style="white-space:pre-wrap;">' + escVal(ro.comment) + '</span></div>';
+}
+function grApproveOne(){
+  if(!grData || !grData.can_approve) return;
+  return grApprove([grStore]).then(function(n){ if(n) return grLoadMonth(); });
+}
+// stores — имената; връща броя одобрени. Отказ за някой обект — в съобщението, другите минават.
+function grApprove(stores){
+  return grApi('approve', { month: grMonth, stores: stores }).then(function(res){
+    if(!res.ok){ toast('Не е одобрено: ' + grErrText(res), '#dc2626'); return 0; }
+    var bad = (res.data.results || []).filter(function(r){ return !r.ok; });
+    var n = res.data.approved || 0;
+    toast(n ? '✔ Одобрени: ' + n + (bad.length ? ' · без ' + bad.length + ': ' + bad.map(function(r){ return r.store + ' (' + (r.message || r.reason) + ')'; }).join(', ') : '') : 'Нищо не е одобрено' + (bad.length ? ': ' + bad.map(function(r){ return r.store + ' (' + (r.message || r.reason) + ')'; }).join(', ') : '.'),
+      bad.length ? '#d97706' : undefined);
+    return n;
+  });
+}
+function grReturnOpen(store){
+  var old = document.getElementById('gr-return-modal');
+  if(old) old.parentNode.removeChild(old);
+  document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg open" id="gr-return-modal"><div class="modal"><h3>↩ Върни с коментар — ' + escVal(store) + ', ' + escVal(grMonthLabel(grMonth)) + '</h3>' +
+    '<div style="font-size:13px;color:#64748b;margin-bottom:6px;">Графикът става чернова; обектът вижда коментара над графика. Промените остават за новото подаване.</div>' +
+    '<textarea id="gr-return-text" rows="4" maxlength="500" style="width:100%;box-sizing:border-box;" placeholder="Какво да поправи обектът — напр. „Иван на 05.11: няма смяна“"></textarea>' +
+    '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-return-modal\')">Откажи</button><button class="btn btn-green" id="gr-return-send" onclick="grReturnSend(\'' + escAttrVal(store) + '\')">↩ Върни</button></div></div></div>');
+  var t = document.getElementById('gr-return-text'); if(t && t.focus) t.focus();
+}
+function grReturnSend(store){
+  var el = document.getElementById('gr-return-text'), c = el ? String(el.value).trim() : '';
+  if(!c){ toast('Напиши коментар — какво да поправи обектът.', '#dc2626'); return; }
+  return grApi('return', { store: store, month: grMonth, comment: c }).then(function(res){
+    if(!res.ok){ toast('Не е върнат: ' + grErrText(res), '#dc2626'); return; }
+    closeModal('gr-return-modal');
+    toast('↩ ' + store + ' — върнат с коментар.');
+    if(grView === 'overview') return grLoadOverview();
+    return grLoadMonth();
+  });
 }
 function grReopen(){
   if(!grData || !grData.can_reopen) return;
@@ -1434,7 +1545,7 @@ function grChCanEdit(){ return grCanEditStaff(); }
 function grChCanTrz(){ return !!grMe && (grMe.kind === 'trz' || !!grMe.can_admin); }
 function grChLoad(){
   grChanges = null;
-  if(!grData || grData.status !== 'submitted') return Promise.resolve();
+  if(!grData || !grFiled()) return Promise.resolve();
   var store = grStore, month = grMonth;
   return grApi('changes_list', { store: store, month: month }).then(function(res){
     if(store !== grStore || month !== grMonth) return;
@@ -1482,7 +1593,7 @@ function grChSame(actual, letter){
   return actual === p;
 }
 function grChangesHtml(){
-  if(grData.status !== 'submitted'){
+  if(!grFiled()){
     return '<div class="card" id="gr-ch-draft" style="color:#64748b;">Промените се въвеждат след подаване на графика. По ВТР чл. 19, ал. 4 всяка промяна в утвърдения график е актуализация с подпис.</div>';
   }
   var list = (grChanges || []).slice().sort(function(a, b){ return a.day - b.day || grChName(a.staff_id).localeCompare(grChName(b.staff_id), 'bg'); });
@@ -1571,7 +1682,7 @@ function grChTrz(id, done){
 }
 /* Печат за подпис (ВТР чл. 19, ал. 4) — в #mod-print, както графикът; заглавката е от снимката. */
 function grPrintChanges(){
-  if(!grData || grData.status !== 'submitted' || !(grChanges || []).length) return;
+  if(!grData || !grFiled() || !(grChanges || []).length) return;
   var wrap = document.getElementById('mod-print');
   if(!wrap) return;
   var snap = (grData.month_row && grData.month_row.snapshot) || {}, H = snap.header || {};
@@ -1624,7 +1735,7 @@ function grPresenceButtons(){
     '<button class="btn-sm" onclick="grExportPresence()" title="Присъствената форма — Excel за ТРЗ">📥 Присъствена Excel</button>';
 }
 function grPresenceModel(){
-  if(!grData || grData.status !== 'submitted' || !grData.month_row || !grData.month_row.snapshot) return null;
+  if(!grData || !grFiled() || !grData.month_row || !grData.month_row.snapshot) return null;
   var snap = grData.month_row.snapshot, H = snap.header || {};
   var p = GrafikEngine.presence(grData.setup || {}, grMonth, snap.rows || [], grChanges || []);
   var M = p.month;
@@ -1952,7 +2063,7 @@ function grSnapEmpty(r, hd, M){
 function grExportModel(){
   if(!grData || !grCalc) return null;
   var setup = grData.setup || {}, P = GrafikEngine.prepare(setup), M = GrafikEngine.monthInfo(grMonth, setup.extra_days);
-  var mr = grData.month_row || null, snap = grData.status === 'submitted' && mr && mr.snapshot ? mr.snapshot : null;
+  var mr = grData.month_row || null, snap = grFiled() && mr && mr.snapshot ? mr.snapshot : null;
   var draft = !snap, blocking = [];
   /* Заглавка — от снимката (подаден) или от setup (чернова). */
   var h = snap && snap.header ? snap.header : {};
