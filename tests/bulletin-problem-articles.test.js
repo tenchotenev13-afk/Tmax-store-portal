@@ -19,6 +19,10 @@
       POST → червен toast, модалът и бутонът остават; паднало качване →
       червен toast, 0 POST към problem_article_done; отметнат ред →
       „✓ Направено дд.мм от <кой>“ и няма <button> в реда.
+   5. Разлики — повторно отваряне (сесия bulletin-pa-refresh, 23.11.2026):
+      отметка, появила се в базата след първото зареждане, се вижда като
+      „✓ 1/1 обекта“ след реален клик по бутона на под-таба; докато чете —
+      досегашните данни. Мутант М6 (setSDView без force) → 2 ❌, exit 1.
    Интеграционно: bulletin.js + stock-differences.js заредени заедно в реда от
    index.html (секции 3–4 ползват helper-ите за снимки от Разлики).
 
@@ -344,6 +348,31 @@ function setFiles(h, n) {
   {
     const h = await bulView(TROYAN, { done: [{ id: 'x', article_id: 'b-all', store_name: 'Ловеч', done_by: 'Ловеч', done_at: '2026-11-22T10:00:00Z', photos: [] }] });
     ok('отметка на ДРУГ обект не отмята моя ред', !!bRow(h, 'b-all').querySelector('button.bul-pa-btn'));
+  }
+
+  section('5. Разлики — повторно отваряне на под-таба чете наново');
+  {
+    const done = [];
+    const h = sdEnv({ pa: [pa('p-one', '700', { bulletin_on: true, bulletin_stores: ['Троян'] })], done });
+    guard('loadStockDiff()', () => h.w.loadStockDiff());
+    await settle(() => h.w.sdPaLoaded && h.w.sdMe);
+    await ticks();
+    const swBtn = v => h.doc.querySelector('#sd-view-switch button[data-sd-view="' + v + '"]');
+    const cell = () => { const r = rowOf(h, 'p-one'); return r ? txt(r.querySelector('.sd-pa-bulcell')) : null; };
+    realClick(h.w, swBtn('problems'));
+    await settle(() => !!rowOf(h, 'p-one'));
+    for (let i = 0; i < 10; i++) await ticks();
+    const before = cell();
+    ok('първо отваряне: „✓ 0/1 обекта“', before === '✓ 0/1 обекта', before);
+    /* Отметка на обекта, появила се в базата след първото зареждане. */
+    done.push({ id: 'd-late', article_id: 'p-one', store_name: 'Троян', done_by: 'Управител Троян', done_at: '2026-11-23T11:00:00Z', photos: [] });
+    realClick(h.w, swBtn('reports'));
+    const gets0 = h.calls.get.filter(g => /problem_article_done/.test(String(g))).length;
+    realClick(h.w, swBtn('problems'));
+    ok('докато чете — досегашните данни, без празна таблица', cell() === before, cell());
+    await settle(() => cell() === '✓ 1/1 обекта');
+    ok('след повторно отваряне: „✓ 1/1 обекта“', cell() === '✓ 1/1 обекта', cell());
+    ok('… с ново четене на problem_article_done', h.calls.get.filter(g => /problem_article_done/.test(String(g))).length > gets0);
   }
 
   report();

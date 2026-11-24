@@ -174,13 +174,15 @@ const setV = (h, id, v) => { const el = h.doc.getElementById(id); if (el) el.val
     setV(h, 'sdpa-action', 'за преналепяне');
     setV(h, 'sdpa-note', 'проверка 19.11');
     setV(h, 'sdpa-from', '2026-11-19');
+    /* Отварянето на под-таба вече чете само (bulletin-pa-refresh, 23.11.2026) — броим от тук. */
+    const paGets0 = h.calls.get.filter(u => /problem_articles/.test(u)).length;
     clickSave(h); await settle();
     const p = paPosts(h)[0];
     ok('точно 1 POST към problem_articles', paPosts(h).length === 1);
     ok('тялото — точно полетата', !!p && JSON.stringify(Object.keys(p.body).sort()) === JSON.stringify(['bulletin_on', 'bulletin_stores', 'created_by', 'material_code', 'material_name', 'note', 'photo_required', 'reads_as_code', 'reads_as_name', 'source', 'status', 'store_action', 'valid_from']), p && JSON.stringify(p.body));
     ok('стойностите', !!p && p.body.material_code === '11111' && p.body.material_name === 'НОВ АРТИКУЛ' && p.body.reads_as_code === '22222' && p.body.reads_as_name === null &&
       p.body.store_action === 'за преналепяне' && p.body.note === 'проверка 19.11' && p.body.valid_from === '2026-11-19' && p.body.status === 'active' && p.body.source === 'office' && p.body.created_by === 'Миглена Павлова', p && JSON.stringify(p.body));
-    ok('след записа — регистърът се чете пак', h.calls.get.filter(u => /problem_articles/.test(u)).length === 2);
+    ok('след записа — регистърът се чете пак', h.calls.get.filter(u => /problem_articles/.test(u)).length === paGets0 + 1);
     ok('модалът е затворен', !h.doc.getElementById('sdpa-ov'));
     h.close();
   }

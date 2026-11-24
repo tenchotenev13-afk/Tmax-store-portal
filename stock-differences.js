@@ -20,9 +20,16 @@ function sdViewGet(){
 }
 function sdViewSave(v){ try{ localStorage.setItem(SD_VIEW_KEY, v); }catch(e){} }
 var sdView = sdViewGet();
-/* 'problems' (етап 7а) не се помни — следващото отваряне е на бланките/редовете. */
+/* 'problems' (етап 7а) не се помни — следващото отваряне е на бланките/редовете.
+   Всяко отваряне на под-таба чете регистъра и отметките наново (сесия
+   bulletin-pa-refresh, 23.11.2026): отметка на обекта след първото зареждане
+   иначе стоеше „0/1“ до презареждане. Докато чете — досегашните данни. */
 function setSDView(v){
-  if(v==='problems'){ sdView = 'problems'; renderStockDiff(); return; }
+  if(v==='problems'){
+    sdView = 'problems'; renderStockDiff();
+    sdLoadProblemArticles(true).then(function(){ if(sdView==='problems') renderStockDiff(); });
+    return;
+  }
   sdView = (v==='rows') ? 'rows' : 'reports'; sdViewSave(sdView); renderStockDiff();
 }
 /* Отваря изгледа с бланките, без да рендира (за скокове отвън, преди showModule). */
@@ -7213,7 +7220,7 @@ if(typeof startApp === 'function'){
    преналепяне). Изгледът sdView 'problems' — третият бутон в превключвателя
    „Бланки / Решени редове“, видим за всички роли, които виждат Разлики.
    · Четене — веднъж при отваряне на модула (sdLoadProblemArticles; повторно
-     само след собствен запис). Паднало четене → console.error, празен
+     след собствен запис и при всяко отваряне на под-таба — setSDView). Паднало четене → console.error, празен
      регистър, червен ред само в под-таба; във формата — без кутийка и без
      грешка към обекта.
    · Писане — само групите 'razliki_co' / 'razliki_barcode' (sdMe, етап 5а);
