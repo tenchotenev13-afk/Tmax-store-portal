@@ -1,6 +1,13 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v75 (24.11.2026) — ЕДНО нещо (копие от report.js, сесия
+      late-transport-always; обещано на Теодор): в седмичния подзаглавието
+      „Закъснял транспорт“ се показва ВИНАГИ — при 0 сиво „Закъснял транспорт
+      (0)“ (без 🔴) и един сив ред „няма“ (reportLateSectionHtml). Закъснелите
+      клиентски заявки — пак само при > 0. dry_run weekly: late.orders /
+      late.transport. Останалото — непроменено.
+
    v74 (23.11.2026) — ДВЕ неща в minus_multi (копие от report.js, сесия
       minusi-weekly-prices-stores; Теодор 23.11, решения А и Б на Тенчо):
       1) нова секция „Ценови разлики (минус ↔ заметнат)“ в писмото към офиса
@@ -3697,7 +3704,6 @@ function reportLateSectionHtml(cross, scoped){
   var orders = cross.lateOrders || [];
   var byStore = cross.lateOrdersByStore || [];
   var transport = cross.lateTransport || [];
-  if (!orders.length && !transport.length) return '';
 
   var dayWord = function(d){ return d === 1 ? ' ден' : ' дни'; };
   var box = function(inner){
@@ -3735,6 +3741,9 @@ function reportLateSectionHtml(cross, scoped){
       head('🔴 Закъснели клиентски заявки ('+orders.length+')') + box(body) + '</div>';
   }
 
+  /* Транспортът се показва ВИНАГИ (24.11.2026, обещано на Теодор): празна
+     секция изглежда като счупен отчет. При 0 — сиво заглавие без 🔴 и един
+     сив ред „няма“. Заявките остават само при > 0. */
   if (transport.length) {
     var trBody = transport.map(function(t){
       var where = t.from ? esc(t.from)+' → '+esc(t.store) : esc(t.customer || '—');
@@ -3743,6 +3752,11 @@ function reportLateSectionHtml(cross, scoped){
     }).join('');
     out += '<div style="margin-top:12px;">' +
       head('🔴 Закъснял транспорт ('+transport.length+')') + box(trBody) + '</div>';
+  } else {
+    out += '<div style="margin-top:12px;">' +
+      '<div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:6px;">Закъснял транспорт (0)</div>' +
+      '<div style="background:#FFFFFF;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">' +
+      '<div style="padding:7px 10px;font-size:12px;color:#6b7280;">няма</div></div></div>';
   }
 
   return out;
@@ -6093,6 +6107,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok:true, dry_run:true, type:type,
         diffStale:{ days:wkDs.days, stores:(wkDs.byStore || []).length, control:wkDs.total.control, warehouse:wkDs.total.warehouse, coSide:wkDs.total.coSide, storeSide:wkDs.total.storeSide, transit:wkDs.total.transit, oldest:wkDs.total.oldest },
         transit:{ open:wkOpen, stale:wkCross.transitStale, noAnswer:wkCross.transitNoAnswer, undelivered:wkCross.transitUndelivered, recon:wkCross.transitRecon },
+        late:{ orders:(wkCross.lateOrders || []).length, transport:(wkCross.lateTransport || []).length },
         rows_read: wkCross.rowsRead, partial: wkCross.partial }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 

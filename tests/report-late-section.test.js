@@ -270,30 +270,81 @@ function cross(h, scope) {
   }
 
   /* ── 6. Празните случаи ──────────────────────────────────────────────── */
-  section('6. Нула закъснения → секцията отпада');
+  /* От 24.11.2026 (сесия late-transport-always, обещано на Теодор):
+     „Закъснял транспорт" стои ВИНАГИ — при 0 сиво заглавие „(0)" без 🔴 и
+     един сив ред „няма". Празна секция изглеждаше като счупен отчет.
+     Заявките — пак само при > 0. Само cross = null дава празен низ.
+     МУТАЦИИ (24.11.2026, всяка ръчно в report.js, всяка събаря секцията):
+     върнато ранното `return ''` при 0+0 → пада а) и г); махнат редът „няма"
+     → падат а), б), г); „няма" и при 1 транспорт → пада в). */
+  section('6. Нула закъснения → транспортът остава с „няма"');
   {
     const h = env();
-    ok('празно и в двата списъка → празен низ',
-       h.w.reportLateSectionHtml(
-         { lateOrders: [], lateOrdersByStore: [], lateTransport: [] }, true) === '');
-    ok('липсващ cross → празен низ', h.w.reportLateSectionHtml(null, true) === '');
+    const NYAMA = '>няма</div>';
+    const cnt = function (s, sub) { return s.split(sub).length - 1; };
 
-    /* Само едната подсекция — другата не бива да се появи като празна. */
+    /* а) 0 заявки + 0 транспорт */
+    const zero = h.w.reportLateSectionHtml(
+      { lateOrders: [], lateOrdersByStore: [], lateTransport: [] }, true);
+    ok('а) 0+0 → има „Закъснял транспорт (0)"',
+       zero.indexOf('Закъснял транспорт (0)') >= 0, zero);
+    ok('а) 0+0 → точно един ред „няма"', cnt(zero, NYAMA) === 1, zero);
+    ok('а) 0+0 → „няма" е в сиво #6b7280',
+       /color:#6b7280;">няма<\/div>/.test(zero), zero);
+    ok('а) 0+0 → без 🔴 при нула (сиво заглавие)',
+       zero.indexOf('🔴') < 0 && /color:#6b7280;[^"]*">Закъснял транспорт \(0\)/.test(zero), zero);
+    ok('а) 0+0 → НЯМА „Закъснели клиентски заявки"',
+       zero.indexOf('Закъснели клиентски заявки') < 0);
+
+    /* б) 2 заявки + 0 транспорт */
+    const coOnly = h.w.reportLateSectionHtml(
+      { lateOrders: [{ store: A, in_num: '9', customer: 'К', fulfiller: 'Ф', days: 2 },
+                     { store: B, in_num: '8', customer: 'Л', fulfiller: 'Ф', days: 1 }],
+        lateOrdersByStore: [{ store: A, count: 1, maxDays: 2 }, { store: B, count: 1, maxDays: 1 }],
+        lateTransport: [] }, true);
+    ok('б) 2+0 → заглавие за заявките (2)',
+       coOnly.indexOf('🔴 Закъснели клиентски заявки (2)') >= 0, coOnly);
+    ok('б) 2+0 → и „Закъснял транспорт (0)" с „няма"',
+       coOnly.indexOf('Закъснял транспорт (0)') >= 0 && cnt(coOnly, NYAMA) === 1, coOnly);
+    ok('б) заявките са ПРЕДИ транспорта',
+       coOnly.indexOf('Закъснели клиентски заявки') < coOnly.indexOf('Закъснял транспорт'));
+    ok('б) единствено число и при дните', coOnly.indexOf('+2 дни') >= 0 && coOnly.indexOf('+1 ден') >= 0);
+
+    /* в) 0 заявки + 1 транспорт */
     const onlyTr = h.w.reportLateSectionHtml(
       { lateOrders: [], lateOrdersByStore: [],
         lateTransport: [{ store: A, from: '', customer: 'Клиент', days: 4 }] }, true);
-    ok('само транспорт → няма заглавие за заявките',
-       onlyTr.indexOf('Закъснели клиентски заявки') < 0 &&
-       onlyTr.indexOf('Закъснял транспорт (1)') >= 0);
+    ok('в) 0+1 → редът на транспорта', onlyTr.indexOf('🔴 Закъснял транспорт (1)') >= 0 &&
+       onlyTr.indexOf('Клиент') >= 0, onlyTr);
+    ok('в) 0+1 → БЕЗ „няма"', cnt(onlyTr, NYAMA) === 0, onlyTr);
+    ok('в) 0+1 → без заглавие за заявките', onlyTr.indexOf('Закъснели клиентски заявки') < 0);
 
-    const onlyCo = h.w.reportLateSectionHtml(
-      { lateOrders: [{ store: A, in_num: '9', customer: 'К', fulfiller: 'Ф', days: 2 }],
-        lateOrdersByStore: [{ store: A, count: 1, maxDays: 2 }],
-        lateTransport: [] }, true);
-    ok('само заявки → няма заглавие за транспорта',
-       onlyCo.indexOf('Закъснял транспорт') < 0 &&
-       onlyCo.indexOf('Закъснели клиентски заявки (1)') >= 0);
-    ok('единствено число и при дните', onlyCo.indexOf('+2 дни') >= 0);
+    /* г) cross без lateTransport (и без заявки) → като а), без изключение */
+    let noKey = null, err = null;
+    try { noKey = h.w.reportLateSectionHtml({}, true); } catch (e) { err = e; }
+    ok('г) без lateTransport → без изключение', !err, err && err.message);
+    ok('г) без lateTransport → „Закъснял транспорт (0)" + „няма"',
+       !!noKey && noKey.indexOf('Закъснял транспорт (0)') >= 0 && cnt(noKey, NYAMA) === 1, noKey);
+    ok('г) без lateTransport → без заявки', !!noKey && noKey.indexOf('Закъснели клиентски заявки') < 0);
+    ok('г) същото като а)', noKey === zero);
+
+    /* д) cross = null */
+    ok('д) липсващ cross → празен низ', h.w.reportLateSectionHtml(null, true) === '' &&
+       h.w.reportLateSectionHtml(undefined, false) === '');
+
+    /* И в пълния режим, и в цялата седмична секция. */
+    ok('пълен режим, 0+0 → пак „(0)" + „няма"',
+       cnt(h.w.reportLateSectionHtml({ lateOrders: [], lateOrdersByStore: [], lateTransport: [] }, false), NYAMA) === 1);
+    h.close();
+  }
+  {
+    const h = env();
+    const c = await cross(h, SCOPE);
+    const sec = h.w.buildCrossModuleSectionHtml(Object.assign({}, c, { lateTransport: [] }), true);
+    ok('седмичната секция при 0 транспорт носи „Закъснял транспорт (0)" и „няма"',
+       sec.indexOf('Закъснял транспорт (0)') >= 0 && sec.indexOf('>няма</div>') >= 0);
+    ok('и пак е ПРЕДИ „Каса — Сторно бележки"',
+       sec.indexOf('Закъснял транспорт (0)') < sec.indexOf('Каса — Сторно бележки'));
     h.close();
   }
 

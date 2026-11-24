@@ -273,6 +273,14 @@ function withoutChecklistTable(newHtml, oldHtml, tbl) {
        checklist-3b-report.test.js; тук се изрязва, по същия начин. */
     const clr = h.w.reportChecklistResponsesHtml ? h.w.reportChecklistResponsesHtml(data.cross) : '';
     if (clr && rest0) rest0 = withoutSection(rest0, clr);
+    /* От 24.11.2026 (late-transport-always) „Закъснял транспорт" стои винаги —
+       при 0 сиво „(0)" с ред „няма". Тук закъснения няма, затова във
+       фикстурата секцията я няма; пази се в report-late-section.test.js,
+       тук се изрязва (точно веднъж), по същия начин. */
+    const late = h.w.reportLateSectionHtml(data.cross, data.scoped);
+    ok('закъсненията тук са само сивото „(0)" — фикстурата е без тях',
+      late.indexOf('Закъснял транспорт (0)') >= 0 && late.indexOf('Закъснели клиентски заявки') < 0, late);
+    if (late && rest0) rest0 = withoutSection(rest0, late);
     let before0 = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
     ok('фикстурата отпреди промяната я има', !!before0);
     [rest0, before0] = withoutChecklistTable(rest0, before0, h.w.reportChecklistSectionHtml(data.cross));

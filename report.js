@@ -2683,7 +2683,6 @@ function reportLateSectionHtml(cross, scoped){
   var orders = cross.lateOrders || [];
   var byStore = cross.lateOrdersByStore || [];
   var transport = cross.lateTransport || [];
-  if (!orders.length && !transport.length) return '';
 
   var dayWord = function(d){ return d === 1 ? ' ден' : ' дни'; };
   var box = function(inner){
@@ -2721,6 +2720,9 @@ function reportLateSectionHtml(cross, scoped){
       head('🔴 Закъснели клиентски заявки ('+orders.length+')') + box(body) + '</div>';
   }
 
+  /* Транспортът се показва ВИНАГИ (24.11.2026, обещано на Теодор): празна
+     секция изглежда като счупен отчет. При 0 — сиво заглавие без 🔴 и един
+     сив ред „няма“. Заявките остават само при > 0. */
   if (transport.length) {
     var trBody = transport.map(function(t){
       var where = t.from ? esc(t.from)+' → '+esc(t.store) : esc(t.customer || '—');
@@ -2729,6 +2731,11 @@ function reportLateSectionHtml(cross, scoped){
     }).join('');
     out += '<div style="margin-top:12px;">' +
       head('🔴 Закъснял транспорт ('+transport.length+')') + box(trBody) + '</div>';
+  } else {
+    out += '<div style="margin-top:12px;">' +
+      '<div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:6px;">Закъснял транспорт (0)</div>' +
+      '<div style="background:#FFFFFF;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">' +
+      '<div style="padding:7px 10px;font-size:12px;color:#6b7280;">няма</div></div></div>';
   }
 
   return out;
