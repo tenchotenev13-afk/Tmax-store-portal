@@ -2163,6 +2163,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('обектът: лента „↩ Върнат за корекция от ТРЗ …: Иван на 05.11 — няма смяна“ над графика, чернова', !!bn && /от ТРЗ/.test(bn.textContent) && m.doc.getElementById('gr-return-comment').textContent === 'Иван на 05.11 — няма смяна' &&
       /Чернова/.test(m.doc.getElementById('gr-status').textContent) && !!btn(mod(m), 'Подай'), bn && bn.textContent);
     ok('обектът: без „✔ Одобри“ и без „↩ Върни“', !m.doc.getElementById('gr-approve-btn') && !m.doc.getElementById('gr-return-btn'));
+    ok('обектът: етикетът „↩ върнат за корекция“ до статуса го НЯМА — само лентата с коментара (решение 24.11)', !m.doc.getElementById('gr-reopened') && m.doc.querySelectorAll('#mod-grafik .gr-reopened').length === 0 && !!m.doc.getElementById('gr-return-banner'));
     // Admin одобрява от самия график (Кърджали наново подаден).
     Object.assign(S.months['Кърджали|2026-11-01'], { status: 'submitted', submitted_by_name: 'Управител Кърджали', submitted_at: '2026-11-09T10:00:00Z', snapshot: { rows: [], header: {} } });
     delete S.months['Кърджали|2026-11-01'].keep; delete S.months['Кърджали|2026-11-01'].reopened;

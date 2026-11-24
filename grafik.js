@@ -560,7 +560,9 @@ function grReopenedHtml(ro, id){
 }
 function grStatusBadge(){
   if(!grData) return '';
-  return grStatusBadgeBase() + grReopenedHtml(grData.reopened, 'gr-reopened');
+  /* Върнат с коментар (етап Б) — само лентата с коментара над мрежата, без етикета до статуса (решение 24.11). */
+  var ro = grData.reopened;
+  return grStatusBadgeBase() + (ro && ro.comment ? '' : grReopenedHtml(ro, 'gr-reopened'));
 }
 function grStatusBadgeBase(){
   var m = grData.month_row || {};

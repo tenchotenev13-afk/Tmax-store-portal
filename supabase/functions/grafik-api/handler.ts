@@ -702,6 +702,8 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const at = new Date().toISOString();
       const ok = await repo.updateMonth(month.id, {
         status: "submitted", submitted_at: at, submitted_by: acc.email, submitted_by_name: acc.name, snapshot, updated_at: at,
+        // Решение на Тенчо 24.11.2026: новото подаване изчиства коментара от последното връщане (историята е в одита, grafik_return).
+        return_comment: null, returned_at: null, returned_by_name: null,
       }, "draft");
       if (!ok) throw new HttpError(409, "submitted", "Графикът вече е подаден.");
       // Решение а: промените от предишното подаване остават; махат се само невалидните.

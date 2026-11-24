@@ -1087,10 +1087,11 @@ Deno.test("return: коментар задължителен; одобрен —
   const ot = (await call(r, U.trz, { action: "overview", month: "2026-11" })).body.stores.filter((s: { store: string }) => s.store === "Кърджали")[0];
   eq([ot.status, ot.reopened.comment, ot.can_approve, ot.can_return], ["submitted", "Иван на 5.11 — няма смяна", false, false], "обзор ТРЗ: върнат — с коментара, без бутони");
   eq((await ret(U.trz, "Кърджали", "пак")).body.reason, "not_submitted", "чернова — не");
-  // Новото подаване: лентата изчезва (reopened), коментарът остава в колоните като история.
+  // Новото подаване: лентата изчезва (reopened), коментарът се изчиства от колоните (решение на Тенчо 24.11) — историята е в одита.
   eq((await call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: snap(ids) })).status, 200, "ново подаване");
   const m2 = (await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
-  eq([m2.status, m2.reopened, m2.month_row.return_comment, m2.can_approve], ["submitted", null, "Иван на 5.11 — няма смяна", false], "подаден наново: без лента; историята в колоната");
+  eq([m2.status, m2.reopened, m2.month_row.return_comment, m2.month_row.returned_at, m2.month_row.returned_by_name, m2.can_approve], ["submitted", null, null, null, null, false], "подаден наново: без лента, коментарът е изчистен от колоните (решение 24.11)");
+  eq((r.audits.filter((a) => a.event === "grafik_return")[0] as unknown as { details: Record<string, unknown> }).details.comment, "Иван на 5.11 — няма смяна", "историята остава в одита");
   eq((await call(r, U.trz, { action: "approve", month: "2026-11", store: "Кърджали" })).body.approved, 1, "и пак може да се одобри");
   // Регионалният връща свой подаден (Шумен е одобрен → първо ТРЗ го връща, после подаване).
   eq((await ret(U.trz, "Шумен", "провери Шумен")).status, 200, "ТРЗ връща одобрения Шумен");
