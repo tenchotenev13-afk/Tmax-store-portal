@@ -18,8 +18,10 @@
       Няма режим в CHECKLIST_PORTAL_MODE, затова дори при стария източник
       'recurring:72aed3fc…' клетката остава празна — отметките по „ЗАРЕЖДАНЕ
       АРТИКУЛИ НА Л.М." не я пълнят.
-   5. stoka_vrashtane чете само stock_returns source=eq.diff — рекламациите
-      са в srok_godnost и не се броят два пъти.
+   5. stoka_vrashtane — от 24.11.2026 от „СПИСЪК СТОКА ЗА ИЗТЕГЛЯНЕ ПО
+      РАЗЛИКИ" (сряда, режим any), не от stock_returns: таблицата не се чете.
+      Дотогава четеше stock_returns source=eq.diff (рекламациите са в
+      srok_godnost). Подробно — tests/checklist-returns.test.js.
 
    Етап 2 (checklist-live-calc, 26.10.2026): отварянето вече не пише
    portal_value — стойностите се проверяват през checklistComputePortalValues()
@@ -36,6 +38,7 @@ const { boot, ok, section, report, ticks } = H;
 const SROK_ID = '0a20f6e8-c526-400b-bed5-57194f35e4e5';
 const RAZL_ID = '166a22f8-c884-4019-862d-4f20175baa12';
 const LM_ID   = '72aed3fc-1720-4205-be89-feb242b2627f';
+const VRA_ID  = 'e9d418af-311a-45ec-b4da-0f9ad69205e7';
 
 const YEAR = 2026, WEEK = 43;
 const WK = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22',
@@ -44,7 +47,7 @@ const WK = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22',
 function metrics(src) {
   src = src || {};
   return [
-    ['stoka_vrashtane',  'Стока за връщане- ТАБЛИЦИ',  'module:returns'],
+    ['stoka_vrashtane',  'Стока за връщане- ТАБЛИЦИ',  src.vra  || 'recurring:' + VRA_ID],
     ['zanulyavane_lm',   'таблица зануляване л.м.',    src.lm   || 'recurring:' + LM_ID],
     ['razliki_dostavka', 'Разлики от доставка',        src.razl || 'recurring:' + RAZL_ID],
     ['srok_godnost',     'Срок на годност/рекламации', src.srok || 'recurring:' + SROK_ID]
@@ -57,7 +60,8 @@ function metrics(src) {
 const TASKS = [
   { id: SROK_ID, due_weekdays: [2] },
   { id: RAZL_ID, due_weekdays: [0, 1, 2, 3, 4] },
-  { id: LM_ID,   due_weekdays: [0] }
+  { id: LM_ID,   due_weekdays: [0] },
+  { id: VRA_ID,  due_weekdays: [2] }
 ];
 
 const USERS = ['Враца', 'Габрово', 'Добрич', 'Централен офис']
@@ -125,14 +129,15 @@ function pv(h, store, key) { return (h.__vals || {})[store + '|' + key]; }
     ok('srok_godnost → any', M.srok_godnost === 'any', M.srok_godnost);
     ok('zanulyavane_lm — без режим (ръчна от 28.10)', M.zanulyavane_lm === undefined, M.zanulyavane_lm);
     ok('razliki_dostavka → count', M.razliki_dostavka === 'count', M.razliki_dostavka);
+    ok('stoka_vrashtane → any (от 24.11.2026)', M.stoka_vrashtane === 'any', M.stoka_vrashtane);
     ok('razhodi и dogovoreni_returi остават без режим', !M.razhodi && !M.dogovoreni_returi);
 
     h.w.checklistMetrics = metrics();
     const autoKeys = h.w.checklistAutoMetrics().map(function (m) { return m.key; }).sort();
-    ok('при recurring: — srok_godnost и razliki_dostavka; zanulyavane_lm — НЕ (без режим, дори при стария източник)',
-       JSON.stringify(autoKeys) === JSON.stringify(['razliki_dostavka', 'srok_godnost']), JSON.stringify(autoKeys));
+    ok('при recurring: — srok_godnost, razliki_dostavka и stoka_vrashtane; zanulyavane_lm — НЕ (без режим, дори при стария източник)',
+       JSON.stringify(autoKeys) === JSON.stringify(['razliki_dostavka', 'srok_godnost', 'stoka_vrashtane']), JSON.stringify(autoKeys));
 
-    h.w.checklistMetrics = metrics({ lm: 'manual', razl: 'manual', srok: 'manual' });
+    h.w.checklistMetrics = metrics({ lm: 'manual', razl: 'manual', srok: 'manual', vra: 'manual' });
     const before = h.w.checklistAutoMetrics().length;
     ok('при manual (преди миграцията) — нито една', before === 0, String(before));
     h.close();
@@ -211,16 +216,19 @@ function pv(h, store, key) { return (h.__vals || {})[store + '|' + key]; }
     h.close();
   }
 
-  /* ── 5. Стока за връщане — само по разлики ──────────────────────────── */
-  section('5. stoka_vrashtane — stock_returns само source=eq.diff');
+  /* ── 5. Стока за връщане — от задачата в сряда (24.11.2026) ─────────── */
+  section('5. stoka_vrashtane — „СПИСЪК СТОКА ЗА ИЗТЕГЛЯНЕ ПО РАЗЛИКИ", сряда');
   {
-    const h = env({ returns: [{ store_name: 'Враца', status: 'taken', confirmed_date: null, source: 'diff' }] });
+    const h = env({
+      comps: [comp(VRA_ID, 'Враца', WK[2]), comp(VRA_ID, 'Габрово', WK[3])],
+      returns: [{ store_name: 'Враца', status: 'pending', confirmed_date: null, source: 'diff' }]
+    });
     await open(h);
+    ok('сряда → da', pv(h, 'Враца', 'stoka_vrashtane') === 'da', JSON.stringify(pv(h, 'Враца', 'stoka_vrashtane')));
+    ok('четвъртък → ne', pv(h, 'Габрово', 'stoka_vrashtane') === 'ne', JSON.stringify(pv(h, 'Габрово', 'stoka_vrashtane')));
     const q = h.calls.get.filter(function (u) { return u.indexOf('/stock_returns') >= 0; });
-    ok('има заявка към stock_returns', q.length > 0, JSON.stringify(q));
-    ok('всяка заявка носи source=eq.diff', q.length > 0 && q.every(function (u) { return /[?&]source=eq\.diff(&|$)/.test(u); }), JSON.stringify(q));
-    ok('CHECKLIST_MODULE_FILL.returns.query има филтъра',
-       /(^|&)source=eq\.diff(&|$)/.test(h.w.CHECKLIST_MODULE_FILL.returns.query), h.w.CHECKLIST_MODULE_FILL.returns.query);
+    ok('stock_returns не се чете', q.length === 0, JSON.stringify(q));
+    ok('CHECKLIST_MODULE_FILL няма returns', !h.w.CHECKLIST_MODULE_FILL.returns);
     h.close();
   }
 

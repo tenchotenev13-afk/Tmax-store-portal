@@ -81,10 +81,12 @@ begin
   got := pg_temp.v(2027, 1, '__sqltest_a', '__sqltest_cnt');
   fails := fails || pg_temp.t(got = '0/5', 'седмица 1/2027 без 01.01.2027 → 0/5, а е ' || got);
 
-  -- 10. модули за обект без записи: returns → NULL; wrong_receipt → 0/0
-  --     (минала седмица), NULL за бъдеща.
+  -- 10. Стока за връщане: от 24.11.2026 (20261124120000) — постоянна задача
+  --     „СПИСЪК СТОКА ЗА ИЗТЕГЛЯНЕ ПО РАЗЛИКИ" (сряда, any), не module:returns;
+  --     тестов обект без отметка → ne (до миграцията беше NULL).
+  --     wrong_receipt за обект без записи → 0/0 (минала седмица), NULL за бъдеща.
   got := pg_temp.v(2026, 43, '__sqltest_a', 'stoka_vrashtane');
-  fails := fails || pg_temp.t(got = '∅', 'returns без записи → NULL, а е ' || got);
+  fails := fails || pg_temp.t(got = 'ne', 'stoka_vrashtane без отметка в сряда → ne, а е ' || got);
   got := pg_temp.v(2026, 43, '__sqltest_a', 'storna_priem');
   fails := fails || pg_temp.t(got = '0/0', 'wrong_receipt без сторна → 0/0, а е ' || got);
   got := pg_temp.v(2030, 10, '__sqltest_a', 'storna_priem');

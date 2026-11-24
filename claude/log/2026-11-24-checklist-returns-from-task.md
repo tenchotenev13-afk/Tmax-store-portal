@@ -1,0 +1,7 @@
+# 24.11 — checklist-returns-from-task
+
+- Чек лист, колона „Стока за връщане- ТАБЛИЦИ" (stoka_vrashtane): от седмица 48 — от постоянната задача „СПИСЪК СТОКА ЗА ИЗТЕГЛЯНЕ ПО РАЗЛИКИ" (e9d418af, сряда), режим any → да/не, както srok_godnost. Решение на Тенчо 24.11 по писмо на Миглена Павлова: старото „обработени/всички" stock_returns source='diff' към затварянето броеше и редовете от четвъртък/петък.
+- Проверено в базата преди промяната: задачата е сряда (due_weekdays [2]), `linked_module` NULL (както и при 0a20f6e8); крон 23 `stock_returns_sync_completions()` всеки час + тригерите на stock_returns; от 14.10 всички отметки по задачата са `auto:stock-returns` (07.10 — 10 авто + 7 ръчни); седмиците 40–47 са замразени с по 18 portal_value — не се пипат.
+- checklist.js: `CHECKLIST_PORTAL_MODE.stoka_vrashtane = 'any'`; махнати записът `returns` в `CHECKLIST_MODULE_FILL` и `checklistReturnsValue()` (друг показател с module:returns няма). `checklist_portal_values()` — без промяна (работи по source/portal_mode; клонът ѝ за module:returns остава неизползван).
+- Миграция само по данни `20261124120000_weekly_checklist_stoka_vrashtane_task` (+ `_down`), огледало `weekly-checklist-stoka-vrashtane-task-schema.sql` — ЧАКА ПРИЛАГАНЕ.
+- Тестове: `checklist-returns.test.js` пренаписан (21 проверки; „ред от четвъртък не прави колоната „не""; 3 мутанта убити), обновени `checklist-portal-columns`, `checklist-portal-value` (пробата „без режим" е вече razhodi) и `tests/sql/checklist-portal-values.test.sql` (т.10 → 'ne'; пуска се след миграцията).

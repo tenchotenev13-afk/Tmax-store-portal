@@ -22,6 +22,9 @@
 (промяна само в данни, weekly-checklist-label-razliki-schema.sql; миграция weekly_checklist_label_razliki — версия 20261124100125, приложена 24.11.2026)
 - 23.11 · weekly_checklist_metrics — промяна само в данни (label на razliki_dostavka → „Разлики логистични складове"), без промяна за огледалото
 
+(промяна само в данни, weekly-checklist-stoka-vrashtane-task-schema.sql; миграция weekly_checklist_stoka_vrashtane_task — чака прилагане)
+- 24.11 · weekly_checklist_metrics — промяна само в данни (stoka_vrashtane: source → recurring:e9d418af…, portal_mode → 'any'), без промяна за огледалото
+
 (изтриване на данни, без схемна промяна — огледалото прави UPSERT и не трие)
 - 23.11 · kasa_reports — РЪЧНО ИЗТРИВАНЕ на ред id e6cc5cfd-f9d0-47bc-a1c5-7d0b3e41bb8a (дублиран отчет Шумен 20.11.2026, каса 2; изтрит в основната база на 23.11.2026, остава eebfd0b1-f6fd-44b1-855a-caea59fb0cdf)
 

@@ -2,7 +2,7 @@
 
    Два от шестте показателя идват от постоянни задачи и се смятат при
    отваряне на седмица. Останалите четири остават празни — включително
-   „Стока за връщане- ТАБЛИЦИ", която ИМА recurring: източник, но няма
+   „разходи" (до 24.11.2026 — „Стока за връщане"), която ИМА recurring: източник, но няма
    due_weekdays и няма договорено правило. Точно затова списъкът с режими е
    по metric.key, а не „всичко с recurring: източник".
 
@@ -35,11 +35,14 @@ const MIN_ID = '03c44560-9572-4274-ad53-5228d61b4de7';
 const VRA_ID = '0a20f6e8-c526-400b-bed5-57194f35e4e5';
 
 /* Реалните редове от weekly_checklist_metrics към 02.09.2026. Трите
-   recurring: източника са тук нарочно — за да се види, че се пълнят ДВА. */
+   recurring: източника са тук нарочно — за да се види, че се пълнят ДВА.
+   От 24.11.2026 stoka_vrashtane ИМА режим ('any', „СПИСЪК СТОКА ЗА ИЗТЕГЛЯНЕ
+   ПО РАЗЛИКИ“ — виж checklist-returns.test.js), затова третият recurring:
+   показател без режим тук е razhodi (ключ без запис в CHECKLIST_PORTAL_MODE). */
 const METRICS = [
   { key:'revizia_953',     label:'ревизия',        sublabel:'953', value_type:'yes_no',      sort_order:1, active:true, source:'recurring:' + REV_ID },
   { key:'spravka_minusi',  label:'справка минуси', sublabel:'',    value_type:'yes_no',      sort_order:2, active:true, source:'recurring:' + MIN_ID },
-  { key:'stoka_vrashtane', label:'стока',          sublabel:'',    value_type:'yes_no',      sort_order:3, active:true, source:'recurring:' + VRA_ID },
+  { key:'razhodi',         label:'разходи',        sublabel:'',    value_type:'yes_no',      sort_order:3, active:true, source:'recurring:' + VRA_ID },
   { key:'storna_priem',    label:'сторна',         sublabel:'',    value_type:'number',      sort_order:4, active:true, source:'module:kasa' },
   { key:'stoka_na_pat',    label:'на път',         sublabel:'',    value_type:'yes_no',      sort_order:5, active:true, source:'module:transit' },
   { key:'preocenka',       label:'преоценка',      sublabel:'',    value_type:'yes_no_none', sort_order:6, active:true, source:'manual' }
@@ -295,8 +298,8 @@ function cellVal(h, store, key) {
     });
     ok('пълни се revizia_953', !!keys.revizia_953, Object.keys(keys).join(','));
     ok('пълни се spravka_minusi', !!keys.spravka_minusi, Object.keys(keys).join(','));
-    ok('НЕ се пълни stoka_vrashtane (recurring, но без правило)',
-       !keys.stoka_vrashtane, Object.keys(keys).join(','));
+    ok('НЕ се пълни razhodi (recurring, но без правило)',
+       !keys.razhodi, Object.keys(keys).join(','));
     ok('НЕ се пълни storna_priem', !keys.storna_priem, Object.keys(keys).join(','));
     ok('НЕ се пълни stoka_na_pat', !keys.stoka_na_pat, Object.keys(keys).join(','));
     ok('НЕ се пълни preocenka', !keys.preocenka, Object.keys(keys).join(','));
@@ -314,7 +317,7 @@ function cellVal(h, store, key) {
     h.close();
 
     /* ЯДРОТО на списъка с режими, отделно от липсващите due_weekdays.
-       Горните проверки минаваха и по ВТОРАТА причина: „Стока за връщане" е
+       Горните проверки минаваха и по ВТОРАТА причина: „разходи" е
        без due_weekdays, тоест правилото ѝ и без това е неизвестно. Затова
        тук ѝ се ДАВАТ дни — остава само липсата на режим. Без този случай
        махането на CHECKLIST_PORTAL_MODE от филтъра минаваше незабелязано
@@ -339,7 +342,7 @@ function cellVal(h, store, key) {
     const keys3 = {};
     Object.keys(h3.__vals).forEach(function (k) { keys3[k.split('|')[1]] = 1; });
     ok('показател с recurring: И с due_weekdays, но без режим, пак НЕ се пълни',
-       !keys3.stoka_vrashtane, Object.keys(keys3).join(','));
+       !keys3.razhodi, Object.keys(keys3).join(','));
     ok('а другите два продължават да се пълнят',
        !!keys3.revizia_953 && !!keys3.spravka_minusi, Object.keys(keys3).join(','));
     ok('пак точно два показателя', Object.keys(keys3).length === 2, Object.keys(keys3).join(','));

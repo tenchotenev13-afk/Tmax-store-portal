@@ -463,6 +463,15 @@ function checklistLatestSentWeek() {
    Докато миграцията не е приложена, редовете са с source 'manual' и
    checklistAutoMetrics() ги прескача — записът тук сам не пълни нищо.
 
+   От 24.11.2026 (седмица 48; решение на Тенчо по писмо на Миглена Павлова)
+   и stoka_vrashtane ← „СПИСЪК СТОКА ЗА ИЗТЕГЛЯНЕ ПО РАЗЛИКИ" (сряда) → da/ne,
+   точно като srok_godnost. Отметката я слага stock_returns_sync_completions()
+   по редовете source='diff', потвърдени от обекта, и след срядата се
+   замразява. Дотогава колоната беше 'module:returns' — „обработени/всички"
+   за ЦЯЛАТА таблица към момента на затварянето, тоест ред от четвъртък или
+   петък излизаше като необработен. Седмиците 40–47 са замразени и остават
+   с брой (миграция weekly_checklist_stoka_vrashtane_task).
+
    РЪЧНИ ЗАСЕГА (source 'manual'): razhodi, dogovoreni_returi, zanulyavane_lm. Свързването
    на всяка от тях е смяна на source в weekly_checklist_metrics
    ('recurring:<uuid>' или 'module:<id>') плюс ред ТУК (режим) или в CHECKLIST_MODULE_FILL (модул). Нищо в рендера,
@@ -482,6 +491,7 @@ var CHECKLIST_PORTAL_MODE = {
   preocenka:      'file_none', /* файл → da, иначе ne; nyamat само ръчно;
                                   задача не-file_comment (пилотът) → отметка → da */
   srok_godnost:     'any',     /* „СПИСЪК СТОКА ЗА ВРЪЩАНЕ", сряда → da/ne */
+  stoka_vrashtane:  'any',     /* „СПИСЪК СТОКА ЗА ИЗТЕГЛЯНЕ ПО РАЗЛИКИ", сряда → da/ne (24.11.2026) */
   razliki_dostavka: 'count'    /* „РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ", Пон–Пет → „3/5" */
 };
 
@@ -708,33 +718,30 @@ function checklistModuleId(metric) {
 
    Всеки запис казва само три неща — коя таблица, кои колони и как се смята
    стойността за ЕДИН обект. Общият обход е един за всички (виж
-   checklistModuleChanges) и точно затова тук няма отделен клон за transit и
-   отделен за returns.
+   checklistModuleChanges) и точно затова тук няма отделен клон за всеки
+   модул.
 
    Запис с load() тегли данните си сам — за източник, който не е „цялата
    таблица": wrong_receipt филтрира по показаната седмица и брои редовете на
    бланките от втора таблица. load() връща масив редове със store_name, или
    не-масив, когато за седмицата нищо не бива да се пише (бъдеща седмица).
-   transit и returns минават по стария път (table + query), без промяна.
+   transit минава по стария път (table + query), без промяна.
 
    'module:kasa' вече не се пълни от нищо: „Сторна по грешни приеми" имаше
    този source, докато нямаше договорено правило. Правилото (28.09.2026) е
    wrong_receipt по-долу — смяната на source е в
    checklist-wrong-receipt-source.sql. Липсващ запис тук значи „не се
-   пълни", не грешка. */
+   пълни", не грешка.
+
+   'module:returns' (Стока за връщане — „обработени/всички" stock_returns
+   source='diff' към момента) е МАХНАТ на 24.11.2026: колоната stoka_vrashtane
+   вече идва от постоянната задача „СПИСЪК СТОКА ЗА ИЗТЕГЛЯНЕ ПО РАЗЛИКИ"
+   (CHECKLIST_PORTAL_MODE). Друг показател с този source няма. */
 var CHECKLIST_MODULE_FILL = {
   transit: {
     table: 'goods_transit',
     query: 'select=store_name,direction,status,reviewed_at,recon_at&archived_at=is.null',
     value: function (rows) { return checklistTransitValue(rows); }
-  },
-  /* Само source='diff' (изтегляне по разлики). Рекламациите и срокът на
-     годност (source='complaint') от 22.10.2026 са в колона srok_godnost —
-     без филтъра едни и същи редове биха се брояли в две колони. */
-  returns: {
-    table: 'stock_returns',
-    query: 'select=store_name,status,confirmed_date&source=eq.diff',
-    value: function (rows) { return checklistReturnsValue(rows); }
   },
   wrong_receipt: {
     table: 'differences_reports',
@@ -1083,26 +1090,6 @@ function checklistTransitValue(rows) {
     return (!!t.status && t.status !== 'pending') || !!t.reviewed_at || !!t.recon_at;
   });
   return done.length === incoming.length ? 'da' : 'ne';
-}
-
-/* Дялът обработени записи за връщане: „29/40".
-   ОБРАБОТЕН е записът, който обектът е поел по един от двата възможни
-   начина: взет от куриер (status='taken') ИЛИ проверен и още невзет
-   (confirmed_date е попълнена, статусът остава 'pending').
-
-   Второто условие НЕ Е излишно. Към 02.09.2026 65 pending записа носят
-   confirmed_date; без него Раднево излиза 22/40 вместо 29/40, тоест
-   обектът е наказан за работа, която е свършил.
-
-   Обект без нито един запис → null, клетката остава празна. „0/0" се чете
-   като провал, а всъщност няма какво да се обработва — записите се
-   появяват при разлика, не по график. */
-function checklistReturnsValue(rows) {
-  if (!rows.length) return null;
-  var done = rows.filter(function (r) {
-    return r && (r.status === 'taken' || !!r.confirmed_date);
-  });
-  return done.length + '/' + rows.length;
 }
 
 /* ВСИЧКИ редове на таблица, на страници по CHECKLIST_PAGE_SIZE.
