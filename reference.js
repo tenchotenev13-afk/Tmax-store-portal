@@ -73,7 +73,12 @@ function renderReference() {
   var h = '<div style="max-width:1100px;margin:0 auto;padding:16px;">';
 
   h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px;">';
-  h += '<div style="font-size:20px;font-weight:600;">📘 Гаранционен справочник</div>';
+  /* Бутонът за бланките стои до заглавието — вижда се и без избрана марка
+     (предложение на Теодор, 24.11.2026). Менюто не зависи от марката. */
+  h += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
+    '<div style="font-size:20px;font-weight:600;">📘 Гаранционен справочник</div>' +
+    refTemplatePickerHtml() +
+    '</div>';
   if (isAdmin) {
     h += '<div style="display:flex;gap:8px;">';
     h += '<button onclick="openRefAdminList()" style="border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer;">⚙️ Управление на записи</button>';
@@ -235,6 +240,42 @@ function refField(label, val) {
     '<div style="font-size:13px;color:#0f172a;white-space:pre-wrap;">'+ (val ? mdBold(val) : '—') +'</div></div>';
 }
 
+/* Бутон „🖨 Гаранционна карта ▾“ + менюто с бланките. Стои горе до заглавието
+   (renderReference), не в картата на марката — вижда се и без избрана марка.
+
+   РЪЧЕН избор на гаранционна карта вместо автоматично познаване по марка/категория —
+   автоматичното мапване често сочеше към грешен шаблон (потвърден бъг). Колегата,
+   който държи продукта, знае най-добре коя карта е правилната.
+
+   Имената (label) на шаблоните се четат от таблица warranty_templates,
+   редактируема през интерфейса (⚙️ Управление на записи) - не са твърдо кодирани. */
+function refTemplatePickerHtml() {
+  var WARRANTY_TEMPLATES = warrantyTemplates.length
+    ? warrantyTemplates.map(function(t){ return [t.filename, t.label]; })
+    : [
+      ['hobby.pdf','Hobby / Дребни артикули'],
+      ['heatmann.pdf','Heatmann / Кухненски ел. уреди'],
+      ['tayfun.pdf','Тайфун'],
+      ['mehanik.pdf','Механик / Ръчни инструменти'],
+      ['agromashini.pdf','Агро машини (косачки, тримери...)'],
+      ['smesiteli.pdf','Смесители'],
+      ['praskachka.pdf','Пръскачки'],
+      ['oranzherii.pdf','Оранжерии'],
+      ['monoblok.pdf','Моноблокове'],
+      ['powervac.pdf','Ел. инструменти (винтоверти, перфоратори...)'],
+      ['mivkialpaka.pdf','Мивки алпака'],
+      ['vrati.pdf','Метални входни врати']
+    ]; /* fallback, ако базата все още не е заредена/достъпна */
+  return '<div style="position:relative;display:inline-block;">' +
+      '<button onclick="var m=document.getElementById(\'ref-tpl-menu\');m.style.display=m.style.display===\'block\'?\'none\':\'block\';" style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">🖨 Гаранционна карта ▾</button>' +
+      '<div id="ref-tpl-menu" style="display:none;position:absolute;left:0;top:calc(100% + 4px);background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:260px;max-width:90vw;z-index:50;overflow:hidden;">' +
+        WARRANTY_TEMPLATES.map(function(t){
+          return '<a href="warranty-templates/'+encodeURIComponent(t[0])+'" target="_blank" style="display:block;padding:8px 12px;font-size:12.5px;color:#1a1a1a;text-decoration:none;border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">'+esc(t[1])+'</a>';
+        }).join('') +
+      '</div>' +
+    '</div>';
+}
+
 function renderRefCard() {
   var cardEl = document.getElementById('ref-card');
   if (!cardEl) return;
@@ -269,40 +310,8 @@ function renderRefCard() {
   var subcatObj = refSubcats.find(function(s){return String(s.id)===String(refSelSubcat);}) || {};
   var subName   = subcatObj.name || '';
 
-  /* РЪЧЕН избор на гаранционна карта вместо автоматично познаване по марка/категория —
-     автоматичното мапване често сочеше към грешен шаблон (потвърден бъг). Колегата,
-     който държи продукта, знае най-добре коя от 11-те карти е правилната.
-
-     Имената (label) на шаблоните вече се четат от таблица warranty_templates,
-     редактируема през интерфейса (⚙️ Управление на записи) - не са твърдо кодирани. */
-  var WARRANTY_TEMPLATES = warrantyTemplates.length
-    ? warrantyTemplates.map(function(t){ return [t.filename, t.label]; })
-    : [
-      ['hobby.pdf','Hobby / Дребни артикули'],
-      ['heatmann.pdf','Heatmann / Кухненски ел. уреди'],
-      ['tayfun.pdf','Тайфун'],
-      ['mehanik.pdf','Механик / Ръчни инструменти'],
-      ['agromashini.pdf','Агро машини (косачки, тримери...)'],
-      ['smesiteli.pdf','Смесители'],
-      ['praskachka.pdf','Пръскачки'],
-      ['oranzherii.pdf','Оранжерии'],
-      ['monoblok.pdf','Моноблокове'],
-      ['powervac.pdf','Ел. инструменти (винтоверти, перфоратори...)'],
-      ['mivkialpaka.pdf','Мивки алпака']
-    ]; /* fallback, ако базата все още не е заредена/достъпна */
-  var templatePicker =
-    '<div style="position:relative;display:inline-block;">' +
-      '<button onclick="var m=document.getElementById(\'ref-tpl-menu\');m.style.display=m.style.display===\'block\'?\'none\':\'block\';" style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">🖨 Гаранционна карта ▾</button>' +
-      '<div id="ref-tpl-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:260px;z-index:50;overflow:hidden;">' +
-        WARRANTY_TEMPLATES.map(function(t){
-          return '<a href="warranty-templates/'+encodeURIComponent(t[0])+'" target="_blank" style="display:block;padding:8px 12px;font-size:12.5px;color:#1a1a1a;text-decoration:none;border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">'+esc(t[1])+'</a>';
-        }).join('') +
-      '</div>' +
-    '</div>';
-
   var h = '<div style="background:#0f172a;color:#fff;border-radius:10px 10px 0 0;padding:12px 16px;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
     '<span>' + esc(brandName) + ' &nbsp;|&nbsp; ' + esc(subName) + '</span>' +
-    templatePicker +
     '</div>';
 
   if (!refEntry) {
@@ -444,7 +453,7 @@ function openRefAdminList() {
 
     '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0;">' +
       '<div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Имена на гаранционни шаблони (карти) ('+warrantyTemplates.length+')</div>' +
-      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">Тук се редактира само показваното име в менюто "🖨 Гаранционна карта" — самите 11 PDF файла остават фиксирани.</div>' +
+      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">Тук се редактира само показваното име в менюто "🖨 Гаранционна карта" — самите PDF файлове са в папката warranty-templates в репото.</div>' +
       '<div style="border:1px solid #e2e8f0;border-radius:8px;max-height:280px;overflow-y:auto;">' +
         warrantyTemplates.map(function(t){
           return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:12.5px;">' +

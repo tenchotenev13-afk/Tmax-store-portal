@@ -579,7 +579,8 @@ const TESTS = [
   'preocenka-dovarshvane.test.js',
   'co-comment-pending.test.js',
   'korekcii-1511.test.js',
-  'publish-instrukcii.test.js'
+  'publish-instrukcii.test.js',
+  'reference-template-picker.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
