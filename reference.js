@@ -85,6 +85,9 @@ function renderReference() {
     h += '</div>';
   }
   h += '</div>';
+  /* Бланките по сектори — под заглавието, за всички роли, без избрана марка
+     (решение на Тенчо 24.11.2026). */
+  h += '<div id="ref-sector-wrap">' + refSectorRowHtml() + '</div>';
   h += '<div style="font-size:12px;color:#94a3b8;margin-bottom:16px;">Изберете марка — картата се зарежда автоматично.</div>';
 
   /* Избор на марка */
@@ -276,6 +279,83 @@ function refTemplatePickerHtml() {
     '</div>';
 }
 
+/* ── Гаранционни карти по сектори (24.11.2026) ──
+   Списъкът е константа; бланката се закача към сектор с warranty_templates.sector
+   от „⚙️ Управление на записи“. Сектор без бланка е сив бутон „няма бланка“ —
+   не се скрива. Бланка без сектор е само в общото меню „🖨 Гаранционна карта ▾“. */
+var REF_SECTORS = ['Машини','Градина','Осветление','Бои','Строителство','Баня',
+  'Дом. потреби и текстил','Интериор и декорация'];
+var refOpenSector = -1; /* индекс в REF_SECTORS на отворения сектор, -1 = нито един */
+
+function refSectorTemplates(idx) {
+  var name = REF_SECTORS[idx];
+  return warrantyTemplates.filter(function(t){ return t.sector === name; });
+}
+
+function refSectorRowHtml() {
+  var h = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0 8px;">' +
+    '<span style="font-size:12.5px;font-weight:600;color:#475569;margin-right:2px;">Гаранционни карти по сектори:</span>';
+  REF_SECTORS.forEach(function(name, i){
+    var n = refSectorTemplates(i).length;
+    if (!n) {
+      h += '<button type="button" disabled data-sector="'+i+'" title="Към този сектор още няма закачена бланка" style="border:1px solid #e2e8f0;background:#f1f5f9;color:#94a3b8;border-radius:6px;padding:4px 10px;font-size:12px;cursor:default;">' +
+        esc(name) + ' <span style="font-size:10.5px;">· няма бланка</span></button>';
+    } else {
+      var open = refOpenSector === i;
+      h += '<button type="button" data-sector="'+i+'" onclick="refToggleSector('+i+')" style="border:1px solid '+(open?'#2563eb':'#bfdbfe')+';background:'+(open?'#2563eb':'#eff6ff')+';color:'+(open?'#fff':'#1e40af')+';border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">' +
+        esc(name) + ' ('+n+')</button>';
+    }
+  });
+  h += '</div>';
+  if (refOpenSector >= 0 && refSectorTemplates(refOpenSector).length) {
+    h += '<div id="ref-sector-list" style="background:#fff;border:1px solid #bfdbfe;border-radius:8px;padding:6px 0;margin-bottom:10px;max-width:520px;">' +
+      refSectorTemplates(refOpenSector).map(function(t){
+        return '<a href="warranty-templates/'+encodeURIComponent(t.filename)+'" target="_blank" style="display:block;padding:6px 12px;font-size:12.5px;color:#1a1a1a;text-decoration:none;" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">🖨 '+esc(t.label)+'</a>';
+      }).join('') +
+      '</div>';
+  }
+  return h;
+}
+
+function refRenderSectorRow() {
+  var el = document.getElementById('ref-sector-wrap');
+  if (el) el.innerHTML = refSectorRowHtml();
+}
+
+/* Клик на сектор отваря бланките му; втори клик на същия го затваря. */
+function refToggleSector(idx) {
+  refOpenSector = (refOpenSector === idx) ? -1 : idx;
+  refRenderSectorRow();
+}
+
+/* „⚙️ Управление на записи“: избор на сектор за бланка → PATCH warranty_templates.sector */
+function refTemplateSectorSelectHtml(t) {
+  var cur = t.sector || '';
+  return '<select onchange="refTemplateSetSector(\''+t.id+'\',this)" title="Сектор" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:11px;max-width:150px;">' +
+    '<option value=""'+(cur?'':' selected')+'>— без сектор —</option>' +
+    REF_SECTORS.map(function(s){
+      return '<option value="'+esc(s)+'"'+(cur===s?' selected':'')+'>'+esc(s)+'</option>';
+    }).join('') +
+    '</select>';
+}
+
+function refTemplateSetSector(id, sel) {
+  var item = warrantyTemplates.find(function(x){return String(x.id)===String(id);});
+  if (!item) return;
+  var prev = item.sector || '';
+  var val = sel.value || null;
+  sbPatch('warranty_templates','id=eq.'+id,{sector:val}).then(function(res){
+    if (!res || !res.ok) {
+      sel.value = prev;
+      toast('Грешка при запис на сектора: ' + sbErrMsg(res), '#dc2626');
+      return;
+    }
+    item.sector = val;
+    toast('✅ Секторът е записан');
+    refRenderSectorRow();
+  });
+}
+
 function renderRefCard() {
   var cardEl = document.getElementById('ref-card');
   if (!cardEl) return;
@@ -453,12 +533,15 @@ function openRefAdminList() {
 
     '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0;">' +
       '<div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Имена на гаранционни шаблони (карти) ('+warrantyTemplates.length+')</div>' +
-      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">Тук се редактира само показваното име в менюто "🖨 Гаранционна карта" — самите PDF файлове са в папката warranty-templates в репото.</div>' +
+      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">Тук се редактира показваното име в менюто "🖨 Гаранционна карта" и секторът, под който бланката излиза в реда „Гаранционни карти по сектори“ — самите PDF файлове са в папката warranty-templates в репото.</div>' +
       '<div style="border:1px solid #e2e8f0;border-radius:8px;max-height:280px;overflow-y:auto;">' +
         warrantyTemplates.map(function(t){
           return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:12.5px;">' +
             '<span>'+esc(t.label)+' <span style="color:#cbd5e1;font-size:10.5px;">('+esc(t.filename)+')</span></span>' +
-            '<button onclick="refTemplateRenamePrompt(\''+t.id+'\')" title="Преименувай" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;flex-shrink:0;">✏️</button>' +
+            '<span style="display:flex;gap:6px;align-items:center;flex-shrink:0;">' +
+              refTemplateSectorSelectHtml(t) +
+              '<button onclick="refTemplateRenamePrompt(\''+t.id+'\')" title="Преименувай" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;flex-shrink:0;">✏️</button>' +
+            '</span>' +
             '</div>';
         }).join('') +
       '</div>' +
