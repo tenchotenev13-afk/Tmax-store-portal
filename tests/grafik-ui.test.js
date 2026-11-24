@@ -228,6 +228,9 @@ const key = (h, k, extra) => h.w.grKey(Object.assign({ key: k, preventDefault() 
 const typeIn = (h, s) => { for (const ch of s) key(h, ch); };
 const cellText = (h, r, d) => { const c = h.doc.getElementById('gr-c-' + r + '-' + d); return c ? c.textContent.replace('🔒', '').replace('▾', '').trim() : null; };
 const lastSave = h => h.S.calls.filter(c => c.action === 'save_rows').slice(-1)[0];
+// Ред от таблицата „⚠ Предупреждения“ (А3, 23.11.2026): името без 🚫 и „име: какво“ — както беше в списъка.
+const wName = tr => tr.children[0].textContent.replace('🚫', '').trim();
+const wtxt = tr => wName(tr) + ': ' + tr.querySelector('.gr-w-what').textContent;
 async function load(h) { await guard('loadGrafik() не хвърля', () => h.w.loadGrafik()); await ticks(6); }
 
 (async () => {
@@ -338,11 +341,15 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   // 1.11 (нд) – 7.11 (сб) работни, 8.11 празна → точно 7 поредни (ВТР чл. 19: няма 36 ч. почивка).
   const rest = h.doc.querySelector('#gr-warnings .gr-warn-no_weekly_rest');
   // Кодовете носят начало/край (20261104073847) → по часовник: най-дългата почивка между смените на МАРИЯ е 16,5 ч.
-  ok('7 поредни работни дни → „няма непрекъсната почивка ≥ 36 ч.“ с датите', !!rest &&
-    /МАРИЯ: няма непрекъсната почивка ≥ 36 ч\. в 7 поредни дни \(01\.11–07\.11\) — най-дългата е \d+(,5)? ч\./.test(rest.textContent), rest && rest.textContent);
+  // А3 (23.11.2026): таблица по категории — служител / ден / какво / какво да направиш; почивките — в „Почивки и празници“.
+  ok('7 поредни работни дни → „няма непрекъсната почивка ≥ 36 ч.“ с датите (в „Почивки и празници“)', !!rest && rest.getAttribute('data-cat') === 'rest' &&
+    rest.children[0].textContent === 'МАРИЯ' && rest.querySelector('.gr-w-day').textContent === '01.11' &&
+    /^няма непрекъсната почивка ≥ 36 ч\. в 7 поредни дни \(01\.11–07\.11\) — най-дългата е \d+(,5)? ч\./.test(rest.querySelector('.gr-w-what').textContent) &&
+    /36 ч\./.test(rest.querySelector('.gr-w-todo').textContent), rest && rest.textContent);
   ok('„6 работни дни в 7“ вече НЕ е предупреждение', !h.doc.querySelector('#gr-warnings .gr-warn-over5'));
   const note = h.doc.querySelector('#gr-warnings .gr-warn-month');
-  ok('без октомври в базата → бележка „Седмицата 26.10–01.11 е непълна“', !!note && /^Седмицата 26\.10–01\.11 е непълна/.test(note.textContent), note && note.textContent);
+  ok('без октомври в базата → бележка „Седмицата 26.10–01.11 е непълна“ (в „Липсват данни“)', !!note && note.getAttribute('data-cat') === 'missing' &&
+    /^Седмицата 26\.10–01\.11 е непълна/.test(note.querySelector('.gr-w-what').textContent), note && note.textContent);
   ok('екранът е поискал октомври (за седмицата през границата)', h.S.calls.some(c => c.action === 'load_month' && c.month === '2026-10'));
   ok('извън нормата → в предупрежденията', !!h.doc.querySelector('#gr-warnings .gr-warn-norm'));
 
@@ -706,7 +713,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     }
     // Същото на екрана: предупреждение, брояч, мрежа.
     const nw = x.doc.querySelector('#gr-warnings .gr-warn-norow');
-    ok('екранът: „ПЕТЯ: няма ред в графика за месеца (0 ч. вместо 84 ч.)“', !!nw && nw.textContent === 'ПЕТЯ: няма ред в графика за месеца (0 ч. вместо 84 ч.)', nw && nw.textContent);
+    ok('екранът: „ПЕТЯ: няма ред в графика за месеца (0 ч. вместо 84 ч.)“', !!nw && wtxt(nw) === 'ПЕТЯ: няма ред в графика за месеца (0 ч. вместо 84 ч.)', nw && nw.textContent);
     ok('екранът: броячът „2 извън нормата“ (Иван + Петя)', /^2 извън нормата$/.test(x.doc.getElementById('gr-offnorm').textContent), x.doc.getElementById('gr-offnorm').textContent);
     const pd = x.doc.querySelectorAll('#gr-grid .gr-diff')[2];
     ok('мрежата: разликата на Петя е −84 (червено), не 0', pd && pd.textContent === '-84' && /dc2626/.test(pd.getAttribute('style')), pd && pd.textContent);
@@ -715,7 +722,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     S2.months['Кърджали|2026-11-01'] = { id: 'm-e', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
     S2.rows.push({ month_id: 'm-e', staff_id: 'st-3', letters: [], locked: {} }, { month_id: 'm-e', staff_id: 'st-1', letters: ['', 'П'], locked: {} });
     const e2 = env(MGR, { server: S2 }); await load(e2);
-    const ew = Array.from(e2.doc.querySelectorAll('#gr-warnings .gr-warn-norow')).map(li => li.textContent);
+    const ew = Array.from(e2.doc.querySelectorAll('#gr-warnings .gr-warn-norow')).map(wtxt);
     ok('записан празен ред → „редът в графика е празен (0 ч. вместо 84 ч.)“', ew.indexOf('ПЕТЯ: редът в графика е празен (0 ч. вместо 84 ч.)') >= 0, ew.join(' | '));
     ok('…служител с поне един ден не е „празен“ (Иван), а без ред — е (Мария)', !ew.some(t => /^ИВАН/.test(t)) && ew.indexOf('МАРИЯ: няма ред в графика за месеца (0 ч. вместо 168 ч.)') >= 0, ew.join(' | '));
 
@@ -811,7 +818,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     n.w.grPaste({ clipboardData: { getData: () => from16 }, preventDefault() {} });
     const md = n.doc.querySelectorAll('#gr-grid .gr-diff')[1];
     ok('назначена 16.11, работи всеки работен ден от 16.11 → разлика 0 (цел 88, не 168)', md && md.textContent === '0' && n.w.grCalc.rows[1].target === 88, md && md.textContent);
-    const ws = Array.from(n.doc.querySelectorAll('#gr-warnings .gr-warn-norow')).map(li => li.textContent);
+    const ws = Array.from(n.doc.querySelectorAll('#gr-warnings .gr-warn-norow')).map(wtxt);
     ok('Петя (от 29.11, 4 ч.) без ред → „0 ч. вместо 4 ч.“ — нормата е само за 30.11', ws.indexOf('ПЕТЯ: няма ред в графика за месеца (0 ч. вместо 4 ч.)') >= 0, ws.join(' | '));
     n.w.grRows['st-1'] = { letters: from16.split('\t').map((v, i) => i < 15 && wd.dow[i] <= 5 ? 'П' : v), locked: {} };
     Object.assign(S.staff.filter(s => s.id === 'st-3')[0], { hired_on: null, left_on: '2026-11-01' });   // напуснала в неделя 1.11 — в месеца, 0 работни дни
@@ -1053,8 +1060,9 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     // т.3 — ЛД в неделя.
     const c00 = d.getElementById('gr-c-0-0');
     ok('т.3: ЛД в неделя (1.11) — червена клетка, без код', /background:#FF8080/i.test(c00.getAttribute('style')) && x.w.grCalc.rows[0].codes[0] === '', c00.getAttribute('style'));
-    const sw = Array.from(d.querySelectorAll('#gr-warnings .gr-warn-sunday_ld')).map(li => li.textContent);
-    ok('т.3: предупреждение „ИВАН: 1-ви — ЛД в неделя — ползвай ЗД“', sw.length === 1 && sw[0] === 'ИВАН: 1-ви — ЛД в неделя — ползвай ЗД', sw.join(' | '));
+    const swr = Array.from(d.querySelectorAll('#gr-warnings .gr-warn-sunday_ld')), sw = swr.map(wtxt);
+    ok('т.3: предупреждение „ИВАН · 01.11 · ЛД в неделя — ползвай ЗД“ — в „Почивки и празници“, с 🚫 (спира „Подай“)', sw.length === 1 && sw[0] === 'ИВАН: ЛД в неделя — ползвай ЗД' &&
+      swr[0].querySelector('.gr-w-day').textContent === '01.11' && swr[0].getAttribute('data-cat') === 'rest' && swr[0].getAttribute('data-block') === '1' && /🚫/.test(swr[0].children[0].textContent), sw.join(' | '));
     ok('т.3: ЛД в делник (2.11) — без червено', !/background:#FF8080/i.test(d.getElementById('gr-c-0-1').getAttribute('style')));
     ok('т.3: „Подай“ го изрежда: „Иван Иванов Иванов: ЛД в неделя на 01.11 — ползвай ЗД“', x.w.grSubmitIssues().indexOf('Иван Иванов Иванов: ЛД в неделя на 01.11 — ползвай ЗД') >= 0, x.w.grSubmitIssues().join(' | '));
 
@@ -1588,8 +1596,8 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('по подразбиране: На смяна, Сутрин, Вечер, Сектори без човек, „▸ още“ — без редовете по буква', Array.from(foot.children).map(tr => tr.id).join() === 'gr-foot-onshift,gr-daily-morning,gr-daily-evening,gr-foot-nosec,gr-foot-more' &&
       d.getElementById('gr-foot-more').children[0].textContent === '▸ още', Array.from(foot.children).map(tr => tr.id).join());
     const on = d.getElementById('gr-foot-onshift');
-    ok('колоните съвпадат с мрежата: залепен етикет през трите леви (colspan 3), 30 дни, едно поле под „Вътр./Офиц./Цел/Разл.“',
-      on.children[0].getAttribute('colspan') === '3' && /gr-stk gr-stk0 gr-stk-last/.test(on.children[0].className) && on.children.length === 1 + 30 + 1 && on.lastElementChild.getAttribute('colspan') === '4');
+    ok('колоните съвпадат с мрежата: залепен етикет през трите леви (colspan 3), 30 дни, едно поле под „Часове / До нормата“ (colspan 2)',
+      on.children[0].getAttribute('colspan') === '3' && /gr-stk gr-stk0 gr-stk-last/.test(on.children[0].className) && on.children.length === 1 + 30 + 1 && on.lastElementChild.getAttribute('colspan') === '2');
     ok('„На смяна“: 1.11 — 0 (червено), 2.11 — 2, 3.11 — 2', nums('gr-foot-onshift').slice(0, 3).join() === '0,2,2' && /background:#fecaca/.test(on.children[1].getAttribute('style')) && !/fecaca/.test(on.children[2].getAttribute('style')));
     ok('„Сутрин (ЛД+ЗД+П)“: 0, 1, 2 · „Вечер (ЛД+ЗД+В+М)“: 0, 1, 1', nums('gr-daily-morning').slice(0, 3).join() === '0,1,2' && nums('gr-daily-evening').slice(0, 3).join() === '0,1,1' &&
       d.getElementById('gr-daily-morning').children[0].textContent === 'Сутрин (ЛД+ЗД+П)' && d.getElementById('gr-daily-evening').children[0].textContent === 'Вечер (ЛД+ЗД+В+М)');
@@ -1600,7 +1608,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('редът „на смяна“ на групата и долният блок броят еднакво (2.11: Склад 1 + Каса 1 = „На смяна“ 2)',
       +d.querySelectorAll('tr.gr-grp-cov[data-sector="Склад"] td.gr-gcov')[1].textContent + +d.querySelectorAll('tr.gr-grp-cov[data-sector="Каса"] td.gr-gcov')[1].textContent === +nums('gr-foot-onshift')[1]);
     ok('картите „Покритие по сектор и ден“ и „Дневни сборове“ ги няма; над мрежата — само предупрежденията', !d.getElementById('gr-coverage') && !d.getElementById('gr-daily') &&
-      Array.from(mod(x).querySelectorAll('details')).every(e => e.id === 'gr-warnings') && mod(x).lastElementChild === d.getElementById('gr-grid-wrap'));
+      Array.from(mod(x).querySelectorAll('details')).every(e => e.id === 'gr-warnings' || e.id === 'gr-howto') && mod(x).lastElementChild === d.getElementById('gr-grid-wrap'));
     // „▸ още“.
     realClick(W, d.getElementById('gr-foot-more').children[0]); await ticks(1);
     let st = null; try { st = W.localStorage.getItem('gr-grid-more'); } catch (e) {}
@@ -1649,8 +1657,10 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     const hintOf = id => { const s = diffCell(id).querySelector('.gr-hint'); return s ? s.getAttribute('title') : null; };
     ok('до човека (колона „Разл.“): 💡 с „добави една П (8–10,5 ч.), напр. на 02.11 Пн“', hintOf('st-1') === '💡 добави една П (8–10,5 ч.), напр. на 02.11 Пн', hintOf('st-1'));
     ok('числото на разликата остава първо (−28,5 → „-28.5“)', diffCell('st-1').firstChild.textContent.trim() === '-28.5', diffCell('st-1').textContent);
-    const wn = Array.from(d.querySelectorAll('#gr-warnings li.gr-warn-norm')).map(li => li.textContent);
-    ok('в предупреждението — същата подсказка след съобщението', wn.some(t => /^ИВАН: не стигат 28\.5 ч\. — изравняването не намира точна комбинация, кодовете не са пипнати · 💡 добави една П \(8–10,5 ч\.\), напр\. на 02\.11 Пн$/.test(t)), JSON.stringify(wn));
+    const wn = Array.from(d.querySelectorAll('#gr-warnings tr.gr-warn-norm')).filter(tr => wName(tr) === 'ИВАН');
+    ok('в предупреждението („Под нормата“, 🚫) — същата подсказка в „Какво да направиш“', wn.length === 1 && wn[0].getAttribute('data-cat') === 'under' && wn[0].getAttribute('data-block') === '1' &&
+      /ч\. по график, целта е [\d,]+ ч\. \(-28,5\)$/.test(wn[0].querySelector('.gr-w-what').textContent) &&
+      wn[0].querySelector('.gr-w-todo').textContent === '💡 добави една П (8–10,5 ч.), напр. на 02.11 Пн (изравняването не намира точна комбинация — смени буквите ръчно)', wn[0] && wn[0].textContent);
     ok('договор 4 ч.: „добави една П (4 ч.)“ на освободения ден', hintOf('st-3') === '💡 добави една П (4 ч.), напр. на ' + W.grChDayLabel(drop + 1), hintOf('st-3'));
     ok('нищо не се записва само (буквите на Иван са същите, няма запис)', JSON.stringify(W.grRows['st-1'].letters) === JSON.stringify(H1) && !x.S.calls.some(c => c.action === 'save_rows'));
     ok('Мария (без нито един ден) — без 💡 (там съобщението е „0 ч.“)', !hintOf('st-2'));
@@ -1722,7 +1732,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     W.grRows['st-1'].locked = { 3: iv.codes[2], 6: iv.codes[5], 8: iv.codes[7] }; W.grRecalc(); W.grRender();
     const before = d.getElementById('gr-warn-box').textContent;
     same('🔒, което сменя подсказката в предупреждението', () => { W.grSelect(1, 8); W.grToggleLock(); });
-    ok('Г: …подсказката в предупреждението е новата („две П“)', /добави една П/.test(before) && /ИВАН: [^·]*· 💡 добави две П/.test(d.getElementById('gr-warn-box').textContent), d.getElementById('gr-warn-box').textContent.slice(0, 300));
+    ok('Г: …подсказката в предупреждението е новата („две П“)', /добави една П/.test(before) && Array.from(d.querySelectorAll('#gr-warnings tr.gr-warn-norm')).some(tr => wName(tr) === 'ИВАН' && /^💡 добави две П/.test(tr.querySelector('.gr-w-todo').textContent)), d.getElementById('gr-warn-box').textContent.slice(0, 300));
     W.grRows['st-1'].locked = {}; W.grRecalc(); W.grRender();
     same('клик в клетка', () => inl(d.getElementById('gr-c-1-1'), 'click'));
     same('буква „П“ (запис, надясно, сборове, подсказка)', () => typeIn(x, 'П'));
@@ -1756,10 +1766,14 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
       S.months['Кърджали|2026-11-01'] = { id: 'm-h', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
       S.rows.push({ month_id: 'm-h', staff_id: 'st-1', letters: L(['', 'П', '6', 'П']), locked: {} });
       const x = env(MGR, { server: S }); await load(x);
-      const li = Array.from(x.doc.querySelectorAll('#gr-warnings li.gr-warn-hours')).map(e => e.textContent);
-      ok('1: „ИВАН: 6 свободни ч. на 03.11 — сложи код“ в предупрежденията', li.length === 1 && li[0] === 'ИВАН: 6 свободни ч. на 03.11 — сложи код', JSON.stringify(li));
+      // А3 (23.11.2026): в предупрежденията — с прости думи („03.11: написано е число 6 — избери смяна (П, ЛД…)“), в „Липсват данни“, с 🚫.
+      const tr = Array.from(x.doc.querySelectorAll('#gr-warnings tr.gr-warn-hours'));
+      ok('1: „ИВАН · 03.11 · написано е число 6 · избери смяна (П, ЛД…)“ в предупрежденията', tr.length === 1 && wName(tr[0]) === 'ИВАН' &&
+        tr[0].querySelector('.gr-w-day').textContent === '03.11' && tr[0].querySelector('.gr-w-what').textContent === 'написано е число 6' &&
+        tr[0].querySelector('.gr-w-todo').textContent === 'избери смяна (П, ЛД…)' && tr[0].getAttribute('data-cat') === 'missing' && tr[0].getAttribute('data-block') === '1', tr.map(e => e.textContent).join(' | '));
+      // При „Подай“ текстът остава досегашният — същият като отказа на сървъра (grafik-api submitIssues); сменя се с деплоя на етап Б.
       const iss = x.w.grSubmitIssues().filter(t => /свободни ч\./.test(t));
-      ok('1: същият текст при „Подай“ (там с трите имена)', iss.length === 1 && iss[0] === 'Иван Иванов Иванов: 6 свободни ч. на 03.11 — сложи код' && li[0].split(': ')[1] === iss[0].split(': ')[1], JSON.stringify(iss));
+      ok('1: при „Подай“ — досегашният текст (като сървъра)', iss.length === 1 && iss[0] === 'Иван Иванов Иванов: 6 свободни ч. на 03.11 — сложи код', JSON.stringify(iss));
     }
     // 3 — ТРЗ: „📆 График“ отваря подаден обект, не обекта по подразбиране; няма подаден → съобщение.
     {
@@ -1817,7 +1831,11 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
       ok('5: ТРЗ — в Обекти е „✔ Подаден“ с етикета', ovSt.indexOf('✔ Подаден') >= 0 && ovSt.indexOf('↩ върнат за корекция от Тенчо на 06.11.2026 11:30') >= 0, ovSt);
       realClick(t.w, btn(t.doc.getElementById('gr-ov-0'), 'Отвори')); await ticks(8);
       ok('5: ТРЗ — „✔ Подаден от Управител Кърджали“ + етикетът', ((t.doc.getElementById('gr-status') || {}).textContent || '').indexOf('✔ Подаден от Управител Кърджали') === 0 && !!t.doc.getElementById('gr-reopened'));
-      ok('5: ТРЗ — буквите на подаденото (2.11 = П), не поправката в черновата (ЗД)', cellText(t, 0, 1) === 'П', cellText(t, 0, 1));
+      // А4 (23.11.2026): ТРЗ отваря по подразбиране „👁 Официален график“ — кодът на подаденото П (Д1/З), не на ЗД (Д4/З).
+      ok('5: ТРЗ — по подразбиране кодовете на подаденото (2.11 = Д1/З от П), не поправката в черновата (ЗД)', t.w.grOfficialOn() && cellText(t, 0, 1) === 'Д1/З', cellText(t, 0, 1));
+      realClick(t.w, t.doc.getElementById('gr-official-btn')); await ticks(1);
+      ok('5: ТРЗ — „✎ Буквите“ → буквите на подаденото (2.11 = П)', cellText(t, 0, 1) === 'П', cellText(t, 0, 1));
+      realClick(t.w, t.doc.getElementById('gr-official-btn')); await ticks(1);
       realClick(t.w, btn(mod(t), 'Промени')); await ticks(4);
       const cb = t.doc.querySelector('#gr-ch-c1 input.gr-ch-trz');
       ok('5: ТРЗ — промяната и отметката „Отразено в ТРЗ“ остават', !!cb && cb.checked === true);
@@ -1850,6 +1868,98 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
       ok('11: бутонът — „📆 График“; без 📅 и 🗓️ в модула', !!btn(mod(x), '📆 График') && mod(x).textContent.indexOf('📅') < 0 && mod(x).textContent.indexOf('🗓️') < 0);
       ok('11: табът в лентата — „📆“', ((x.doc.getElementById('tab-grafik') || {}).textContent || '').indexOf('📆') >= 0);
     }
+  }
+
+  section('23. Яснота на екрана — легенда, предупреждения по категории, колони, сектор без човек (етап А2–А5, 23.11.2026)');
+  {
+    // Същите данни като раздел 22: 1.11 (нд) — никой; 2.11 — Мария П (Склад), Иван В (Каса); 3.11 — Иван ЛД, Петя П, Мария почива → Склад без човек.
+    const mk = () => {
+      const S = makeServer();
+      S.months['Кърджали|2026-11-01'] = { id: 'm-a', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+      const Lm = new Array(30).fill(''), Li = new Array(30).fill(''), Lp = new Array(30).fill('');
+      Lm[1] = 'П'; Li[1] = 'В'; Li[2] = 'ЛД'; Lp[2] = 'П'; Lp[4] = '6'; Lp[7] = 'ЛД';   // 8.11 (нд) — ЛД в неделя → „Почивки и празници“, 🚫
+      S.rows.push({ month_id: 'm-a', staff_id: 'st-2', letters: Lm, locked: {} }, { month_id: 'm-a', staff_id: 'st-1', letters: Li, locked: {} }, { month_id: 'm-a', staff_id: 'st-3', letters: Lp, locked: {} });
+      return S;
+    };
+    const x = env(MGR, { server: mk(), grouped: true }); await load(x);
+    const d = x.doc, W = x.w;
+    const mCell = dd => d.getElementById('gr-row-st-2').querySelectorAll('td.gr-c')[dd];
+    const heads = () => Array.from(d.querySelectorAll('#gr-grid thead th')).map(th => th.textContent);
+
+    // А2 — легендата: кодовете за ОТВОРЕНИЯ месец (ноември = Зимно I) и за неделя, от setup.
+    const lg = (l, k) => { const c = d.querySelector('#gr-legend td.gr-lg[data-l="' + l + '"][data-k="' + k + '"]'); return c ? c.textContent : null; };
+    ok('А2: легенда ЛД — делник „Д5/З 08:00–19:30 · 10,5 ч.“, неделя „Д6/1 08:30–18:30 · 9 ч.“', lg('ЛД', 'З1') === 'Д5/З 08:00–19:30 · 10,5 ч.' && lg('ЛД', 'Н') === 'Д6/1 08:30–18:30 · 9 ч.', lg('ЛД', 'З1') + ' / ' + lg('ЛД', 'Н'));
+    ok('А2: П — „Д1/З 08:00–17:00 · 8 ч.“; О — отсъствие с обяснението от ВТР', lg('П', 'З1') === 'Д1/З 08:00–17:00 · 8 ч.' && /^О /.test(lg('О', 'З1') || ''), lg('П', 'З1') + ' / ' + lg('О', 'З1'));
+    ok('А2: редът „Делник“ носи името на сезона на месеца', /Делник · /.test(d.getElementById('gr-legend').textContent));
+    const ho = d.getElementById('gr-howto');
+    ok('А2: клавишите — в сгънато „ⓘ Как се работи“ (по подразбиране затворено), не в реда над мрежата', !!ho && !ho.open && /Ctrl\+L/.test(ho.textContent) && /ⓘ Как се работи/.test(ho.querySelector('summary').textContent) &&
+      !/Ctrl\+L/.test(d.getElementById('gr-hint').textContent.replace(ho.textContent, '')));
+    // Отваряне в браузъра = DOM open + събитието toggle (jsdom не пуска toggle синхронно — викаме обработчика като него).
+    d.getElementById('gr-howto').open = true; W.grHowtoToggle(d.getElementById('gr-howto')); W.grRender();
+    ok('А2: отвореното „Как се работи“ остава отворено след прерисуване и се помни в браузъра', d.getElementById('gr-howto').open === true && W.localStorage.getItem('gr-howto') === '1' && / open /.test(W.grHowtoHtml()));
+    d.getElementById('gr-howto').open = false; W.grHowtoToggle(d.getElementById('gr-howto'));
+    ok('А2: затворено → помни се затворено', W.localStorage.getItem('gr-howto') === '0' && !/ open /.test(W.grHowtoHtml()));
+
+    // А3 — категориите и 🚫.
+    const cats = Array.from(d.querySelectorAll('#gr-warn-tbl tr.gr-wcat')).map(tr => tr.getAttribute('data-cat'));
+    ok('А3: категориите — в реда „Над / Под нормата, Отпуски, Липсват данни, Почивки и празници“, празните ги няма', cats.join() === 'under,missing,rest', cats.join());
+    const blocks = d.querySelectorAll('#gr-warn-tbl tr.gr-warn[data-block="1"]').length;
+    ok('А3: заглавието брои 🚫 = редовете, които спират „Подай“', new RegExp('🚫 ' + blocks + ' спират „Подай“').test(d.querySelector('#gr-warnings summary').textContent) && blocks > 0, d.querySelector('#gr-warnings summary').textContent);
+    ok('А3: 🚫 ⇔ grSubmitIssues — същият брой (за тези данни)', blocks === W.grSubmitIssues().length, blocks + ' / ' + W.grSubmitIssues().length);
+    const hr = d.querySelector('#gr-warn-tbl tr.gr-warn-hours');
+    ok('А3: „05.11: написано е число 6 — избери смяна (П, ЛД…)“', !!hr && hr.querySelector('.gr-w-day').textContent === '05.11' && hr.querySelector('.gr-w-what').textContent === 'написано е число 6' && hr.querySelector('.gr-w-todo').textContent === 'избери смяна (П, ЛД…)');
+    const hcat = Array.from(d.querySelectorAll('#gr-warn-tbl tr')).map(tr => tr.getAttribute('data-cat'));
+    ok('А3: всеки ред стои под заглавието на своята категория (непрекъснато)', hcat.every((c, i) => i < 2 || !c || c === hcat[i - 1] || d.querySelectorAll('#gr-warn-tbl tr')[i].classList.contains('gr-wcat')));
+
+    // А4 — колоните.
+    ok('А4: след дните — само „Часове“ и „До нормата“', heads().slice(-2).join() === 'Часове,До нормата' && heads().indexOf('Офиц.') < 0 && heads().indexOf('Цел') < 0, heads().slice(-4).join());
+    ok('А4: редът — 3 + 30 дни + 2 клетки', d.getElementById('gr-row-st-2').children.length === 35, d.getElementById('gr-row-st-2').children.length);
+    ok('А4: буквата в клетката (П)', mCell(1).textContent.replace('▾', '').trim() === 'П');
+    const ob = d.getElementById('gr-official-btn');
+    ok('А4: бутон „👁 Официален график“', !!ob && ob.textContent === '👁 Официален график');
+    realClick(W, ob); await ticks(1);
+    ok('А4: официален — Часове, Офиц., Цел, До нормата; ред 3 + 30 + 4', heads().slice(-4).join() === 'Часове,Офиц.,Цел,До нормата' && d.getElementById('gr-row-st-2').children.length === 37 &&
+      d.getElementById('gr-foot-onshift').lastElementChild.getAttribute('colspan') === '4', heads().slice(-4).join());
+    const iv = W.grCalc.rows.filter(z => z.staff.id === 'st-2')[0];
+    ok('А4: официален — в клетката е кодът (Д1/З), не буквата', mCell(1).textContent.trim() === iv.codes[1] && iv.codes[1] === 'Д1/З', mCell(1).textContent);
+    ok('А4: официален — денят със свободни часове без код остава с числото', d.getElementById('gr-row-st-3').querySelectorAll('td.gr-c')[4].textContent.trim() === '6');
+    const before = JSON.stringify(W.grRows);
+    W.grSelect(0, 3); typeIn(x, 'П'); key(x, 'Delete');
+    ok('А4: официален — само за четене (писане и Delete не пипат реда)', JSON.stringify(W.grRows) === before && !x.S.calls.some(c => c.action === 'save_rows'));
+    ok('А4: официален — без 🔒 и 📋 (те са за буквите), „📤 Подай“ остава', !btn(mod(x), 'Заключи') && !btn(mod(x), 'Ритъмът') && !!btn(mod(x), 'Подай'));
+    ok('А4: изборът се помни в браузъра; бутонът става „✎ Буквите“', W.localStorage.getItem('gr-official') === '1' && d.getElementById('gr-official-btn').textContent === '✎ Буквите');
+    realClick(W, d.getElementById('gr-official-btn')); await ticks(1);
+    ok('А4: обратно — буквите, 2 колони, писането работи', heads().slice(-2).join() === 'Часове,До нормата' && W.localStorage.getItem('gr-official') === '0');
+    W.localStorage.removeItem('gr-official'); W.grOfficial = null;
+    const me0 = W.grMe;
+    W.grMe = Object.assign({}, me0, { kind: 'trz' });
+    ok('А4: ТРЗ без свой избор → официалният по подразбиране', W.grOfficialOn() === true);
+    W.localStorage.setItem('gr-official', '0'); W.grOfficial = null;
+    ok('А4: ТРЗ със свой избор „буквите“ → буквите', W.grOfficialOn() === false);
+    W.grMe = me0; W.localStorage.removeItem('gr-official'); W.grOfficial = null;
+    ok('А4: обектът без избор → буквите', W.grOfficialOn() === false);
+    W.grRender();
+
+    // А5 — сектор без човек в самата мрежа (изгледът по сектори).
+    ok('А5: 3.11 — клетката на Мария (Склад, сама) е с червена рамка и светлочервено', mCell(2).classList.contains('gr-secgap') && /border-left:2px solid #dc2626/.test(mCell(2).getAttribute('style')) && /background:#fecaca/.test(mCell(2).getAttribute('style')));
+    ok('А5: 2.11 — без маркировка (Мария е на смяна)', !mCell(1).classList.contains('gr-secgap'));
+    const th = i => d.querySelectorAll('#gr-grid thead th.gr-dh')[i];
+    ok('А5: заглавието на 3.11 — червена точка, при задържане „без човек: Склад“', !!th(2).querySelector('.gr-dh-gap') && /без човек: Склад$/.test(th(2).getAttribute('title')) && !th(1).querySelector('.gr-dh-gap'), th(2).getAttribute('title'));
+    const g0 = d.querySelectorAll('tr.gr-grp-cov[data-sector="Склад"] td.gr-gcov')[2];
+    ok('А5: „на смяна“ на Склад за 3.11 — 0 с червена рамка', g0.textContent === '0' && /border-left:2px solid #dc2626/.test(g0.getAttribute('style')));
+    const nsc = d.querySelector('tr.gr-grp-cov[data-sector="Без сектор"] td.gr-gcov0');
+    ok('А5: „Без сектор“ не получава червена рамка (не е сектор)', !nsc || !/border-left:2px solid #dc2626/.test(nsc.getAttribute('style')));
+    // Бързото обновяване: Мария получава П на 3.11 → червеното изчезва без пълен рендер и съвпада с пълния.
+    const w0 = d.getElementById('gr-grid-wrap');
+    const mr = Array.from(d.querySelectorAll('#gr-grid tbody tr[id^="gr-row-"]')).map(tr => tr.id).indexOf('gr-row-st-2');
+    W.grSelect(mr, 2); typeIn(x, 'П'); key(x, 'Enter');
+    const fast = d.getElementById('gr-grid').outerHTML;
+    ok('А5: П на 3.11 за Мария → без маркировка и без точка (бързо обновяване)', d.getElementById('gr-grid-wrap') === w0 && !mCell(2).classList.contains('gr-secgap') && !th(2).querySelector('.gr-dh-gap'));
+    W.grRender();
+    ok('А5: бързото = пълното прерисуване', fast === d.getElementById('gr-grid').outerHTML);
+    // Плоският изглед — без групи, без червени колони; точката в заглавието остава (1.11 — никой).
+    realClick(W, d.getElementById('gr-group-btn')); await ticks(1);
+    ok('А5: плосък списък — няма червени колони, точката в заглавието остава', W.grGroupMode() === 'flat' && !d.querySelector('#gr-grid td.gr-secgap') && !!th(0).querySelector('.gr-dh-gap'));
   }
 
   report();

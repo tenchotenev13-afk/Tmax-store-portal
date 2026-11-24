@@ -11,7 +11,6 @@
 
 var GR_LETTERS_FALLBACK = ['ЛД','ЗД','П','В','М','О','Б','НО','К','О4'];
 var GR_WORK_LETTERS = ['ЛД','ЗД','П','В','М','К'];
-var GR_DATED_WARN = { no_weekly_rest: 1, week_over_56: 1, daily_rest: 1 };   // текстът вече носи датите (ВТР чл. 19)
 /* Заглавията на легендата — дословно от бланката v70 (ГРАФИК ЗА ЯВЯВАНЕ, A82 и A94; ВТР от 01.11.2026). */
 var GR_LEGEND_TITLE = {
   'Л': 'Работните смени при лятно работно време (май–октомври) са:',
@@ -136,6 +135,24 @@ function grStaffById(id){
   return null;
 }
 function grCanEdit(){ return !!(grData && grData.can_edit); }
+/* „👁 Официален график“ (етап А4, 23.11.2026): клетките показват кодовете (Д1/З…), колоните
+   Офиц. / Цел се връщат; само за четене. Помни се в браузъра; за ТРЗ — включен по подразбиране. */
+var grOfficial = null;
+function grOfficialOn(){
+  if(grOfficial === null){
+    var v = null; try { v = localStorage.getItem('gr-official'); } catch(e){}
+    if(v === '1' || v === '0') grOfficial = v === '1';
+    else return !!grMe && grMe.kind === 'trz';          // без избор — по ролята, без да се кешира
+  }
+  return grOfficial;
+}
+function grToggleOfficial(){
+  grOfficial = !grOfficialOn(); grDrop = false; grEdit = '';
+  try { localStorage.setItem('gr-official', grOfficial ? '1' : '0'); } catch(e){}
+  grRender();
+}
+function grCellEdit(){ return grCanEdit() && !grOfficialOn(); }   // клетките — не и в официалния изглед
+function grTailCols(){ return grOfficialOn() ? 4 : 2; }          // Часове, [Офиц., Цел,] До нормата
 /* Служител в графика за месеца без нито един ден — няма ред в grafik_rows или редът е
    празен (без букви и без заключени кодове). Изчисленията му дават цел 0 (както бланката),
    но по решение на Тенчо (04.11.2026) това е ИЗВЪН нормата: 0 ч. вместо нормата на човека
@@ -394,7 +411,7 @@ function grGroupMembers(sk){ return grOrder.filter(function(i){ return grSector(
 function grGroupHeadHtml(sk){
   var M = grCalc.month;
   return '<tr class="gr-grp" data-sector="' + escAttrVal(sk) + '"><td colspan="3" class="gr-stk gr-stk0 gr-stk-last" style="text-align:left;font-weight:700;background:#e2e8f0;white-space:nowrap;">' +
-    escVal(sk) + ' <span style="font-weight:400;color:#64748b;">(' + grGroupMembers(sk).length + ')</span></td><td colspan="' + (M.days + 4) + '" style="background:#e2e8f0;"></td></tr>';
+    escVal(sk) + ' <span style="font-weight:400;color:#64748b;">(' + grGroupMembers(sk).length + ')</span></td><td colspan="' + (M.days + grTailCols()) + '" style="background:#e2e8f0;"></td></tr>';
 }
 /* „На смяна“ под групата — същото броене като картата „Покритие“ (работна буква). 0 → червено. */
 function grGroupCovHtml(sk){
@@ -404,8 +421,9 @@ function grGroupCovHtml(sk){
     for(var d = 0; d < M.days; d++) if(GR_WORK_LETTERS.indexOf(L[d]) >= 0) c[d]++;
   });
   var h = '<tr class="gr-grp-cov" data-sector="' + escAttrVal(sk) + '"><td colspan="3" class="gr-stk gr-stk0 gr-stk-last" style="text-align:right;font-size:11px;color:#64748b;white-space:nowrap;">на смяна</td>';
-  c.forEach(function(n){ h += '<td class="gr-gcov' + (n ? '' : ' gr-gcov0') + '" style="text-align:center;font-size:11px;' + (n ? 'color:#64748b;' : 'background:#fecaca;color:#991b1b;font-weight:700;') + '">' + n + '</td>'; });
-  return h + '<td colspan="4"></td></tr>';
+  var real = sk !== GR_NO_SECTOR;   // „Без сектор“ — без червената рамка на колоната (не е сектор)
+  c.forEach(function(n){ h += '<td class="gr-gcov' + (n ? '' : ' gr-gcov0') + '" style="text-align:center;font-size:11px;' + (n ? 'color:#64748b;' : 'background:#fecaca;color:#991b1b;font-weight:700;' + (real ? 'border-left:2px solid #dc2626;border-right:2px solid #dc2626;border-bottom:2px solid #dc2626;' : '')) + '">' + n + '</td>'; });
+  return h + '<td colspan="' + grTailCols() + '"></td></tr>';
 }
 
 /* ─── Рендер ───────────────────────────────────────────── */
@@ -459,7 +477,14 @@ function grUpdate(){
   var grid = document.getElementById('gr-grid');
   if(!grid){ grTouched = {}; return grRender(); }      // друг изглед / без данни — #gr-grid го няма
   var ctx = grRowCtx(), rows = {}, k, calc = false;
-  for(k in grTouched){ rows[k] = 1; calc = true; }
+  for(k in grTouched){
+    rows[k] = 1; calc = true;
+    /* А5: смяна в сектора може да отвори / затвори червената колона на цялата група — прерисува се групата. */
+    if(ctx.grp && grOrder[+k] !== undefined){
+      var tsk = grSector(grCalc.rows[grOrder[+k]].staff);
+      grOrder.forEach(function(ci, rr){ if(grSector(grCalc.rows[ci].staff) === tsk) rows[rr] = 1; });
+    }
+  }
   for(k = grPainted.r0; k <= grPainted.r1; k++) rows[k] = 1;
   for(k = ctx.rg.r0; k <= ctx.rg.r1; k++) rows[k] = 1;
   grTouched = {};
@@ -472,6 +497,7 @@ function grUpdate(){
   }
   if(calc){
     Array.prototype.forEach.call(grid.querySelectorAll('tr.gr-grp-cov'), function(tr){ tr.outerHTML = grGroupCovHtml(tr.getAttribute('data-sector')); });
+    Array.prototype.forEach.call(grid.querySelectorAll('th.gr-dh'), function(th, i){ th.outerHTML = grDayHead(i, ctx.gaps); });
     var ft = grid.querySelector('tbody.gr-foot');
     if(ft) ft.outerHTML = grFootHtml();
     var wb = document.getElementById('gr-warn-box');
@@ -557,11 +583,12 @@ function grGridPageHtml(){
     '<span>Работни дни: <b>' + M.workDays + '</b> · норма <b>' + M.norm + ' ч.</b> · <b id="gr-season">' + escVal(grSeasonLabel(setup)) + '</b></span>' +
     '<span id="gr-offnorm" style="color:' + (off ? '#dc2626' : '#16a34a') + ';font-weight:600;">' + (off ? off + ' извън нормата' : 'всички на нормата') + '</span>' +
     '<span id="gr-save" style="color:#64748b;font-size:12px;">' + escVal(grSaveState) + '</span><span style="flex:1"></span>';
-  if(grCanEdit()){
+  if(grCellEdit()){
     h += '<button class="btn-sm" onclick="grCopyRhythm()" title="Попълва празните клетки по дните от седмицата на предходния месец">📋 Ритъмът от предходния месец</button>';
     h += '<button class="btn-sm" onclick="grToggleLock()" title="Ctrl+L">🔒 Заключи / отключи кода</button>';
-    h += '<button class="btn btn-green" onclick="grSubmit()">📤 Подай</button>';
   }
+  if(grCanEdit()) h += '<button class="btn btn-green" onclick="grSubmit()">📤 Подай</button>';
+  h += '<button class="btn-sm" id="gr-official-btn" onclick="grToggleOfficial()" title="' + (grOfficialOn() ? 'Обратно към буквите (редакция)' : 'Кодовете по ВТР и официалните часове — само за преглед') + '">' + (grOfficialOn() ? '✎ Буквите' : '👁 Официален график') + '</button>';
   if(grData.can_reopen) h += '<button class="btn-sm" onclick="grReopen()">↩ Върни в чернова</button>';
   /* 1д: файл за ТРЗ и печат — за всеки, който вижда графика (засега само beta списъка). */
   h += '<button class="btn-sm" id="gr-group-btn" onclick="grToggleGroup()" title="Редовете — по сектори или един общ списък (само на екрана; печатът и Excel са по реда на персонала)">' + (grGroupMode() === 'sector' ? '☰ Плосък списък' : '▤ По сектори') + '</button>';
@@ -572,18 +599,73 @@ function grGridPageHtml(){
   h += '<div id="gr-warn-box">' + grWarningsHtml() + '</div>';
   /* Подсказката е НАД мрежата: кутията на мрежата залепва под лентата и трябва да е последна в
      модула — иначе редът под нея я избутва нагоре при скрол докрай (index.html, .gr-grid-wrap). */
-  h += '<div id="gr-hint" style="font-size:12px;color:#64748b;margin:6px 2px;">Букви: ' + escVal(grAllowedLetters().join(', ')) +
-    ' · число 1–12 = свободни часове · стрелки / Tab / Enter · Shift+клик / Shift+стрелки — избор · Ctrl+C / Ctrl+V (и от / към Excel) · Delete изтрива избраното · ▾, двоен клик или Alt+↓ — списък · квадратчето долу вдясно — дръпни надясно, повтаря избраното · Ctrl+L заключва кода · ' +
-    '<span style="background:#fde68a;padding:0 4px;">жълто</span> = кодът е сменен автоматично до нормата · 🔒 = заключен код</div>';
+  h += '<div id="gr-hint" style="font-size:12px;color:#64748b;margin:6px 2px;">' + grLegendHtml() + grHowtoHtml() + '</div>';
   h += grGridHtml();
   return h;
 }
+/* Легендата над мрежата (етап А2, 23.11.2026): буквата → кодът, часът и часовете ЗА ОТВОРЕНИЯ МЕСЕЦ —
+   от setup (сезонът на месеца и неделята, grafik_letter_map + grafik_vtr_codes), не от кода тук.
+   Само общите букви (8-часов договор); договорите с други часове са в тяхната бланка. */
+function grLegendCode(P, code){
+  if(!code) return '—';
+  var c = P.codes[code];
+  if(!c) return escVal(code);
+  if(c.kind === 'absence'){
+    var raw = ((grData.setup || {}).codes || []).filter(function(k){ return k.code === code; })[0];
+    return escVal(code) + (raw && raw.legend ? ' <span style="color:#94a3b8;">' + escVal(raw.legend) + '</span>' : '');
+  }
+  var hm = function(m){ return grPad(Math.floor(m / 60)) + ':' + grPad(m % 60); };
+  var t = c.start !== null && c.end !== null ? hm(c.start) + '–' + hm(c.end) : '';
+  var hrs = GrafikEngine.codeHours(P, code);
+  return '<b>' + escVal(code) + '</b>' + (t ? ' ' + t : '') + (hrs ? ' · ' + grHrsTxt(hrs) + ' ч.' : '');
+}
+function grLegendHtml(){
+  var setup = (grData && grData.setup) || {};
+  if(!(setup.letter_map || []).length) return '';
+  var P = GrafikEngine.prepare(setup), seen = {}, letters = [];
+  (setup.letter_map || []).forEach(function(l){
+    if((l.hours_per_day === null || l.hours_per_day === undefined) && !seen[l.letter]){ seen[l.letter] = 1; letters.push(l.letter); }
+  });
+  var td = 'style="padding:2px 6px;border:1px solid #e2e8f0;white-space:nowrap;"';
+  var h = '<div class="tbl-wrap" style="margin-bottom:4px;"><table id="gr-legend" style="border-collapse:collapse;font-size:11px;"><thead><tr><th ' + td + '>Буква</th>' +
+    letters.map(function(l){ return '<th ' + td + '>' + escVal(l) + '</th>'; }).join('') + '</tr></thead><tbody>';
+  [['Делник · ' + grSeasonLabel(setup), P.season], ['Неделя', 'Н']].forEach(function(k){
+    h += '<tr><td ' + td + '><b>' + escVal(k[0]) + '</b></td>' + letters.map(function(l){ return '<td class="gr-lg" data-l="' + escAttrVal(l) + '" data-k="' + escAttrVal(k[1]) + '" ' + td + '>' + grLegendCode(P, P.map[l + '|' + k[1]]) + '</td>'; }).join('') + '</tr>';
+  });
+  return h + '</tbody></table></div>';
+}
+function grHowtoOpen(){ var v = null; try { v = localStorage.getItem('gr-howto'); } catch(e){} return v === '1'; }
+function grHowtoToggle(el){ try { localStorage.setItem('gr-howto', el.open ? '1' : '0'); } catch(e){} }
+function grHowtoHtml(){
+  return '<details id="gr-howto"' + (grHowtoOpen() ? ' open' : '') + ' ontoggle="grHowtoToggle(this)"><summary style="cursor:pointer;color:#2563eb;">ⓘ Как се работи</summary>' +
+    '<ul style="margin:4px 0 0 18px;">' +
+    '<li>Пиши буквата в клетката (' + escVal(grAllowedLetters().join(', ')) + '); число 1–12 = свободни часове — после избери смяна.</li>' +
+    '<li>Стрелки / Tab / Enter — движение; Shift+клик или Shift+стрелки — избор на няколко клетки.</li>' +
+    '<li>Ctrl+C / Ctrl+V — копиране (и от / към Excel); Delete изтрива избраното.</li>' +
+    '<li>▾, двоен клик или Alt+↓ — списък с буквите; квадратчето долу вдясно — дръпни надясно, повтаря избраното.</li>' +
+    '<li>Ctrl+L заключва кода (🔒). <span style="background:#fde68a;padding:0 4px;">жълто</span> = кодът е сменен автоматично до нормата.</li>' +
+    '<li>Червена колона в сектор = в този ден в сектора няма човек на смяна.</li></ul></details>';
+}
 function grStkW(i){ var w = GR_STK_W[i]; return 'box-sizing:border-box;width:' + w + 'px;min-width:' + w + 'px;max-width:' + w + 'px;'; }
-function grDayHead(i){
-  var M = grCalc.month, w = M.dow[i], hol = M.holiday[i];
+/* gaps — grDayGaps(): секторите без човек на смяна в деня → червена точка и имената при задържане (А5). */
+function grDayHead(i, gaps){
+  var M = grCalc.month, w = M.dow[i], hol = M.holiday[i], gp = gaps && gaps[i] && gaps[i].length ? gaps[i] : null;
   var bg = hol ? '#fecaca' : (w >= 6 ? '#e2e8f0' : '');
-  return '<th class="gr-dh" title="' + escAttrVal(M.dates[i] + (hol ? ' · ' + hol : '')) + '" style="padding:2px 3px;min-width:30px;' + (bg ? 'background:' + bg + ';' : '') + '">' +
-    (i + 1) + '<br><span style="font-weight:400;font-size:10px;">' + GR_DOW[w] + '</span></th>';
+  return '<th class="gr-dh" title="' + escAttrVal(M.dates[i] + (hol ? ' · ' + hol : '') + (gp ? ' · без човек: ' + gp.join(', ') : '')) + '" style="padding:2px 3px;min-width:30px;' + (bg ? 'background:' + bg + ';' : '') + '">' +
+    (i + 1) + '<br><span style="font-weight:400;font-size:10px;">' + GR_DOW[w] + '</span>' + (gp ? '<span class="gr-dh-gap" style="color:#dc2626;font-size:10px;">●</span>' : '') + '</th>';
+}
+/* Секторите без човек на смяна по дни (без „Без сектор“ — той не е сектор). */
+function grDayGaps(){
+  var M = grCalc.month, c = grCoverage(), out = [];
+  var secs = c.order.filter(function(k){ return k !== GR_NO_SECTOR; });
+  for(var d = 0; d < M.days; d++) out.push(secs.filter(function(k){ return !c.sec[k][d]; }));
+  return out;
+}
+/* Колоните след дните: в двата изгледа „Часове“ (вътрешните) и „До нормата“; в официалния — и Офиц. / Цел. */
+function grTailHead(){
+  return '<th title="Вътрешни часове (буквите + свободните часове)">Часове</th>' +
+    (grOfficialOn() ? '<th title="Официални часове по кодовете">Офиц.</th><th title="Целта по официалните кодове">Цел</th>' : '') +
+    '<th title="+/− спрямо целта: 0 = на нормата">До нормата</th>';
 }
 function grGridHtml(){
   var M = grCalc.month;
@@ -593,9 +675,9 @@ function grGridHtml(){
   var h = '<style id="gr-stk-css">#gr-grid .gr-stk1{left:' + GR_STK_W[0] + 'px;}#gr-grid .gr-stk2{left:' + (GR_STK_W[0] + GR_STK_W[1]) + 'px;}</style>';
   h += '<div class="tbl-wrap gr-grid-wrap" id="gr-grid-wrap"><table id="gr-grid" tabindex="0" onkeydown="grKey(event)" onpaste="grPaste(event)" oncopy="grCopy(event)" onmouseover="grFillOver(event)" style="border-collapse:collapse;font-size:12px;-webkit-user-select:none;user-select:none;">';
   h += '<thead><tr><th class="gr-stk gr-stk0" style="' + grStkW(0) + '">№</th><th class="gr-stk gr-stk1" style="text-align:left;' + grStkW(1) + '">Служител</th><th class="gr-stk gr-stk2 gr-stk-last" style="' + grStkW(2) + '">Сектор</th>';
-  for(var i = 0; i < M.days; i++) h += grDayHead(i);
-  h += '<th title="Вътрешни часове (буквите + свободните часове)">Вътр.</th><th title="Официални часове по кодовете">Офиц.</th><th>Цел</th><th>Разл.</th></tr></thead><tbody>';
   var grp = grGroupMode() === 'sector', ctx = grRowCtx(), prevSec = null;
+  for(var i = 0; i < M.days; i++) h += grDayHead(i, ctx.gaps);
+  h += grTailHead() + '</tr></thead><tbody>';
   grPainted = { r0: ctx.rg.r0, r1: ctx.rg.r1 };
   grOrder.forEach(function(ci, r){
     var x = grCalc.rows[ci];
@@ -606,7 +688,7 @@ function grGridHtml(){
     h += grRowHtml(ci, r, ctx);
   });
   if(grp && prevSec !== null) h += grGroupCovHtml(prevSec);
-  if(!grCalc.rows.length) h += '<tr><td colspan="' + (M.days + 7) + '" style="padding:14px;color:#64748b;">Няма служители в графика за месеца — добави ги от „👥 Персонал“.</td></tr>';
+  if(!grCalc.rows.length) h += '<tr><td colspan="' + (M.days + 3 + grTailCols()) + '" style="padding:14px;color:#64748b;">Няма служители в графика за месеца — добави ги от „👥 Персонал“.</td></tr>';
   h += '</tbody>' + grFootHtml() + '</table></div>';
   return h;
 }
@@ -620,6 +702,9 @@ function grRowHtml(ci, r, ctx){
   x.warnings.forEach(function(w){ (warnDays[w.day] = warnDays[w.day] || []).push(w.text); if(w.type === 'sunday_ld') sunLd[w.day] = 1; });
   /* Напуска през месеца — маркиран (бланката: L5:L80, светлосиньо). */
   var leaving = s.left_on && s.left_on >= M.start && s.left_on <= M.end;
+  /* А5: в изгледа по сектори — колоната на деня без човек в сектора е с червена рамка (и светлочервено, ако клетката няма свой цвят). */
+  var sk = ctx.grp ? grSector(s) : null, gapOf = function(d){ return !!sk && ctx.gaps[d].indexOf(sk) >= 0; };
+  var off = ctx.official;
   out += '<tr id="gr-row-' + escAttrVal(s.id) + '"><td class="gr-stk gr-stk0" style="' + grStkW(0) + '" title="Номерът в печата и в Excel за ТРЗ">' + (ci + 1) + '</td><td class="gr-name gr-stk gr-stk1' + (leaving ? ' gr-leaving' : '') + '" style="text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' + grStkW(1) + (leaving ? 'background:' + GR_GRID_FILL.leaving + ';' : '') + '" title="' + escAttrVal((s.full_name || '') + (s.contract_title ? ' · ' + s.contract_title : '') + (+s.hours_per_day && +s.hours_per_day !== 8 ? ' · ' + s.hours_per_day + ' ч.' : '') + (leaving ? ' · напуска на ' + fmtDate(s.left_on) : '')) + '">' +
     escVal(s.short_name || s.full_name) + (+s.hours_per_day && +s.hours_per_day !== 8 ? ' <span style="color:#64748b;">(' + escVal(String(+s.hours_per_day)) + ' ч.)</span>' : '') + '</td><td class="gr-stk gr-stk2 gr-stk-last" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' + grStkW(2) + '" title="' + escAttrVal(s.sector_id ? grSector(s) : '') + '">' + escVal(s.sector_id ? grSector(s) : '') + '</td>';
   for(var d = 0; d < M.days; d++){
@@ -636,10 +721,15 @@ function grRowHtml(ci, r, ctx){
     var sel = (grSel.r === r && grSel.d === d);
     var inR = rg.multi && r >= rg.r0 && r <= rg.r1 && d >= rg.d0 && d <= rg.d1;
     var corner = edit && r === rg.r1 && d === rg.d1, btnDrop = edit && sel && !grEdit;
-    out += '<td class="gr-c' + (inR ? ' gr-insel' : '') + '" id="gr-c-' + r + '-' + d + '" data-r="' + r + '" data-d="' + d + '" onclick="grSelect(' + r + ',' + d + ',event)" ondblclick="grDropOpen(' + r + ',' + d + ')" title="' + escAttrVal(title) + '" style="text-align:center;border:1px solid #e2e8f0;cursor:cell;min-width:30px;height:24px;' +
+    var gap = gapOf(d);
+    if(gap){ title += ' · в сектора няма човек на смяна'; if(!bg) bg = '#fecaca'; }
+    /* Официалният изглед — кодът; ден със свободни часове (без код) остава с числото, за да се види. */
+    var shown = sel && grEdit ? grEdit : off ? (code || (GrafikEngine.isHours(L) ? L : '')) : L;
+    out += '<td class="gr-c' + (inR ? ' gr-insel' : '') + (gap ? ' gr-secgap' : '') + '" id="gr-c-' + r + '-' + d + '" data-r="' + r + '" data-d="' + d + '" onclick="grSelect(' + r + ',' + d + ',event)" ondblclick="grDropOpen(' + r + ',' + d + ')" title="' + escAttrVal(title) + '" style="text-align:center;border:1px solid #e2e8f0;cursor:cell;min-width:30px;height:24px;' +
+      (gap ? 'border-left:2px solid #dc2626;border-right:2px solid #dc2626;' : '') +
       (bg ? 'background:' + bg + ';' : '') + (sel ? 'outline:2px solid #2563eb;outline-offset:-2px;' : '') + (inR ? 'box-shadow:inset 0 0 0 1000px rgba(37,99,235,.15);' : '') +
-      (sel || corner ? 'position:relative;' : '') + (warnDays[d + 1] ? 'color:#dc2626;font-weight:700;' : '') + '">' +
-      escVal(sel && grEdit ? grEdit : L) + (lk ? '<span style="font-size:9px;">🔒</span>' : '') +
+      (sel || corner ? 'position:relative;' : '') + (warnDays[d + 1] ? 'color:#dc2626;font-weight:700;' : '') + (off ? 'font-size:10px;' : '') + '">' +
+      escVal(shown) + (lk ? '<span style="font-size:9px;">🔒</span>' : '') +
       (btnDrop ? '<span class="gr-drop-btn" onclick="event.stopPropagation();grDropOpen(' + r + ',' + d + ')" title="Списък с буквите (Alt+↓)" style="position:absolute;top:0;right:1px;font-size:9px;line-height:9px;color:#2563eb;cursor:pointer;">▾</span>' : '') +
       (corner ? '<span class="gr-fill" onmousedown="grFillStart(event)" title="Дръпни надясно — повтаря избраното по дните" style="position:absolute;right:-3px;bottom:-3px;width:6px;height:6px;background:#2563eb;border:1px solid #fff;cursor:crosshair;z-index:0;"></span>' : '') +
       (sel && grDrop && edit ? grDropHtml(r) : '') + '</td>';
@@ -649,12 +739,15 @@ function grRowHtml(ci, r, ctx){
   /* „Вътр.“ като колона BE на бланката: под нормата — червено, над нормата + 3 ч. — оранжево.
      Прагът е нормата на човека без дните Б / НО (internalNorm, grafik-engine.js). */
   var inC = x.internal < x.internalNorm ? GR_GRID_FILL.under : x.internal > x.internalNorm + 3 ? GR_GRID_FILL.over : '';
-  out += '<td class="gr-int" style="' + (inC ? 'background:' + inC + ';' : '') + '" title="' + escAttrVal('вътрешни ' + grHrsTxt(x.internal) + ' ч. · праг ' + grHrsTxt(x.internalNorm) + ' ч. (норма без Б / НО)') + '">' + x.internal + '</td><td>' + x.official + '</td><td>' + tg + '</td>' +
+  out += '<td class="gr-int" style="' + (inC ? 'background:' + inC + ';' : '') + '" title="' + escAttrVal('вътрешни ' + grHrsTxt(x.internal) + ' ч. · праг ' + grHrsTxt(x.internalNorm) + ' ч. (норма без Б / НО)') + '">' + x.internal + '</td>' + (off ? '<td class="gr-off">' + x.official + '</td><td class="gr-tg">' + tg + '</td>' : '') +
     '<td class="gr-diff" style="color:' + dc + ';font-weight:700;white-space:nowrap;" title="' + escAttrVal(er || x.message) + '">' + (df > 0 ? '+' : '') + df +
     (function(){ var ht = er ? '' : grHintText(grNormHint(x)); return ht ? ' <span class="gr-hint" title="' + escAttrVal('💡 ' + ht) + '" style="cursor:help;">💡</span>' : ''; })() + '</td></tr>';
   return out;
 }
-function grRowCtx(){ return { M: grCalc.month, chMap: grChMap(), rg: grRange(), edit: grCanEdit() }; }
+function grRowCtx(){
+  return { M: grCalc.month, chMap: grChMap(), rg: grRange(), edit: grCellEdit(), official: grOfficialOn(),
+    grp: grGroupMode() === 'sector', gaps: grDayGaps() };
+}
 /* Долният блок на мрежата (08.11.2026, вместо картите „Покритие“ и „Дневни сборове“): в същите
    колони за дните, със същия хоризонтален скрол и залепените леви колони. Отгоре — „На смяна“,
    „Сутрин“, „Вечер“, „Сектори без човек“; под „▸ още“ (сгънато, помни се) — по буква, „Общо на
@@ -671,13 +764,11 @@ function grToggleMore(){
 function grFootHtml(){
   if(!grCalc.rows.length) return '';
   var M = grCalc.month, t = grDaily(), c = grCoverage(), more = grMoreOpen(), flat = grGroupMode() !== 'sector';
-  var on = new Array(M.days).fill(0), empty = [];
+  var on = new Array(M.days).fill(0), empty = grDayGaps();
   grCalc.rows.forEach(function(x){
     var L = (grRows[x.staff.id] || { letters: [] }).letters || [];
     for(var d = 0; d < M.days; d++) if(GR_WORK_LETTERS.indexOf(L[d]) >= 0) on[d]++;
   });
-  var secs = c.order.filter(function(k){ return k !== GR_NO_SECTOR; });   // „Без сектор“ не е сектор
-  for(var d = 0; d < M.days; d++) empty.push(secs.filter(function(k){ return !c.sec[k][d]; }));
   var first = true;
   var line = function(id, label, arr, o){
     o = o || {};
@@ -688,14 +779,14 @@ function grFootHtml(){
       var st = o.red0 && !n ? 'background:#fecaca;color:#991b1b;font-weight:700;' : o.redPos && n ? 'background:#fecaca;color:#991b1b;font-weight:700;' : (n ? '' : 'color:#cbd5e1;');
       h += '<td style="text-align:center;font-size:11px;' + top + st + '"' + (o.titles && o.titles[i].length ? ' title="' + escAttrVal(o.titles[i].join(', ')) + '"' : '') + '>' + n + '</td>';
     });
-    return h + '<td colspan="4" style="' + top + '"></td></tr>';
+    return h + '<td colspan="' + grTailCols() + '" style="' + top + '"></td></tr>';
   };
   var h = line('gr-foot-onshift', 'На смяна', on, { bold: true, red0: true }) +
     line('gr-daily-morning', 'Сутрин (ЛД+ЗД+П)', t.morning, { bold: true }) +
     line('gr-daily-evening', 'Вечер (ЛД+ЗД+В+М)', t.evening, { bold: true }) +
     line('gr-foot-nosec', 'Сектори без човек', empty.map(function(l){ return l.length; }), { redPos: true, titles: empty });
   h += '<tr id="gr-foot-more" class="gr-foot-row"><td colspan="3" class="gr-stk gr-stk0 gr-stk-last" onclick="grToggleMore()" style="text-align:left;white-space:nowrap;font-size:11px;color:#2563eb;cursor:pointer;" title="По буква, „Общо на ден“, по позиция (хората на смяна — работна буква или свободни часове)' + (flat ? ', по сектор' : '') + '">' +
-    (more ? '▾ по-малко' : '▸ още') + '</td><td colspan="' + (M.days + 4) + '"></td></tr>';
+    (more ? '▾ по-малко' : '▸ още') + '</td><td colspan="' + (M.days + grTailCols()) + '"></td></tr>';
   if(more){
     h += GR_DAILY_LETTERS.map(function(l){ return line('gr-daily-l-' + l, l, t.by[l]); }).join('') +
       line('gr-daily-total', 'Общо на ден (буквите)', t.total, { bold: true }) +
@@ -769,33 +860,72 @@ function grHintText(h){
   if(h.kind === 'add') return 'добави ' + cnt + ' ' + h.letter + rng + ', напр. на ' + days;
   return 'махни ' + cnt + ' ' + h.from + ', напр. на ' + days;
 }
-function grWarningsHtml(){
-  var list = [];
+/* Предупрежденията — таблица по категории с прости думи (етап А3, 23.11.2026; решение на Тенчо:
+   „Неделя / празник“ — в „Почивки и празници“; каквото спира „Подай“ — с 🚫 във всяка категория).
+   🚫 = същото като grSubmitIssues: извън нормата, празен ред, свободни часове, ЛД в неделя.
+   Категория „Отпуски“ — за етап В (фирмената политика); празна категория не се показва. */
+var GR_WARN_CATS = [['over', 'Над нормата'], ['under', 'Под нормата'], ['leave', 'Отпуски'], ['missing', 'Липсват данни'], ['rest', 'Почивки и празници']];
+var GR_WARN_CAT = { week_over_56: 'over', shift_over_12: 'over', daily_rest: 'rest', no_weekly_rest: 'rest', sunday_ld: 'rest', holiday: 'rest',
+  before_hire: 'missing', after_leave: 'missing', unknown: 'missing', no_contract: 'missing' };
+var GR_WARN_TODO = {
+  week_over_56: 'махни смяна или сложи по-кратка в тази седмица',
+  shift_over_12: 'избери по-кратка смяна',
+  daily_rest: 'смени едната смяна — между двете трябват поне 12 ч. почивка',
+  no_weekly_rest: 'сложи почивни дни — поне 36 ч. почивка подред в седмицата',
+  sunday_ld: 'смени ЛД със ЗД',
+  holiday: 'провери дали човекът наистина работи на празника',
+  before_hire: 'махни смяната или поправи „Назначен на“ в 👥 Персонал',
+  after_leave: 'махни смяната или поправи „Напуснал на“ в 👥 Персонал',
+  unknown: 'избери буква от списъка (▾)',
+  no_contract: 'админ: букви за този договор (Администрация → 📆 График)'
+};
+function grWarnItems(){
+  var list = [], M = grCalc.month, dm = function(d){ return grPad(d) + '.' + grPad(M.month); };
   grCalc.rows.forEach(function(x){
     var name = x.staff.short_name || x.staff.full_name;
     var er = grEmptyRow(x);
-    if(er) list.push({ t: 'norow', s: name + ': ' + er });
+    if(er) list.push({ cat: 'missing', t: 'norow', name: name, day: '—', what: er, todo: 'попълни реда; ако човекът не работи този месец — „Назначен на“ / „Напуснал на“ в 👥 Персонал', block: true });
     if(x.diff !== 0){
       var ht = er ? '' : grHintText(grNormHint(x));
-      list.push({ t: 'norm', s: name + ': ' + x.message + (x.reachable ? '' : ' — изравняването не намира точна комбинация, кодовете не са пипнати') + (ht ? ' · 💡 ' + ht : '') });
+      list.push({ cat: x.diff > 0 ? 'over' : 'under', t: 'norm', name: name, day: 'месеца',
+        what: grHrsTxt(x.official) + ' ч. по график, целта е ' + grHrsTxt(x.target) + ' ч. (' + (x.diff > 0 ? '+' : '') + grHrsTxt(x.diff) + ')',
+        todo: (ht ? '💡 ' + ht : x.diff > 0 ? 'махни смени' : 'добави смени') + (x.reachable ? '' : ' (изравняването не намира точна комбинация — смени буквите ръчно)'), block: true });
     }
-    /* Свободни часове 1–12 (решение на Тенчо 20.11.2026) — същият текст като при „Подай“ (grSubmitIssues). */
-    var L = (grRows[x.staff.id] || {}).letters || [], M = grCalc.month;
+    /* Свободни часове 1–12 (решение на Тенчо 20.11.2026) — спират „Подай“. */
+    var L = (grRows[x.staff.id] || {}).letters || [];
     for(var d = 0; d < M.days; d++){
-      if(GrafikEngine.isHours(L[d] || '')) list.push({ t: 'hours', s: name + ': ' + L[d] + ' свободни ч. на ' + grPad(d + 1) + '.' + grPad(M.month) + ' — сложи код' });
+      if(GrafikEngine.isHours(L[d] || '')) list.push({ cat: 'missing', t: 'hours', name: name, day: dm(d + 1), what: 'написано е число ' + L[d], todo: 'избери смяна (П, ЛД…)', block: true });
     }
     var seen = {};
     x.warnings.forEach(function(w){
       var key = w.type + ':' + w.day;
       if(seen[key]) return; seen[key] = 1;
-      /* Почивките и седмиците носят датите си в текста („7 поредни работни дни (02.11–08.11) …“). */
-      list.push({ t: w.type, s: name + ': ' + (GR_DATED_WARN[w.type] ? w.text : w.day + '-ви — ' + w.text) });
+      list.push({ cat: GR_WARN_CAT[w.type] || 'missing', t: w.type, name: name, day: dm(w.day), what: w.text, todo: GR_WARN_TODO[w.type] || '', block: w.type === 'sunday_ld' });
     });
   });
-  (grCalc.notes || []).forEach(function(n){ list.push({ t: 'month', s: n }); });
+  (grCalc.notes || []).forEach(function(n){ list.push({ cat: 'missing', t: 'month', name: '—', day: '—', what: n, todo: 'нищо — само за сведение' }); });
+  return list;
+}
+function grWarningsHtml(){
+  var list = grWarnItems();
   if(!list.length) return '';
-  return '<details class="card" id="gr-warnings" style="border-left:4px solid #f59e0b;"' + (list.length <= 12 ? ' open' : '') + '><summary style="cursor:pointer;font-weight:600;">⚠ Предупреждения (' + list.length + ')</summary><ul style="margin:6px 0 0 18px;font-size:12px;">' +
-    list.map(function(x){ return '<li class="gr-warn gr-warn-' + escAttrVal(x.t) + '">' + escVal(x.s) + '</li>'; }).join('') + '</ul></details>';
+  var nb = list.filter(function(x){ return x.block; }).length;
+  var td = 'style="padding:3px 6px;border-bottom:1px solid #e2e8f0;vertical-align:top;"';
+  var h = '<details class="card" id="gr-warnings" style="border-left:4px solid #f59e0b;"' + (list.length <= 12 ? ' open' : '') + '><summary style="cursor:pointer;font-weight:600;">⚠ Предупреждения (' + list.length + ')' +
+    (nb ? ' <span style="color:#dc2626;">· 🚫 ' + nb + ' спират „Подай“</span>' : '') + '</summary>' +
+    '<div class="tbl-wrap"><table id="gr-warn-tbl" style="border-collapse:collapse;font-size:12px;margin-top:6px;width:100%;"><thead><tr><th ' + td + '>Служител</th><th ' + td + '>Ден</th><th ' + td + '>Какво</th><th ' + td + '>Какво да направиш</th></tr></thead><tbody>';
+  GR_WARN_CATS.forEach(function(c){
+    var items = list.filter(function(x){ return x.cat === c[0]; });
+    if(!items.length) return;
+    var cb = items.filter(function(x){ return x.block; }).length;
+    h += '<tr class="gr-wcat" data-cat="' + c[0] + '"><td colspan="4" style="padding:6px 6px 3px;background:#f1f5f9;font-weight:700;">' + escVal(c[1]) + ' (' + items.length + ')' +
+      (cb ? ' <span style="color:#dc2626;font-weight:600;">🚫 ' + cb + '</span>' : '') + '</td></tr>';
+    items.forEach(function(x){
+      h += '<tr class="gr-warn gr-warn-' + escAttrVal(x.t) + '" data-cat="' + c[0] + '"' + (x.block ? ' data-block="1"' : '') + '><td ' + td + '>' + (x.block ? '<span title="Спира „Подай“">🚫</span> ' : '') + escVal(x.name) + '</td><td ' + td + ' class="gr-w-day">' + escVal(x.day) + '</td>' +
+        '<td ' + td + ' class="gr-w-what">' + escVal(x.what) + '</td><td ' + td + ' class="gr-w-todo">' + escVal(x.todo) + '</td></tr>';
+    });
+  });
+  return h + '</tbody></table></div></details>';
 }
 
 /* ─── Навигация ────────────────────────────────────────── */
@@ -857,7 +987,7 @@ function grCopy(e){
 /* т.6: квадратчето в долния десен ъгъл — дърпане надясно повтаря избраното по дните,
    всеки ред своя шаблон (2 на 2, 5+2 …). Докато се дърпа — само рамка; записът е при пускане. */
 function grFillStart(e){
-  if(!grCanEdit() || !grCalc) return;
+  if(!grCellEdit() || !grCalc) return;
   if(e.preventDefault) e.preventDefault();
   if(e.stopPropagation) e.stopPropagation();
   grCommitEdit();
@@ -894,7 +1024,7 @@ function grFillEnd(){
 }
 /* т.4: списъкът в клетката (като валидацията в Excel) — двоен клик, ▾ или Alt+↓. */
 function grDropOpen(r, d){
-  if(!grCanEdit() || !grCalc) return;
+  if(!grCellEdit() || !grCalc) return;
   grCommitEdit();
   grAnc = null; grSel = { r: r, d: d }; grDrop = true;
   grUpdate();
@@ -956,7 +1086,7 @@ function grMoveClamp(dr, dd){
 function grKey(e){
   if(!grData || grView !== 'grid' || !grCalc || !grVisible.length) return;
   if(e.target && e.target.id === 'gr-drop-sel') return;    // клавишите на списъка
-  var k = e.key, edit = grCanEdit();
+  var k = e.key, edit = grCellEdit();
   if((e.ctrlKey || e.metaKey) && (k === 'l' || k === 'L' || k === 'л' || k === 'Л')){ e.preventDefault(); grToggleLock(); return; }
   if(e.altKey && k === 'ArrowDown'){ e.preventDefault(); grDropOpen(grSel.r, grSel.d); return; }
   if(e.ctrlKey || e.metaKey || e.altKey) return;           // Ctrl+V → grPaste, Ctrl+C → grCopy
@@ -1011,7 +1141,7 @@ function grCouldBe(t){ var p = grPartial(t); return grCandidates().some(function
 function grHasLonger(t){ var p = grPartial(t); return grCandidates().some(function(c){ return c.length > p.length && c.indexOf(p) === 0; }); }
 /* Поставяне от Excel: редове с табулации, от избраната клетка надясно и надолу. */
 function grPaste(e){
-  if(!grCanEdit() || !grCalc) return;
+  if(!grCellEdit() || !grCalc) return;
   var txt = (e.clipboardData || window.clipboardData) ? (e.clipboardData || window.clipboardData).getData('text') : '';
   if(!txt) return;
   e.preventDefault();
@@ -1044,7 +1174,7 @@ function grPaste(e){
 }
 /* Заключва официалния код на клетката (такъв, какъвто е сега — вкл. автоматично сменен). */
 function grToggleLock(){
-  if(!grCanEdit() || !grCalc) return;
+  if(!grCellEdit() || !grCalc) return;
   grCommitEdit();
   var s = grVisible[grSel.r];
   if(!s) return;
@@ -1064,7 +1194,7 @@ function grToggleLock(){
    предходния месец. Само работните букви и „свободните часове“, само в
    ПРАЗНИ клетки; отсъствията (О, Б, НО) не се пренасят. */
 function grCopyRhythm(){
-  if(!grCanEdit() || !grCalc) return;
+  if(!grCellEdit() || !grCalc) return;
   var prev = {};
   (grData.prev_rows || []).forEach(function(r){ prev[r.staff_id] = r.letters || []; });
   var M = grCalc.month, pm = GrafikEngine.monthInfo(grShiftMonth(grMonth, -1), []), n = 0;
