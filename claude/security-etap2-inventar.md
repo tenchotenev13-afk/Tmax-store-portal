@@ -171,7 +171,7 @@ JWT secret като секрет на функция — само докато l
 | `stock_diff_swaps` | **изкл.** | SIUD | SIUD | SIUD | ···· | anon_all_sd_swaps → ALL → anon |
 | `stock_differences` | **изкл.** | SIUD | SIUD | SIUD | ···· | anon_all_sd → ALL → anon |
 | `stock_returns` | вкл. | SIUD | SIUD | SIUD | ···· | anon_all_sr → ALL → anon |
-| `storage_files_index` (изглед) | — | SIUD | SIUD | — | — | — |
+| `storage_files_index` (изглед) | — | SIUD | SIUD | — | — | **24.11.2026: записът е затворен** — anon/authenticated само S (миграция `20261124125709`, `storage-files-index-readonly-schema.sql`) |
 | `stores` | вкл. | SIUD | SIUD | SI·D | ···· | anon_delete_stores → DELETE → anon; anon_read_stores → SELECT → anon; anon_write_stores → INSERT → anon |
 | `storno_note_replies` | вкл. | SIU· | SIU· | SIU· | ···· | storno_note_replies_insert → INSERT → anon; storno_note_replies_select → SELECT → anon; storno_note_replies_update → UPDATE → anon |
 | `storno_notes` | вкл. | SIUD | SIUD | SIUD | ···· | storno_notes_delete → DELETE → anon; storno_notes_insert → INSERT → anon; storno_notes_select → SELECT → anon; storno_notes_update → UPDATE → anon |
@@ -928,6 +928,7 @@ Referer-ът носи само произхода (`https://tenchotenev13-afk.gi
 Всички политики на Storage са **само за `anon`** — за `authenticated` няма нито една. Публичните bucket-и се четат по `/object/public/…` без ключ, независимо от политиките. `kasa-docs` е частен — порталът го отваря със signed URL (`kasa_docs_sign`).
 
 `public.storage_files_index` — изглед (собственик postgres, **без** `security_invoker`, тоест работи с правата на собственика) върху `storage.objects` за `kasa-docs`, `bulletin-files`, `docs`, `contacts` (име, размер, mime, дати). anon има SELECT → **списъкът на всички файлове, вкл. частния `kasa-docs`, е четим с публичния ключ**. Чете го PowerShell клиентът (3г); Advisor го показва като `security_definer_view`.
+**24.11.2026 — записът през изгледа е затворен:** anon и authenticated имаха и INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER (UPDATE и INSERT минаваха покрай RLS на `storage.objects`); миграция `20261124125709` (`storage-files-index-readonly-schema.sql`) ги отнема, SELECT остава. Четимостта на списъка с anon (горе) е непроменена.
 
 **Публични URL-и, записани в базата** (стойности, съдържащи `/storage/v1/object/public/`, 04.11):
 

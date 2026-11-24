@@ -1553,6 +1553,7 @@ execute от public/anon/authenticated; `report_excluded_stores` — INVOKER;
 `set-history-pin` и
 `users.history_pin_hash` не са пипани — решение в
 `claude/open/11-11-history-pin-decision.md`.
+`storage_files_index` (24.11): изгледът е само за четене — revoke insert/update/delete/truncate/references/trigger от anon и authenticated, SELECT остава за огледалото (`storage-files-index-readonly-schema.sql`, миграция `20261124125709`, приложена 24.11; curl с anon: GET 206 `0-0/9700`, PATCH 401/42501). Списъкът на файловете (вкл. `kasa-docs`) остава четим с anon — отделно решение.
 Остава: сървърна проверка на
 самоличност (ВИСОК, `claude/open-tasks.md`), OneSignal REST ключ в push.js
 (ротация), `in.(<списък>)` без горна граница (среден/висок).

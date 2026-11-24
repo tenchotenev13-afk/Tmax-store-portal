@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията storage_files_index_readonly, storage-files-index-readonly-schema.sql, версия 20261124125709, приложена 24.11.2026)
+- 24.11 · storage_files_index — без промяна за огледалото, остава само за четене
+
 (в базата от миграцията revaluation_units, revaluation-units-schema.sql, версия 20261123201403, приложена 23.11.2026)
 - 23.11 · нова таблица revaluation_units — id uuid NOT NULL, default gen_random_uuid() (PK) · item_id uuid NOT NULL (→ revaluation_items.id) · submission_id uuid NOT NULL (→ revaluation_submissions.id) · store_name text NOT NULL · unit_no text NOT NULL, уникален · created_at timestamptz NOT NULL, default now()
 - 23.11 · нова таблица revaluation_unit_counters — store_name text NOT NULL (PK) · last_num integer NOT NULL, default 0
