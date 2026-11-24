@@ -27,6 +27,9 @@
 - 23.11 · problem_articles.photo_required — boolean, NOT NULL, default false
 - 23.11 · нова таблица problem_article_done — id uuid PK, article_id uuid NOT NULL, store_name text NOT NULL, done_by text NULL, done_at timestamptz NOT NULL default now(), photos jsonb NOT NULL default '[]'; уникалност article_id + store_name
 
+(в базата от миграцията grafik_sector_coverage, grafik-sector-coverage-schema.sql, версия 20261124081201, приложена 24.11.2026; таблицата е без anon — виж бележката при grafik_schema)
+- 24.11 · grafik_sectors.track_coverage — boolean, NOT NULL, default true
+
 ## Потвърдено 23.11.2026
 
 (в базата от миграцията reads_as_code, reads-as-code-schema.sql, версия 20261123113626, приложена 23.11.2026)

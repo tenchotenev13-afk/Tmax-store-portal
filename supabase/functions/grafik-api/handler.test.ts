@@ -138,6 +138,7 @@ class MemRepo implements Repo {
     };
   }
   async getSector(id: string) { return this.sectors.filter((x) => x.id === id)[0] || null; }
+  async updateSector(id: string, f: Record<string, unknown>) { const x = this.sectors.filter((s) => s.id === id)[0]; if (!x) return null; Object.assign(x, f); return x; }
   async insertSector(f: Record<string, unknown>) {
     if (this.sectors.some((x) => x.store_name === f.store_name && x.name.toLowerCase() === String(f.name).toLowerCase())) {
       throw new HttpError(400, "db_constraint", "duplicate key value violates unique constraint");
@@ -818,6 +819,37 @@ Deno.test("sector_save: admin и регионалният — да; manager, с�
   eq((await add(U.admin, "Кърджали", "   ")).reason, "bad_request", "празно име");
   eq((await add(U.admin, "Кърджали", "x".repeat(61))).reason, "bad_request", "над 60 знака");
   eq(r.audits.filter((x) => x.event === "grafik_sector_create").length, 2, "audit за двата успешни");
+});
+
+Deno.test("сектори: setup носи track_coverage (липсва в базата → true)", async () => {
+  const r = new MemRepo();
+  r.sectors[0].track_coverage = false;                       // Склад — изключен; Каса — без поле (стар ред)
+  const st = resolveSetup(await r.setupRaw("Кърджали"), "2026-11-01", "2026-11-30");
+  eq(st.sectors.map((x) => x.name + ":" + x.track_coverage), ["Каса:true", "Склад:false"], "Каса → true, Склад → false");
+});
+
+Deno.test("sector_update: „следи покритието“ — admin и регионалният (свой); manager, склад, ТРЗ — не; само полето", async () => {
+  const r = new MemRepo();
+  const SK = "5ec00000-0000-4000-8000-000000000001", SH = "5ec00000-0000-4000-8000-000000000004";
+  const upd = async (u: User, store: string, id: unknown, v: unknown) => (await call(r, u, { action: "sector_update", store, id, track_coverage: v, name: "ПРЕИМЕНУВАН" })).body;
+  const a = await upd(U.admin, "Кърджали", SK, false);
+  eq([a.ok, a.sector.track_coverage, a.sector.name], [true, false, "Склад"], "admin изключва; името не се пипа");
+  eq(r.sectors[0].track_coverage, false, "в базата — false");
+  eq((await upd(U.admin, "Кърджали", SK, true)).sector.track_coverage, true, "admin включва обратно");
+  eq((await upd(U.regSh, "Шумен", SH, false)).ok, true, "регионален — свой обект");
+  eq((await upd(U.regSh, "Кърджали", SK, false)).reason, "readonly", "регионален — чужд обект");
+  eq((await upd(U.mgrK, "Кърджали", SK, false)).reason, "forbidden", "manager");
+  eq((await upd(U.sklK, "Кърджали", SK, false)).reason, "readonly", "склад");
+  eq((await upd(U.trz, "Кърджали", SK, false)).reason, "readonly", "ТРЗ");
+  eq((await upd(U.admin, "Кърджали", SH, false)).reason, "not_found", "сектор на друг магазин през този магазин");
+  eq((await upd(U.admin, "Кърджали", SK, "false")).reason, "bad_request", "низ вместо boolean");
+  eq((await upd(U.admin, "Кърджали", SK, undefined)).reason, "bad_request", "без стойност");
+  eq((await upd(U.admin, "Кърджали", "не-uuid", false)).reason, "bad_request", "невалиден id");
+  eq(r.sectors[0].track_coverage, true, "отказаните не пипат базата");
+  const au = r.audits.filter((x) => x.event === "grafik_sector_update");
+  eq(au.length, 3, "audit за трите успешни");
+  const was = au.map((a) => (a as unknown as { details: Record<string, unknown> }).details.was);
+  eq(was, [true, false, true], "audit пази предишната стойност (true → false, false → true, Шумен true → false)");
 });
 
 Deno.test("staff_save: sector_id само от същия магазин и активен; staff_move го маха", async () => {

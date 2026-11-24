@@ -177,6 +177,15 @@ function grSectorById(id){
   return null;
 }
 function grSector(s){ var x = s && s.sector_id ? grSectorById(s.sector_id) : null; return x ? x.name : GR_NO_SECTOR; }
+/* „Следи покритието“ (grafik_sectors.track_coverage, 24.11.2026): без отметка секторът не е дупка — не се
+   брои в „Сектори без човек“, в червените колони и в точката над деня. „Без сектор“ никога не се следи.
+   Липсва ли полето (сървър отпреди миграцията) — следи се, както досега. */
+function grSectorTracked(name){
+  if(name === GR_NO_SECTOR) return false;
+  var l = grSectors();
+  for(var i = 0; i < l.length; i++) if(l[i].name === name) return l[i].track_coverage !== false;
+  return true;
+}
 /* Пълното име на сезона (grafik_vtr_seasons.labels) — „З1“ се чете като „31“. */
 function grSeasonLabel(setup){ return (setup && (setup.season_label || setup.season)) || '—'; }
 /* Нов сектор — admin и регионалният (сървърът проверява същото). */
@@ -411,7 +420,9 @@ function grGroupMembers(sk){ return grOrder.filter(function(i){ return grSector(
 function grGroupHeadHtml(sk){
   var M = grCalc.month;
   return '<tr class="gr-grp" data-sector="' + escAttrVal(sk) + '"><td colspan="3" class="gr-stk gr-stk0 gr-stk-last" style="text-align:left;font-weight:700;background:#e2e8f0;white-space:nowrap;">' +
-    escVal(sk) + ' <span style="font-weight:400;color:#64748b;">(' + grGroupMembers(sk).length + ')</span></td><td colspan="' + (M.days + grTailCols()) + '" style="background:#e2e8f0;"></td></tr>';
+    escVal(sk) + ' <span style="font-weight:400;color:#64748b;">(' + grGroupMembers(sk).length + ')</span>' +
+    (sk !== GR_NO_SECTOR && !grSectorTracked(sk) ? ' <span class="gr-notrack" style="font-weight:400;color:#94a3b8;font-size:11px;" title="Покритието не се следи — сменя се в 👥 Персонал">· не се следи</span>' : '') +
+    '</td><td colspan="' + (M.days + grTailCols()) + '" style="background:#e2e8f0;"></td></tr>';
 }
 /* „На смяна“ под групата — същото броене като картата „Покритие“ (работна буква). 0 → червено. */
 function grGroupCovHtml(sk){
@@ -421,8 +432,10 @@ function grGroupCovHtml(sk){
     for(var d = 0; d < M.days; d++) if(GR_WORK_LETTERS.indexOf(L[d]) >= 0) c[d]++;
   });
   var h = '<tr class="gr-grp-cov" data-sector="' + escAttrVal(sk) + '"><td colspan="3" class="gr-stk gr-stk0 gr-stk-last" style="text-align:right;font-size:11px;color:#64748b;white-space:nowrap;">на смяна</td>';
-  var real = sk !== GR_NO_SECTOR;   // „Без сектор“ — без червената рамка на колоната (не е сектор)
-  c.forEach(function(n){ h += '<td class="gr-gcov' + (n ? '' : ' gr-gcov0') + '" style="text-align:center;font-size:11px;' + (n ? 'color:#64748b;' : 'background:#fecaca;color:#991b1b;font-weight:700;' + (real ? 'border-left:2px solid #dc2626;border-right:2px solid #dc2626;border-bottom:2px solid #dc2626;' : '')) + '">' + n + '</td>'; });
+  /* „Без сектор“ — червено без рамката на колоната (не е сектор). Сектор, чието покритие не се следи
+     (24.11.2026) — редът остава, но 0 не е червено (сиво, без gr-gcov0). */
+  var real = sk !== GR_NO_SECTOR, quiet = real && !grSectorTracked(sk);
+  c.forEach(function(n){ h += '<td class="gr-gcov' + (n || quiet ? '' : ' gr-gcov0') + '" style="text-align:center;font-size:11px;' + (n ? 'color:#64748b;' : quiet ? 'color:#cbd5e1;' : 'background:#fecaca;color:#991b1b;font-weight:700;' + (real ? 'border-left:2px solid #dc2626;border-right:2px solid #dc2626;border-bottom:2px solid #dc2626;' : '')) + '">' + n + '</td>'; });
   return h + '<td colspan="' + grTailCols() + '"></td></tr>';
 }
 
@@ -657,7 +670,7 @@ function grDayHead(i, gaps){
 /* Секторите без човек на смяна по дни (без „Без сектор“ — той не е сектор). */
 function grDayGaps(){
   var M = grCalc.month, c = grCoverage(), out = [];
-  var secs = c.order.filter(function(k){ return k !== GR_NO_SECTOR; });
+  var secs = c.order.filter(grSectorTracked);   // без „Без сектор“ и без секторите, чието покритие не се следи
   for(var d = 0; d < M.days; d++) out.push(secs.filter(function(k){ return !c.sec[k][d]; }));
   return out;
 }
@@ -791,7 +804,7 @@ function grFootHtml(){
     h += GR_DAILY_LETTERS.map(function(l){ return line('gr-daily-l-' + l, l, t.by[l]); }).join('') +
       line('gr-daily-total', 'Общо на ден (буквите)', t.total, { bold: true }) +
       t.posOrder.map(function(k){ return line('gr-daily-p-' + k, k, t.pos[k]); }).join('');
-    if(flat) h += c.order.map(function(k){ return line('gr-foot-sec-' + k, 'на смяна: ' + k, c.sec[k], { red0: k !== GR_NO_SECTOR }); }).join('');
+    if(flat) h += c.order.map(function(k){ return line('gr-foot-sec-' + k, 'на смяна: ' + k, c.sec[k], { red0: grSectorTracked(k) }); }).join('');
   }
   return '<tbody class="gr-foot">' + h + '</tbody>';
 }
@@ -1737,7 +1750,7 @@ function grStaffHtml(){
   var edit = grCanEditStaff();
   var h = '<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><b>Персонал — ' + escVal(grStore) + '</b><span style="color:#64748b;font-size:12px;">' + list.length + ' души</span><span style="flex:1"></span>' +
     (grCanAddSector() ? '<button class="btn-sm" onclick="grSectorOpen()" title="Нов сектор в списъка на магазина">➕ Сектор</button>' : '') +
-    (edit ? '<button class="btn btn-green" onclick="grStaffOpen(\'\')">➕ Нов служител</button>' : '') + '</div>';
+    (edit ? '<button class="btn btn-green" onclick="grStaffOpen(\'\')">➕ Нов служител</button>' : '') + '</div>' + grSectorTrackHtml(list);
   /* tbl-compact е на обвивката (както навсякъде в портала): от 1200px тя сваля скрола и
      заглавието залепва под лентата (index.html, .tbl-compact thead th). Върху самата <table>
      вътре в .tbl-wrap заглавието залепваше на --nav-h ВЪТРЕ в кутията — върху първите редове. */
@@ -1748,6 +1761,34 @@ function grStaffHtml(){
   });
   if(!list.length) h += '<tr><td colspan="9" style="color:#64748b;padding:12px;">Няма въведен персонал.</td></tr>';
   return h + '</tbody></table></div></div>';
+}
+/* Секторите на магазина с „следи покритието“ (24.11.2026): отметката сменят admin и регионалният
+   (grCanAddSector — както „➕ Сектор“; сървърът проверява същото), останалите я виждат без промяна.
+   Броят хора — без напусналите. */
+function grSectorTrackHtml(list){
+  var secs = grSectors();
+  if(!secs.length) return '';
+  var can = grCanAddSector(), n = {};
+  list.forEach(function(s){ if(s.sector_id && !s.left_on) n[s.sector_id] = (n[s.sector_id] || 0) + 1; });
+  var h = '<div id="gr-sec-track" style="display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12px;margin:0 0 10px;">' +
+    '<span style="color:#64748b;" title="Без отметка секторът не се брои в „Сектори без човек“ и в червените колони на графика">Следи покритието:</span>';
+  secs.forEach(function(x){
+    var on = x.track_coverage !== false;
+    h += '<label style="display:inline-flex;gap:4px;align-items:center;' + (on ? '' : 'color:#94a3b8;') + (can ? 'cursor:pointer;' : '') + '">' +
+      '<input type="checkbox" id="gr-sec-track-' + escAttrVal(x.id) + '"' + (on ? ' checked' : '') + (can ? ' onchange="grSectorTrack(\'' + escAttrVal(x.id) + '\', this.checked)"' : ' disabled') + '>' +
+      escVal(x.name) + ' <span style="color:#94a3b8;">(' + (n[x.id] || 0) + ')</span></label>';
+  });
+  return h + '</div>';
+}
+function grSectorTrack(id, on){
+  var x = grSectorById(id);
+  if(!x || !grCanAddSector()) return;
+  return grApi('sector_update', { store: grStore, id: id, track_coverage: !!on }).then(function(res){
+    if(!res.ok){ toast('Не е записано: ' + grErrText(res), '#dc2626'); grRender(); return; }   // отметката — обратно, както е в базата
+    x.track_coverage = !(res.data.sector && res.data.sector.track_coverage === false);
+    toast('„' + x.name + '“ — ' + (x.track_coverage ? 'покритието се следи.' : 'покритието не се следи.'));
+    grRender();
+  });
 }
 /* Персоналът се пише от тези, които пишат графика (manager, регионален, admin). */
 function grCanEditStaff(){

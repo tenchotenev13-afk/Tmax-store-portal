@@ -56,7 +56,7 @@ export type SetupRaw = {
   extraDays: { day: string; store_name: string | null; note: string | null }[];
   sectors?: Sector[];
 };
-export type Sector = { id: string; store_name: string; name: string; sort_order: number; active: boolean };
+export type Sector = { id: string; store_name: string; name: string; sort_order: number; active: boolean; track_coverage?: boolean };
 export type AdminTable = "companies" | "grafik_company_terms" | "grafik_store_company" | "grafik_extra_days" | "grafik_letter_map";
 
 export interface Repo {
@@ -89,6 +89,7 @@ export interface Repo {
   letterSet(): Promise<string[]>;
   getSector(id: string): Promise<Sector | null>;
   insertSector(fields: Record<string, unknown>): Promise<Sector>;
+  updateSector(id: string, fields: Record<string, unknown>): Promise<Sector | null>;
   adminList(table: AdminTable): Promise<unknown[]>;
   adminInsert(table: AdminTable, fields: Record<string, unknown>): Promise<unknown>;
   adminUpdate(table: AdminTable, id: string, fields: Record<string, unknown>): Promise<unknown | null>;
@@ -172,7 +173,7 @@ export function resolveSetup(raw: SetupRaw, start: string, end: string) {
     letter_map: vtr ? raw.letterMap.filter((l) => l.vtr_id === vtr && validAt(l, start)).map((l) => ({ letter: l.letter, day_kind: l.day_kind, code: l.code, hours_per_day: l.hours_per_day ?? null })) : [],
     extra_days: raw.extraDays.filter((e) => e.day >= start && e.day <= end),
     sectors: (raw.sectors || []).filter((x) => x.active).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, "bg"))
-      .map((x) => ({ id: x.id, name: x.name, sort_order: x.sort_order })),
+      .map((x) => ({ id: x.id, name: x.name, sort_order: x.sort_order, track_coverage: x.track_coverage !== false })),
     missing,
   };
 }
@@ -765,6 +766,22 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
         throw e;
       }
       await audit(repo, acc, "grafik_sector_create", store, { id: sec.id, name });
+      return { sector: sec };
+    }
+
+    case "sector_update": {
+      // „Следи покритието“ (24.11.2026): сектор без отметка не се брои в „Сектори без човек“ и в
+      // червените колони на графика. Сменя го admin или регионалният за своя обект — само това поле.
+      const store = await needStore(repo, acc, b.store, "edit");
+      if (acc.kind !== "admin" && acc.kind !== "regional") throw new HttpError(403, "forbidden", "Сектора сменят регионалният и admin.");
+      const id = uuid(b.id, "id");
+      if (typeof b.track_coverage !== "boolean") throw new HttpError(400, "bad_request", "track_coverage е true или false.");
+      const cur = await repo.getSector(id);
+      if (!cur || cur.store_name !== store) throw new HttpError(404, "not_found", "Секторът не е намерен в този магазин.");
+      const was = cur.track_coverage !== false;   // преди записа — getSector може да върне същия обект
+      const sec = await repo.updateSector(id, { track_coverage: b.track_coverage });
+      if (!sec) throw new HttpError(404, "not_found", "Секторът не е намерен в този магазин.");
+      await audit(repo, acc, "grafik_sector_update", store, { id, name: cur.name, track_coverage: b.track_coverage, was });
       return { sector: sec };
     }
 

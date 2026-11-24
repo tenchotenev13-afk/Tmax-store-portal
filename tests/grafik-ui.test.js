@@ -101,7 +101,7 @@ function makeServer(opt) {
           // S.v11 — като grafik-api v11: предишният месец в същия отговор (при prev: true). Без него — както v10.
           ...(S.v11 && b.prev === true ? { prev_month: pm && (M.kind !== 'trz' || pm.status === 'submitted') ? { month_row: pm, rows: S.rows.filter(r => r.month_id === pm.id), setup: Object.assign({}, ET.setups['2026-10']) } : null } : {}),
           setup: Object.assign({}, b.month === '2026-11' || b.month === '2026-12' ? SETUP11 : ET.setups['2026-10'], { missing: S.missing, extra_days: [], company: S.company, store: S.store, approver: S.approver, season_label: b.month === '2026-10' ? 'Лято (до 20:00)' : 'Зима 1 (до 19:30)',
-            sectors: S.sectors.filter(x => x.store_name === b.store).sort((a, c) => a.sort_order - c.sort_order).map(x => ({ id: x.id, name: x.name, sort_order: x.sort_order })) }) } };
+            sectors: S.sectors.filter(x => x.store_name === b.store).sort((a, c) => a.sort_order - c.sort_order).map(x => Object.assign({ id: x.id, name: x.name, sort_order: x.sort_order }, x.track_coverage !== undefined ? { track_coverage: x.track_coverage } : {})) }) } };   // без поле — като сървър отпреди 24.11.2026
       }
       case 'save_rows': {
         if (!canEdit(b.store)) return { status: 403, body: { ok: false, reason: 'readonly', message: 'Нямате права да променяте графика на този обект.' } };
@@ -134,6 +134,13 @@ function makeServer(opt) {
         if (S.sectors.some(x => x.store_name === b.store && x.name.toLowerCase() === b.name.toLowerCase())) return { status: 409, body: { ok: false, reason: 'duplicate', message: 'Секторът вече го има.' } };
         const x = { id: 'sec-new-' + (++S.seq), store_name: b.store, name: b.name, sort_order: 500 }; S.sectors.push(x);
         return { status: 200, body: { ok: true, sector: x } };
+      }
+      case 'sector_update': {   // „следи покритието“ (24.11.2026) — правилата са в handler.test.ts; тук — формата
+        if (!canEdit(b.store) || (u.role !== 'admin' && !u.is_regional)) return { status: 403, body: { ok: false, reason: 'forbidden', message: 'Сектора сменят регионалният и admin.' } };
+        const x = S.sectors.filter(s => s.id === b.id && s.store_name === b.store)[0];
+        if (!x) return { status: 404, body: { ok: false, reason: 'not_found', message: 'Секторът не е намерен в този магазин.' } };
+        x.track_coverage = b.track_coverage;
+        return { status: 200, body: { ok: true, sector: Object.assign({}, x) } };
       }
       case 'changes_list': case 'changes_save': case 'changes_delete': case 'changes_trz': {
         // „Промени“ (П1) — правилата са в handler.ts и се проверяват в handler.test.ts; тук — само формата.
@@ -1960,6 +1967,72 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     // Плоският изглед — без групи, без червени колони; точката в заглавието остава (1.11 — никой).
     realClick(W, d.getElementById('gr-group-btn')); await ticks(1);
     ok('А5: плосък списък — няма червени колони, точката в заглавието остава', W.grGroupMode() === 'flat' && !d.querySelector('#gr-grid td.gr-secgap') && !!th(0).querySelector('.gr-dh-gap'));
+  }
+
+  section('24. Сектор „следи покритието“ (24.11.2026): отметка в „👥 Персонал“, без шум от секторите с един човек');
+  {
+    // Данните от раздел 23: Склад = само Мария; 1.11 — никой (Склад и Каса без човек); 3.11 — Склад без човек.
+    const mk = () => {
+      const S = makeServer();
+      S.months['Кърджали|2026-11-01'] = { id: 'm-t', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+      const Lm = new Array(30).fill(''), Li = new Array(30).fill(''), Lp = new Array(30).fill('');
+      Lm[1] = 'П'; Li[1] = 'В'; Li[2] = 'ЛД'; Lp[2] = 'П';
+      S.rows.push({ month_id: 'm-t', staff_id: 'st-2', letters: Lm, locked: {} }, { month_id: 'm-t', staff_id: 'st-1', letters: Li, locked: {} }, { month_id: 'm-t', staff_id: 'st-3', letters: Lp, locked: {} });
+      return S;
+    };
+    const inl = (w2, el, type) => { const code = el.getAttribute('on' + type); if (code) w2.eval('(function(event){' + code + '})').call(el, { type, target: el, currentTarget: el }); };
+    const S = mk();
+    const x = env(ADM, { server: S, grouped: true }); await load(x);
+    const d = x.doc, W = x.w;
+    if (W.grStore !== 'Кърджали') { await W.grPickStore('Кърджали'); await ticks(8); }
+    ok('(предпоставка) admin в Кърджали, сървър без полето → секторите се следят (както досега)', W.grStore === 'Кърджали' && W.grSectorTracked('Склад') === true && W.grSectorTracked('Каса') === true && W.grSectorTracked('Без сектор') === false);
+    const th = i => d.querySelectorAll('#gr-grid thead th.gr-dh')[i];
+    ok('(предпоставка) 3.11 — точка „без човек: Склад“', /без човек: Склад$/.test(th(2).getAttribute('title')));
+    realClick(W, btn(mod(x), 'Персонал')); await ticks(2);
+    const cb = id => d.getElementById('gr-sec-track-' + id);
+    ok('Персонал: „Следи покритието:“ с отметка за всеки сектор, включена, admin може да я сменя', !!d.getElementById('gr-sec-track') && cb('sec-k-sklad').checked && cb('sec-k-kasa').checked && !cb('sec-k-sklad').disabled && !!cb('sec-k-sklad').getAttribute('onchange'));
+    ok('Персонал: до сектора — броят хора', /Склад \(\d+\)/.test(cb('sec-k-sklad').parentNode.textContent), cb('sec-k-sklad').parentNode.textContent);
+    // Махане на отметката.
+    cb('sec-k-sklad').checked = false; inl(W, cb('sec-k-sklad'), 'change'); await ticks(4);
+    const call = S.calls.filter(c => c.action === 'sector_update').slice(-1)[0];
+    ok('махната отметка → sector_update { store: Кърджали, id: Склад, track_coverage: false }', !!call && call.store === 'Кърджали' && call.id === 'sec-k-sklad' && call.track_coverage === false, JSON.stringify(call));
+    ok('…записано в базата и в екрана; отметката остава махната, етикетът е сив', S.sectors.filter(s => s.id === 'sec-k-sklad')[0].track_coverage === false && W.grSectorTracked('Склад') === false &&
+      cb('sec-k-sklad').checked === false && /color:#94a3b8/.test(cb('sec-k-sklad').parentNode.getAttribute('style')));
+    ok('…съобщение „Склад — покритието не се следи.“', x.calls.toast.some(t => /„Склад“ — покритието не се следи/.test(t)));
+    realClick(W, btn(mod(x), 'График')); await ticks(2);
+    const mCell = dd => d.getElementById('gr-row-st-2').querySelectorAll('td.gr-c')[dd];
+    ok('График: 3.11 — без точка (единствената дупка беше Склад)', !th(2).querySelector('.gr-dh-gap'), th(2).getAttribute('title'));
+    ok('График: 1.11 — точка само за Каса', /без човек: Каса$/.test(th(0).getAttribute('title')), th(0).getAttribute('title'));
+    ok('График: клетката на Мария на 3.11 — без червената колона', !mCell(2).classList.contains('gr-secgap'));
+    const skCov = d.querySelectorAll('tr.gr-grp-cov[data-sector="Склад"] td.gr-gcov')[2];
+    ok('График: редът „на смяна“ на Склад остава — 0, но без червено', !!skCov && skCov.textContent === '0' && !skCov.classList.contains('gr-gcov0') && !/fecaca|dc2626/.test(skCov.getAttribute('style')));
+    ok('График: Каса на 1.11 — пак червено (тя се следи)', d.querySelectorAll('tr.gr-grp-cov[data-sector="Каса"] td.gr-gcov')[0].classList.contains('gr-gcov0'));
+    ok('График: в заглавието на групата — „· не се следи“; при Каса — не', /не се следи/.test(d.querySelector('tr.gr-grp[data-sector="Склад"]').textContent) && !/не се следи/.test(d.querySelector('tr.gr-grp[data-sector="Каса"]').textContent));
+    const ns = Array.from(d.getElementById('gr-foot-nosec').children).slice(1, 4);
+    ok('„Сектори без човек“: 1.11 — 1 (Каса), 3.11 — 0', ns.map(t => t.textContent).join() === '1,0,0' && ns[0].getAttribute('title') === 'Каса', ns.map(t => t.textContent).join());
+    // Плоският изглед, „▸ още“ — редът „на смяна: Склад“ без червено.
+    W.grToggleGroup(); if (!W.grMoreOpen()) W.grToggleMore();
+    const fs = k => Array.from(d.getElementById('gr-foot-sec-' + k).children).slice(1, 4);
+    ok('плосък, „▸ още“: „на смяна: Склад“ — 0 без червено; „на смяна: Каса“ на 1.11 — червено', !/fecaca/.test(fs('Склад')[2].getAttribute('style')) && /fecaca/.test(fs('Каса')[0].getAttribute('style')));
+    W.grToggleMore(); W.grToggleGroup();
+    // Връщане на отметката.
+    realClick(W, btn(mod(x), 'Персонал')); await ticks(2);
+    cb('sec-k-sklad').checked = true; inl(W, cb('sec-k-sklad'), 'change'); await ticks(4);
+    realClick(W, btn(mod(x), 'График')); await ticks(2);
+    ok('отметката обратно → 3.11 пак с точка „без човек: Склад“ и червена колона', W.grSectorTracked('Склад') && /без човек: Склад$/.test(th(2).getAttribute('title')) && mCell(2).classList.contains('gr-secgap'));
+    // Грешка от сървъра — отметката се връща както е в базата.
+    S.fail.sector_update = () => ({ status: 500, body: { ok: false, reason: 'db_error', message: 'Грешка в базата.' } });
+    realClick(W, btn(mod(x), 'Персонал')); await ticks(2);
+    cb('sec-k-sklad').checked = false; inl(W, cb('sec-k-sklad'), 'change'); await ticks(4);
+    ok('грешка при запис → съобщение, отметката е пак сложена, секторът се следи', x.calls.toast.some(t => /^Не е записано: /.test(t)) && cb('sec-k-sklad').checked === true && W.grSectorTracked('Склад') === true);
+    delete S.fail.sector_update;
+    // Управителят вижда отметките, но не ги сменя (както „➕ Сектор“).
+    const m = env(MGR, { server: S, grouped: true }); await load(m);
+    realClick(m.w, btn(mod(m), 'Персонал')); await ticks(2);
+    const mcb = m.doc.getElementById('gr-sec-track-sec-k-sklad');
+    const before = S.calls.filter(c => c.action === 'sector_update').length;
+    m.w.grSectorTrack('sec-k-sklad', false); await ticks(2);
+    ok('управител: отметките се виждат, но са заключени, без onchange; извикване на ръка — без заявка', !!mcb && mcb.disabled && !mcb.getAttribute('onchange') && S.calls.filter(c => c.action === 'sector_update').length === before);
   }
 
   report();

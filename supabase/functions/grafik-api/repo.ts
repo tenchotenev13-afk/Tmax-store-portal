@@ -133,7 +133,7 @@ export function makeRepo(): Repo {
         db.from("grafik_vtr_seasons").select("*"),
         db.from("grafik_letter_map").select("*"),
         db.from("grafik_extra_days").select("day,store_name,note"),
-        db.from("grafik_sectors").select("id,store_name,name,sort_order,active").eq("store_name", store),
+        db.from("grafik_sectors").select("id,store_name,name,sort_order,active,track_coverage").eq("store_name", store),
       ]);
       return {
         storeCompany: ok(sc), companies: ok(co), terms: ok(te), codes: ok(cd),
@@ -144,10 +144,13 @@ export function makeRepo(): Repo {
       };
     },
     async getSector(id) {
-      return ok<Sector | null>(await db.from("grafik_sectors").select("id,store_name,name,sort_order,active").eq("id", id).maybeSingle());
+      return ok<Sector | null>(await db.from("grafik_sectors").select("id,store_name,name,sort_order,active,track_coverage").eq("id", id).maybeSingle());
     },
     async insertSector(fields) {
-      return ok<Sector>(await db.from("grafik_sectors").insert(fields).select("id,store_name,name,sort_order,active").single());
+      return ok<Sector>(await db.from("grafik_sectors").insert(fields).select("id,store_name,name,sort_order,active,track_coverage").single());
+    },
+    async updateSector(id, fields) {
+      return ok<Sector | null>(await db.from("grafik_sectors").update(fields).eq("id", id).select("id,store_name,name,sort_order,active,track_coverage").maybeSingle());
     },
     async letterSet() {
       const rows = ok<{ letter: string }[]>(await db.from("grafik_letter_map").select("letter"));
