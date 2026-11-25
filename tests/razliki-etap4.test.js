@@ -201,11 +201,11 @@ async function submit(h) {
     const m = h.fake.mail[0] || {}, pu = h.fake.push[0] || {};
     ok('получатели на имейла — само активните от групата', JSON.stringify(m.to) === JSON.stringify(['c.teneva@temax.bg']), JSON.stringify(m.to));
     ok('push по display_name', JSON.stringify(pu.names) === JSON.stringify(['Цветелина Тенева']), JSON.stringify(pu.names));
-    ok('тема „Разлики · Враца · ТЕСИ ООД: бланка без документ"', m.subject === 'Разлики · Враца · ТЕСИ ООД: бланка без документ', m.subject);
-    ok('push заглавие „Разлики", текстът започва с темата', pu.title === 'Разлики' && String(pu.msg).indexOf('Разлики · Враца · ТЕСИ ООД: бланка без документ') === 0, pu.msg);
+    ok('тема „Разлики · Враца · ТЕСИ ООД: стока или доставка без документ"', m.subject === 'Разлики · Враца · ТЕСИ ООД: стока или доставка без документ', m.subject);
+    ok('push заглавие „Разлики", текстът започва с темата', pu.title === 'Разлики' && String(pu.msg).indexOf('Разлики · Враца · ТЕСИ ООД: стока или доставка без документ') === 0, pu.msg);
     ok('имейлът: подал, поръчка, брой редове, къде', /Подаде: Управител Враца/.test(m.html) && /Поръчка №: 4100135756/.test(m.html) &&
       /Брой редове: 2/.test(m.html) && m.html.indexOf('Отворете в портала: Разлики → Бланки за преглед') >= 0, m.html);
-    ok('без жълт toast', !/известието до Цвети/.test(toasts(h)), toasts(h));
+    ok('без жълт toast', !/известието до Снабдяването/.test(toasts(h)), toasts(h));
     h.close();
 
     const h2 = formEnv();
@@ -232,14 +232,14 @@ async function submit(h) {
     await submit(h);
     ok('POST е минал', repPosts(h).length === 1);
     ok('зелен toast за подаването', /Бланката е подадена/.test(toasts(h)), toasts(h));
-    ok('жълт toast „Подадено, но известието до Цвети не тръгна (имейл)"',
-      h.calls.toast.indexOf('Подадено, но известието до Цвети не тръгна (имейл)') >= 0, toasts(h));
+    ok('жълт toast „Подадено, но известието до Снабдяването не тръгна (имейл)"',
+      h.calls.toast.indexOf('Подадено, но известието до Снабдяването не тръгна (имейл)') >= 0, toasts(h));
     h.close();
     const h2 = formEnv({ pushFail: true, mailFail: true });
     await openForm(h2, 'supplier', { stokova: false });
     check(h2, noDoc(h2));
     await submit(h2);
-    ok('push и имейл паднали → „(push, имейл)"', h2.calls.toast.indexOf('Подадено, но известието до Цвети не тръгна (push, имейл)') >= 0, toasts(h2));
+    ok('push и имейл паднали → „(push, имейл)"', h2.calls.toast.indexOf('Подадено, но известието до Снабдяването не тръгна (push, имейл)') >= 0, toasts(h2));
     h2.close();
   }
 
@@ -251,7 +251,7 @@ async function submit(h) {
     await submit(h);
     ok('POST е минал', repPosts(h).length === 1);
     ok('нищо не е пратено', h.fake.push.length === 0 && h.fake.mail.length === 0);
-    ok('жълт toast „…няма получатели"', h.calls.toast.some(t => /^Подадено, но известието до Цвети няма получатели/.test(t)), toasts(h));
+    ok('жълт toast „…няма получатели"', h.calls.toast.some(t => /^Подадено, но известието до Снабдяването няма получатели/.test(t)), toasts(h));
     h.close();
   }
 
@@ -338,7 +338,7 @@ async function submit(h) {
     const cb = h.doc.querySelector('.ntf-grp-cb[value="razliki"]');
     ok('редакторът на групите рисува отметка „Разлики", отметната', !!cb && cb.checked && /Разлики/.test(cb.parentElement.textContent));
     const row = h.w.WHO_BROWSER_MAILS.find(m => m.sites.indexOf('stock-differences.js:sdRazlikiNotify') >= 0);
-    ok('„Кой какво получава": писмото е в WHO_BROWSER_MAILS', !!row && /група „Разлики"/.test(row.who));
+    ok('„Кой какво получава": писмото е в WHO_BROWSER_MAILS', !!row && /група „Разлики"/.test(row.who) && /Снабдяването/.test(row.who) && /стока или доставка без документ/.test(row.mail), row && (row.mail + ' | ' + row.who));
     ok('ролята „разлики" в WHO_ROLE_CATS', h.w.WHO_ROLE_CATS.indexOf('разлики') >= 0);
     h.close();
   }

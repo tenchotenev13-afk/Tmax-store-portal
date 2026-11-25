@@ -5982,10 +5982,12 @@ function sdNoteRenotify(kind, id){
   return sdNoteNotify(kind, rec, true);
 }
 
-/* ── Известие до групата „Разлики" (етап 4, 17.11.2026, Цвети) ──
+/* ── Известие до групата „Разлики" (етап 4, 17.11.2026) ──
    Бланка към доставчик с „📄 Без документ" или „📭 Няма входяща" → push +
    имейл до потребителите с 'razliki' в users.notify_groups (Администрация →
-   Групи). По модела на rvNotify / rvNoticeResult (revaluation.js). Вика се
+   Групи). От 25.11.2026 групата е Снабдяването, не Цвети (данни, писмо на
+   Цвети 24.11); текстът „стока или доставка без документ" — решение на
+   Тенчо 25.11. По модела на rvNotify / rvNoticeResult (revaluation.js). Вика се
    СЛЕД успешния запис и не го отменя: провал → жълт toast. sendEmail стои
    тук, за да го брои „Кой какво получава" (admin.js, WHO_BROWSER_MAILS). */
 var SD_RAZLIKI_USERS_Q = 'active=eq.true&select=email,display_name,notify_groups,active';
@@ -6002,11 +6004,11 @@ function sdRazlikiGroupUsers(users){
 }
 function sdRazlikiNotifyText(info){
   return 'Разлики · ' + info.store + ' · ' + info.counterpart + ': ' +
-    (info.no_inbound ? 'няма входяща доставка в системата' : 'бланка без документ');
+    (info.no_inbound ? 'няма входяща доставка в системата' : 'стока или доставка без документ');
 }
 function sdRazlikiNotify(info){
   var text = sdRazlikiNotifyText(info);
-  var warn = function(msg){ toast('Подадено, но известието до Цвети ' + msg, '#d97706'); return false; };
+  var warn = function(msg){ toast('Подадено, но известието до Снабдяването ' + msg, '#d97706'); return false; };
   return sbGetOk('users', SD_RAZLIKI_USERS_Q).then(function(res){
     if(!res.ok) return warn('не тръгна (получателите не се прочетоха)');
     var rec = sdRazlikiGroupUsers(res.rows);
