@@ -5,4 +5,4 @@
 - Правило 7: други места със същия текст — няма (supabase/functions, report.js, email.js — нищо).
 - Тест: `tests/razliki-etap4.test.js` (темата, push, toast-овете, редът в WHO_BROWSER_MAILS); мутанти — старата тема, старият toast, старият ред в WHO — всеки exit 1.
 - Без схемна промяна → няма ред за Живко. Rollback: `git revert` на комита.
-- SHA: (попълва се след комита)
+- SHA: `81d030a` (на живо — Pages сверен 25.11 по маркера „стока или доставка без документ“: stock-differences.js и admin.js байт по байт с HEAD; в стария `d016cd4` маркерът е 0).
