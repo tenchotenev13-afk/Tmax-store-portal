@@ -123,7 +123,7 @@ const whBtns = (h, id) => { const r = row(h, id); return r ? Array.prototype.map
 const whBtn = (h, id, val) => { const r = row(h, id); return r ? r.querySelector('button[data-val="' + val + '"]') : null; };
 /* Бутоните на обекта при return. */
 const stBtns = (h, id) => { const r = row(h, id); return r ? Array.prototype.filter.call(r.querySelectorAll('button'),
-  b => /sdSetStoreResponse|openStoreNoStockModal/.test(b.getAttribute('onclick') || '')).map(txt) : null; };
+  b => /sdSetStoreResponse|openStoreNoStockModal|openStoreZstrModal/.test(b.getAttribute('onclick') || '')).map(txt) : null; };
 const stBtn = (h, id, re) => { const r = row(h, id); return r ? Array.prototype.find.call(r.querySelectorAll('button'),
   b => re.test(b.getAttribute('onclick') || '')) : null; };
 const cellText = (h, id) => { const r = row(h, id); return r ? r.textContent : ''; };
@@ -230,13 +230,17 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const lines = [L[id]];
     const h = env(U.store, lines);
     await render(h, lines);
-    realClick(h.w, stBtn(h, id, /sdSetStoreResponse/)); await settle();
+    realClick(h.w, stBtn(h, id, /sdSetStoreResponse|openStoreZstrModal/)); await settle();
+    /* Излишък (25.11.2026, razliki-dovarshvane): модал с номер на ZSTR. */
+    const zov = h.doc.getElementById('sdzstr-ov');
+    ok(id + ': модал за номера ' + (id === 'er' ? 'ДА' : 'не'), !!zov === (id === 'er'));
+    if (zov) { h.doc.getElementById('sdzstr-number').value = '4500000001'; realClick(h.w, h.doc.getElementById('sdzstr-save')); await settle(); }
     const p = h.calls.patch.find(x => x.table === 'stock_differences');
     ok(id + ': PATCH store_response = sap_done', !!p && p.body.store_response === 'sap_done', p && JSON.stringify(p.body));
-    ok(id + ': същите полета като досега', !!p && same(Object.keys(p.body).sort(), ['store_response', 'store_response_at', 'store_response_by']), p && JSON.stringify(p.body));
+    ok(id + ': полетата + zstr_number (razliki-dovarshvane)', !!p && same(Object.keys(p.body).sort(), ['store_response', 'store_response_at', 'store_response_by', 'zstr_number']) && p.body.zstr_number === (id === 'er' ? '4500000001' : null), p && JSON.stringify(p.body));
     const ps = h.push.find(x => x.target === WH);
     ok(id + ': push до склада „' + title + '“', !!ps && ps.title === title, ps && ps.title);
-    ok(id + ': текстът на push-а — непроменен', !!ps && ps.msg === STORE + ': АРТ ' + id + ' — приемете обратно', ps && ps.msg);
+    ok(id + ': текстът на push-а (с номера при излишък)', !!ps && ps.msg === STORE + ': АРТ ' + id + (id === 'er' ? ' · заявка № 4500000001' : '') + ' — приемете обратно', ps && ps.msg);
     h.close();
   }
   for (const [id, title, mtitle] of [['ur', '⛔ Разлика: Не мога да изпиша', '⛔ Не мога да изпиша'],

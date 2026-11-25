@@ -169,7 +169,9 @@ const toasts = h => h.calls.toast.join(' | ');
     ok('r1: обикновеният ред АРТ u1 — да', cardHas(h, 'r1', 'АРТ u1'));
     ok('r1: насоченият АРТ d1 (увредена) — не', !cardHas(h, 'r1', 'АРТ d1'));
     ok('r1: насоченият АРТ b1 (грешен баркод) — не', !cardHas(h, 'r1', 'АРТ b1'));
-    ok('r1: без надписа „➡️ …“', !cardHas(h, 'r1', '➡️'));
+    /* Насоченият надпис (5а). „➡️ Към Контролинг“ (бутонът на склада от
+       25.11.2026, razliki-dovarshvane) е друго нещо и тук не се брои. */
+    ok('r1: без надписа „➡️ …“', !cardHas(h, 'r1', '➡️ Към ЦО') && !cardHas(h, 'r1', '➡️ При регионалния'));
     ok('бланка r2 (само насочени) — няма я', !card(h, 'r2'));
     ok('в целия модул няма АРТ b2 / АРТ p2', mod(h).textContent.indexOf('АРТ b2') < 0 && mod(h).textContent.indexOf('АРТ p2') < 0);
     ok('броят бланки = 1 (sdReportsCount)', h.w.sdReportsCount() === 1, h.w.sdReportsCount());

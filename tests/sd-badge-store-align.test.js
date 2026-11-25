@@ -233,7 +233,7 @@ async function pulseCount(h, reps, lines, swaps) {
     /* Етап 5а на Разлики (17.11.2026): пулсът на склада тегли и direction +
        difference_category (насочените редове не се броят) — очакването е
        сменено нарочно, по решение на Тенчо. */
-    ok('склад: заявката — постарому плюс id на реда', qw === 'differences_reports?select=id,store_name,counterpart,reviewed,direction,stock_differences(id,difference_category,report_id,warehouse_response,store_response,status)&reviewed=eq.false&counterpart=eq.' + encodeURIComponent(WH), qw);
+    ok('склад: заявката — постарому плюс id на реда и to_co_at (razliki-dovarshvane 25.11)', qw === 'differences_reports?select=id,store_name,counterpart,reviewed,direction,stock_differences(id,difference_category,to_co_at,report_id,warehouse_response,store_response,status)&reviewed=eq.false&counterpart=eq.' + encodeURIComponent(WH), qw);
 
     const ha = env(ADMIN, [], [], []);
     ok('admin е canReviewDiff', !!ha.w.canReviewDiff());

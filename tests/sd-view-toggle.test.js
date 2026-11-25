@@ -125,7 +125,7 @@ const ls = h => { try { return h.w.localStorage.getItem(KEY); } catch (e) { retu
       guard('рендер', () => h.w.renderStockDiff());
       const nr = num(swText(h, 'reports')), nw = num(swText(h, 'rows'));
       ok(name + ': „Бланки“ = ' + nr + ' = картите на екрана', nr === cards(h).length, nr + ' / ' + cards(h).length);
-      ok(name + ': броят е и в заглавието на секцията', nr === 0 || new RegExp('чакат преглед \\(' + nr + '(\\s|\\))').test(mod(h).textContent));
+      ok(name + ': броят е и в заглавието на секцията', nr === 0 || new RegExp('чакат (преглед|отговор) \\(' + nr + '(\\s|\\))').test(mod(h).textContent));
       realClick(h.w, swBtn(h, 'rows'));
       ok(name + ': „Редове“ = ' + nw + ' = редовете в таблицата', nw === rows(h).length, nw + ' / ' + rows(h).length);
       ok(name + ': броят на редовете = sdTableRows()', nw === h.w.sdTableRows().length);

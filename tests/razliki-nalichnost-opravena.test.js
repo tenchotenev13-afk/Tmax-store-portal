@@ -170,7 +170,8 @@ const sdPatches = h => h.calls.patch.filter(x => x.table === 'stock_differences'
     const p = ps[0] || { body: {}, url: '' };
     ok('PATCH по id=eq.f1', /id=eq\.f1$/.test(p.url), p.url);
     const b = p.body;
-    ok('тяло: точно петте полета', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['store_response', 'store_response_at', 'store_response_by', 'store_response_comment', 'warehouse_comment']), JSON.stringify(b));
+    ok('тяло: точно шестте полета (+ zstr_number, razliki-dovarshvane 25.11)', JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['store_response', 'store_response_at', 'store_response_by', 'store_response_comment', 'warehouse_comment', 'zstr_number']), JSON.stringify(b));
+    ok('zstr_number → null', b.zstr_number === null);
     ok('store_response* → null', b.store_response === null && b.store_response_by === null && b.store_response_at === null && b.store_response_comment === null, JSON.stringify(b));
     ok('warehouse_response не се праща (остава return)', !('warehouse_response' in b));
     const today = (() => { const d = new Date(before); return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2); })();

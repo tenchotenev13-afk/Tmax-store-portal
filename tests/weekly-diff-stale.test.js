@@ -289,9 +289,9 @@ const names = ds => (ds && ds.byStore || []).map(g => g.store);
       /select=id,store_name,direction,reviewed,created_at&order=id.asc&limit=1000&offset=0$/.test(snap[0]), snap.join(' | '));
     ok('една заявка към stock_differences, без прозорец',
       dsq.length === 1 && dsq[0].indexOf('created_at=') < 0, dsq.join(' | '));
-    ok('и носи точно нужните шест колони (с difference_category от 14.10)',
+    ok('и носи точно нужните седем колони (difference_category от 14.10, to_co_at от 25.11)',
       dsq.length === 1 &&
-      /select=report_id,store_name,status,warehouse_response,store_response,difference_category&order=id.asc&limit=1000&offset=0$/.test(dsq[0]),
+      /select=report_id,store_name,status,warehouse_response,store_response,difference_category,to_co_at&order=id.asc&limit=1000&offset=0$/.test(dsq[0]),
       dsq.join(' | '));
     ok('една заявка за прага', aps.length === 1, aps.join(' | '));
     h.close();

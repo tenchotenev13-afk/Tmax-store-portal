@@ -1,6 +1,15 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v76 (25.11.2026) — ЕДНО нещо (копие от report.js, сесия
+      razliki-dovarshvane; решение на Тенчо 25.11): междускладов ред,
+      предаден от склада на Контролинг (stock_differences.to_co_at), е „чака
+      ЦО / регионалния“ (reportDiffCOTurn), не „чака склада“, и не влиза в
+      секцията на склада (reportWhDiffKind → null); в „Минуси с отворена
+      разлика“ ходът му е „офис“ (reportMinusOdTurn). Трите заявки към
+      stock_differences теглят to_co_at. Сборът на „Необработени разлики“ —
+      същият, редовете само се прегрупират. Останалото — непроменено.
+
    v75 (24.11.2026) — ЕДНО нещо (копие от report.js, сесия
       late-transport-always; обещано на Теодор): в седмичния подзаглавието
       „Закъснял транспорт“ се показва ВИНАГИ — при 0 сиво „Закъснял транспорт
@@ -3090,7 +3099,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        Сверено на 23.09.2026: 552 реда, нула без доклад и нула, чийто
        store_name се разминава с този на доклада. Затова обектът долу се
        взима от доклада — един котва за трите колони. */
-    reportGetAll('stock_differences','select=report_id,store_name,status,warehouse_response,store_response,difference_category&order=id.asc'),
+    reportGetAll('stock_differences','select=report_id,store_name,status,warehouse_response,store_response,difference_category,to_co_at&order=id.asc'),
     sbGet('app_settings','key=eq.diff_stale_days&select=key,value&limit=1'),
     /* 🕒 „Трансфери — застояли над N дни" (етап 4, 30.09.2026) — моментна
        снимка, само в седмичния отчет (таб „Днес" няма седмица и не показва
@@ -4654,13 +4663,16 @@ function reportDiffIsRouted(d){
 }
 function reportDiffCOTurn(d){
   if (!d) return false;
-  return reportDiffIsRouted(d) || (d.warehouse_response === 'return' && d.store_response === 'no_stock');
+  /* „➡️ Към Контролинг“ (25.11.2026, razliki-dovarshvane): складът е предал
+     реда на ЦО — „чака ЦО / регионалния“, не „чака склада“. */
+  return reportDiffIsRouted(d) || !!d.to_co_at || (d.warehouse_response === 'return' && d.store_response === 'no_stock');
 }
 function reportWhDiffKind(l, rep, openSwap, nowMs){
   if (!l || !rep || rep.direction !== 'interstore') return null;
   if (l.status === 'received') return null;
   if (l.store_response === 'accepted' && String(l.store_response_comment || '').indexOf('Получено междувременно на ') === 0) return null;
   if (openSwap || reportDiffIsRouted(l)) return null;
+  if (l.to_co_at) return null;
   var w = String(l.warehouse_response || ''), s = String(l.store_response || '');
   if (!w) return 'noanswer';
   if (w === 'will_send' && !s) {
@@ -4737,7 +4749,7 @@ function collectWarehouseDiffs(warehouse){
     }
     var ids = reps.map(function(r){ return r.id; });
     return reportGetAll('stock_differences', 'report_id=in.(' + ids.join(',') + ')' +
-      '&select=id,report_id,status,warehouse_response,store_response,store_response_comment,difference_category,created_at&order=id.asc').then(function(lines){
+      '&select=id,report_id,status,warehouse_response,store_response,store_response_comment,difference_category,created_at,to_co_at&order=id.asc').then(function(lines){
       var res = reportWhDiffSummary(warehouse, reps, lines, a[1], Date.now());
       res.partial = partial || !!(lines && lines.partial);
       return res;
@@ -5373,6 +5385,7 @@ function reportMinusOdTurn(l, swaps, store){
   var rep = l.differences_reports || {};
   if (rep.direction !== 'interstore') return 'co';
   if (reportDiffIsRouted(l)) return String(l.difference_category || '') === 'damaged' ? 'regional' : 'co';
+  if (l.to_co_at) return 'co';
   var open = (Array.isArray(swaps) ? swaps : []).some(function(s){
     return s && s.status !== 'closed' && (String(s.from_line_id) === String(l.id) || String(s.to_line_id) === String(l.id));
   });
@@ -5473,7 +5486,7 @@ function collectMinusOdData(stores, cb){
   var fail = function(){ cb({ error: true }); };
   reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date&mvt_type=eq.955' + inStores + '&order=id.asc').then(function(mv){
     if (mv.partial) { fail(); return; }
-    return reportGetAll('stock_differences', 'select=id,store_name,material_code,material_name,type,status,warehouse_response,store_response,difference_category,comment,store_response_comment,resolution_comment,warehouse_comment,created_at,differences_reports(store_name,reviewed,direction,doc_date)' +
+    return reportGetAll('stock_differences', 'select=id,store_name,material_code,material_name,type,status,warehouse_response,store_response,difference_category,comment,store_response_comment,resolution_comment,warehouse_comment,created_at,to_co_at,differences_reports(store_name,reviewed,direction,doc_date)' +
       inStores + '&status=not.in.(' + SD_CLOSED_STATUSES.join(',') + ')&order=id.asc').then(function(ln){
       if (ln.partial) { fail(); return; }
       return reportGetAll('stock_diff_swaps', 'select=id,from_line_id,to_line_id,from_store,to_store,status&order=created_at.asc').then(function(sw){

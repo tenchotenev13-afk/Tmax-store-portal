@@ -256,7 +256,7 @@ async function pulse(h, reps, lines, swaps) {
        difference_category (насочените редове не се броят) — очакването е
        сменено нарочно, по решение на Тенчо. */
     ok('заявката на склада тегли id на реда',
-      p.q === 'differences_reports?select=id,store_name,counterpart,reviewed,direction,stock_differences(id,difference_category,report_id,warehouse_response,store_response,status)&reviewed=eq.false&counterpart=eq.' + encodeURIComponent(WH), p.q);
+      p.q === 'differences_reports?select=id,store_name,counterpart,reviewed,direction,stock_differences(id,difference_category,to_co_at,report_id,warehouse_response,store_response,status)&reviewed=eq.false&counterpart=eq.' + encodeURIComponent(WH), p.q);
     const p0 = await pulse(hw, W_REPS, W_LINES, []);
     ok('без размяна — пулс 0', p0.n === 0, String(p0.n));
 

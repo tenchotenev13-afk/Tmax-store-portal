@@ -17,6 +17,12 @@
 (в базата от миграцията mirror_reader, mirror-reader-schema.sql, версия 20261125122939, приложена 25.11.2026)
 - 25.11 · роля mirror_reader само за четене (седемте касови таблици, storage_files_index, файловете в kasa-docs) — ключ се дава лично; таблиците остават отворени за anon до твоето потвърждение
 
+(в базата от миграцията razliki_dovarshvane_columns, razliki-dovarshvane-schema.sql, версия 20261125122242, приложена 25.11.2026)
+- 25.11 · stock_differences.zstr_number — text, NULL, без default
+- 25.11 · stock_differences.to_co_at — timestamptz, NULL, без default
+- 25.11 · stock_differences.to_co_by — text, NULL, без default
+- 25.11 · stock_differences.to_co_comment — text, NULL, без default
+
 (в базата от миграцията storage_files_index_readonly, storage-files-index-readonly-schema.sql, версия 20261124125709, приложена 24.11.2026)
 - 24.11 · storage_files_index — без промяна за огледалото, остава само за четене
 

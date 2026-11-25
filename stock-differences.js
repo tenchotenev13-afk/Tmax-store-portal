@@ -680,7 +680,7 @@ function renderStockDiff() {
           /* Под отговора на склада - отговорът на магазина. Само при зададен
              store_response: без него sdStoreResponseLabel казва "чака магазина",
              а тук стоят доставчикови и вече приключени редове. */
-          (showWh ? '<td class="sd-c-wh" style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+sdWhResponseLabel(r)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+'</td>' : '')+
+          (showWh ? '<td class="sd-c-wh" style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+sdWhResponseLabel(r)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+sdToCOHtml(r)+'</td>' : '')+
           '<td class="sd-c-act" style="padding:7px 10px;">';
 
         /* status='received' е КРАЯТ на междускладовия поток. Такъв ред няма
@@ -787,7 +787,7 @@ function sdExcelRows(list){
   var txt = function(v){ return (v===null||v===undefined) ? '' : String(v); };
   var aoa = [['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Поръчка за връщане',
               'Дата потвърд.','Статус','Кредитно','Коментар','Коментар контролер']
-             .concat(xShowWh?['Отговор на склада']:[])
+             .concat(xShowWh?['Отговор на склада','Заявка ZSTR №','Към Контролинг']:[])
              .concat(['Дата на подаване','Документ №','Дата на документ','Няма входяща','Чете се като'])];
   list.forEach(function(r){
     var rep = diffReports.find(function(x){ return x.id===r.report_id; }) || {};
@@ -807,7 +807,7 @@ function sdExcelRows(list){
       sdHtmlText(sdRowStatusBadge(r)).replace(/^[^A-Za-z\u0400-\u04FF]+/,''),
       r.type==='missing' ? (r.credit_note_issued ? 'Издадено' : 'Няма') : '',
       txt(r.comment), txt(r.resolution_comment)
-    ].concat(xShowWh?[wh.join(' · ')]:[]).concat([
+    ].concat(xShowWh?[wh.join(' · '), txt(r.zstr_number).trim(), sdToCOText(r).replace(/^➡️ /,'')]:[]).concat([
       rep.created_at ? fmtDate(localDateISO(new Date(rep.created_at))) : '',
       txt(rep.document_number),
       fd(rep.doc_date),
@@ -834,7 +834,7 @@ function exportSDExcel(){
   var wb = window.XLSX.utils.book_new();
   var ws = window.XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [{wch:16},{wch:16},{wch:22},{wch:10},{wch:34},{wch:7},{wch:13},{wch:13},
-                 {wch:12},{wch:16},{wch:10},{wch:26},{wch:26},{wch:26},{wch:12},{wch:14},{wch:12},{wch:12},{wch:30}];
+                 {wch:12},{wch:16},{wch:10},{wch:26},{wch:26},{wch:26},{wch:14},{wch:30},{wch:12},{wch:14},{wch:12},{wch:12},{wch:30}];
   window.XLSX.utils.book_append_sheet(wb, ws, 'Разлики');
   var fname = 'razliki-'+(sdTypeFilter==='all' ? 'vsichki' : sdExcelTranslit(SD_TYPE_PLAIN[sdTypeFilter]||sdTypeFilter))+'-'+
               (sdStoreFilter ? sdExcelTranslit(sdStoreFilter) : 'vsichki')+'-'+today()+'.xlsx';
@@ -1156,7 +1156,7 @@ function sdTableRows(over){
     if (sdStoreFilter && r.store_name !== sdStoreFilter) return false;
     if (sdSearch) {
       var q = sdSearch.toLowerCase();
-      var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.return_order_number,r.comment].join(' ').toLowerCase();
+      var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.return_order_number,r.comment,r.zstr_number].join(' ').toLowerCase();
       if (hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -1493,6 +1493,9 @@ function sdInterstoreConfirmButton(l, rep){
   /* Отворена размяна замества пътя "приет / пуснато в SAP / прието обратно" -
      стоката отива в друг магазин, а размяната се води в sdSwapPanel. */
   if(sdSwapsForLine(l).some(function(s){ return s.status!=='closed'; })) return '';
+  /* Предаден на Контролинг — нито обектът, нито складът имат бутон по него;
+     отговорът на обекта (ако има) остава като надпис. */
+  if(sdLineToCO(l)) return l.store_response ? sdStoreResponseLabel(l, rep) : '';
   if(l.warehouse_response==='will_send'){
     return '<div style="margin-top:3px;font-size:10.5px;color:#94a3b8;">чака изпращане</div>';
   }
@@ -1520,11 +1523,14 @@ function sdInterstoreConfirmButton(l, rep){
         return '<button data-lid="'+l.id+'" onclick="'+onclick+'" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
       };
       var hs = '<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap;">'+
-        sb('sap_done',sdStoreBtnLabel(l,rep,'sap_done'),'#7c3aed',"sdSetStoreResponse(this.dataset.lid,'sap_done')")+
+        sb('sap_done',sdStoreBtnLabel(l,rep,'sap_done'),'#7c3aed',sdNeedsZstr(l,rep)?'openStoreZstrModal(this.dataset.lid)':"sdSetStoreResponse(this.dataset.lid,'sap_done')")+
         sb('no_stock',sdStoreBtnLabel(l,rep,'no_stock'),'#dc2626','openStoreNoStockModal(this.dataset.lid)')+
         '</div>';
       if(l.store_response==='no_stock' && l.store_response_comment){
         hs += '<div style="margin-top:3px;font-size:11px;color:#1e293b;white-space:normal;">💬 '+esc(l.store_response_comment)+'</div>';
+      }
+      if(l.store_response==='sap_done' && sdZstrText(l)){
+        hs += '<div class="sd-zstr" style="margin-top:3px;font-size:11px;color:#7c3aed;font-weight:600;">'+esc(sdZstrText(l))+'</div>';
       }
       return hs;
     }
@@ -1587,7 +1593,7 @@ function submitSDStockFixed(lineId){
   sdKeepScroll(line.report_id);
   var at = new Date().toISOString(), by = sdActor();
   var data = { store_response: null, store_response_by: null, store_response_at: null, store_response_comment: null,
-    warehouse_comment: sdStockFixedComment(line, by, at, comment) };
+    zstr_number: null, warehouse_comment: sdStockFixedComment(line, by, at, comment) };
   return sbPatch('stock_differences', 'id=eq.' + line.id, data).then(function(res){
     if(!res.ok){ toast('Грешка при запис','#dc2626'); return false; }
     var ov = document.getElementById('sdfix-ov'); if(ov) ov.remove();
@@ -1746,6 +1752,10 @@ function sdCloseBtnHtml(l, rep){
 function sdInterstoreTurn(l, rep){
   if(!l || !rep || rep.direction !== 'interstore' || l.status === 'received' || sdIsLateReceive(l)) return null;
   if(sdLineRoutedHere(l, rep)) return { who: sdLineRoute(l, rep) === 'regional' ? 'regional' : 'co', text: null };
+  /* „➡️ Към Контролинг“ (25.11.2026, razliki-dovarshvane): складът е предал
+     реда на ЦО — оттук чипът „🏢 Ход: ЦО“, „✅ Приключи (от свое име)“,
+     sdWhChipKind и баджът на склада следват сами. */
+  if(l.to_co_at) return { who: 'co', text: 'ЦО — предаден от склада ' + sdFmtDayMonth(l.to_co_at) };
   if(sdLineHasOpenSwap(l)) return { who: 'swap', text: 'по размяната' };
   var w = String(l.warehouse_response || ''), s = String(l.store_response || '');
   if(!w) return { who: 'warehouse', text: 'склада — да отговори' };
@@ -1880,6 +1890,101 @@ function sdRoutedCellHtml(l, rep){
   return '<div class="sd-route-label" style="font-size:11px;color:#1d4ed8;font-weight:600;">'+sdRouteLabel(sdLineRoute(l, rep))+'</div>'+
     sdCloseBtnHtml(l, rep);
 }
+/* ══ „➡️ Към Контролинг“ (25.11.2026, razliki-dovarshvane; решение на Тенчо) ══
+   Складът НА БЛАНКАТА предава междускладов ред на ЦО, когато ходът е негов
+   (sdInterstoreTurn → who 'warehouse': без отговор, „ще се изпрати“ без
+   отговор на обекта, return + sap_done). Не: приключен, насочен по 5а,
+   отворена размяна, вече предаден, чужд склад, обект, офис. ЕДНО правило за
+   бутона и за записа. Записът — САМО to_co_at / to_co_by / to_co_comment;
+   warehouse_response и store_response не се пипат. Оттам ходът е на ЦО
+   („🏢 Ход: ЦО“, „✅ Приключи (от свое име)“ на 'razliki_co'); връщане към
+   склада от ЦО няма. Складът и обектът виждат реда само за четене. */
+function sdLineToCO(l){
+  return !!l && !!l.to_co_at && l.status !== 'received' && !sdIsLateReceive(l);
+}
+function sdCanToCO(l, rep){
+  if(!currentUser || !l || !rep || rep.direction !== 'interstore' || l.to_co_at) return false;
+  if(!isLogisticsWarehouseUser() || rep.counterpart !== currentUser.store_name) return false;
+  var t = sdInterstoreTurn(l, rep);
+  return !!t && t.who === 'warehouse';
+}
+/* „➡️ Към Контролинг дд.мм (кой): <коментар>“ — за всички роли. */
+function sdToCOText(l){
+  if(!l || !l.to_co_at) return '';
+  var c = String(l.to_co_comment || '').trim();
+  return '➡️ Към Контролинг ' + sdFmtDayMonth(l.to_co_at) + (l.to_co_by ? ' (' + l.to_co_by + ')' : '') + (c ? ': ' + c : '');
+}
+function sdToCOHtml(l){
+  if(!l || !l.to_co_at) return '';
+  return '<div class="sd-toco" style="margin-top:4px;font-size:11px;color:#b45309;font-weight:600;white-space:normal;">' + esc(sdToCOText(l)) + '</div>';
+}
+function sdToCOBtnHtml(l, rep){
+  if(!sdCanToCO(l, rep)) return '';
+  return '<div style="margin-top:3px;"><button class="sd-toco-btn" data-lid="'+l.id+'" onclick="openSDToCOModal(this.dataset.lid)" style="border:1px solid #b45309;background:#fff;color:#b45309;border-radius:5px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">➡️ Към Контролинг</button></div>';
+}
+function openSDToCOModal(lineId){
+  var l = sdData.find(function(x){ return String(x.id) === String(lineId); });
+  var rep = l ? diffReports.find(function(x){ return x.id === l.report_id; }) : null;
+  if(!l || !sdCanToCO(l, rep)) return;
+  var old = document.getElementById('sdtoco-ov'); if(old) old.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdtoco-ov"><div class="bmod" style="width:400px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">➡️ Към Контролинг</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+esc(rep.store_name||'')+' · '+esc(l.material_code||'')+' · '+esc(l.material_name||'')+'</div>'+
+    '<div style="font-size:12px;color:#1e293b;margin-bottom:12px;">Редът отива при ЦО (група „Разлики — към ЦО“). Вие и обектът го виждате само за четене.</div>'+
+    '<label class="fl">Коментар *</label>'+
+    '<textarea class="fi" id="sdtoco-comment" rows="3" placeholder="Защо го предавате на Контролинг"></textarea>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'sdtoco-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button id="sdtoco-save" data-lid="'+l.id+'" onclick="submitSDToCO(this.dataset.lid)" style="border:none;background:#b45309;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">➡️ Предай</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+function submitSDToCO(lineId){
+  var line = sdData.find(function(x){ return String(x.id) === String(lineId); });
+  var rep = line ? diffReports.find(function(x){ return x.id === line.report_id; }) : null;
+  if(!line || !sdCanToCO(line, rep)) return Promise.resolve(false);
+  var el = document.getElementById('sdtoco-comment');
+  var comment = el ? String(el.value || '').trim() : '';
+  if(!comment){ toast('Впиши коментар — защо го предавате','#dc2626'); if(el) el.focus(); return Promise.resolve(false); }
+  sdKeepScroll(line.report_id);
+  var data = { to_co_at: new Date().toISOString(), to_co_by: sdActor(), to_co_comment: comment };
+  return sbPatch('stock_differences', 'id=eq.' + line.id, data).then(function(res){
+    if(!res.ok){ toast('Грешка при запис','#dc2626'); return false; }
+    var ov = document.getElementById('sdtoco-ov'); if(ov) ov.remove();
+    Object.assign(line, data);
+    toast('✅ Предаден на Контролинг');
+    loadStockDiff();
+    return sdToCONotify(line, rep, comment).then(function(){ return true; });
+  });
+}
+/* push + имейл до група 'razliki_co' по модела на sdRouteNotify. Провал или
+   празна група → жълт toast; записът остава. */
+function sdToCONotify(line, rep, comment){
+  var who = 'група „' + SD_ROUTE_GROUP_LABEL.razliki_co + '"';
+  var fail = function(why){ toast('⚠️ Предаден, но известието до ЦО не тръгна: ' + who + ' — ' + why, '#d97706'); return false; };
+  var text = 'Разлики · ' + (rep.store_name || '') + ' · към Контролинг от ' + (rep.counterpart || 'склада');
+  var item = sdRouteItemText(line);
+  return sbGetOk('users', SD_ROUTE_USERS_Q).then(function(res){
+    if(!res.ok) return fail('получателите не се прочетоха');
+    var rec = sdRouteRecipients(res.rows, 'co', rep.store_name);
+    if(!rec.length) return fail('няма получатели');
+    var names = rec.map(function(u){ return u.display_name; }).filter(Boolean);
+    var emails = rec.map(function(u){ return u.email; }).filter(Boolean);
+    var html = '<p>' + esc(text) + '</p><p>Обект: ' + esc(rep.store_name || '—') + '<br>Склад: ' + esc(rep.counterpart || '—') +
+      '<br>Предаде: ' + esc(line.to_co_by || '') + '</p><ul><li>' + esc(item) + '</li></ul>' +
+      '<p>Коментар на склада: ' + esc(comment) + '</p><p>Отворете в портала: Разлики.</p>';
+    return Promise.all([
+      names.length && typeof pushToPeople === 'function' ? pushToPeople(names, 'Разлики', text + ' · ' + item + ' · ' + comment) : Promise.resolve({ ok: false }),
+      emails.length && typeof sendEmail === 'function' ? sendEmail(emails, text, html) : Promise.resolve({ ok: false })
+    ]).then(function(r){
+      var bad = [];
+      if(!r[0] || !r[0].ok) bad.push('push');
+      if(!r[1] || !r[1].ok) bad.push('имейл');
+      return bad.length ? fail(bad.join(', ')) : true;
+    });
+  }).catch(function(e){ return fail((e && e.message) || String(e)); });
+}
 function openSDRouteCloseModal(lineId){
   var l = sdData.find(function(x){ return String(x.id) === String(lineId); });
   var rep = l ? diffReports.find(function(x){ return x.id === l.report_id; }) : null;
@@ -1955,6 +2060,7 @@ function sdStoreResponseLabel(l, rep){
   if(l.store_response==='sap_done' || l.store_response==='accepted' || l.store_response==='sap_accepted'){
     return '<div style="margin-top:3px;font-size:10.5px;color:#7c3aed;font-weight:600;">'+
       sdStoreResponseLabelFor(l, rep)+
+      (l.store_response==='sap_done' && sdZstrText(l) ? ' '+esc(sdZstrText(l)) : '')+
       (l.store_response_by?' · '+esc(l.store_response_by):'')+
       (l.store_response_at?' · '+sdFmtDateTime(l.store_response_at):'')+'</div>';
   }
@@ -1978,7 +2084,7 @@ function sdIsLateReceive(l){
    sent/will_send/return. */
 function sdLateReceiveAllowed(l, rep){
   if(!l || !rep || rep.direction!=='interstore') return false;
-  if(l.difference_category!=='undelivered' || l.status==='received') return false;
+  if(l.difference_category!=='undelivered' || l.status==='received' || l.to_co_at) return false;
   if(sdSwapsForLine(l).some(function(s){ return s.status!=='closed'; })) return false;
   return sdIsInterstoreStoreSide(l, rep);
 }
@@ -2082,18 +2188,60 @@ function openStoreNoStockModal(lineId){
 /* Записва отговора на магазина. status НЕ се пипа - редът остава 'new', докато
    складът не приеме стоката обратно. Коментарът е на "няма наличност": при
    "пуснато в SAP" не се трие (остава за история), просто не се показва. */
-function sdSetStoreResponse(lineId,val,comment){
+/* ══ Номер на заявката ZSTR (25.11.2026, razliki-dovarshvane) ══
+   Излишък + return: обектът отговаря „📝 ЗАЯВКАТА Е ПУСНАТА“ (sap_done) САМО
+   с номер на заявката → zstr_number в същия PATCH. Липса („📄 ИЗПИСАНО В
+   SAP“), без/друга категория и „няма наличност“ — без поле. Всяко друго
+   записване на отговора на обекта, „✅ Наличността е оправена“ и смяна на
+   отговора на склада, която нулира отговора на обекта → zstr_number = null.
+   Заварените sap_done без номер — просто без номер. НЕ е return_order_number
+   (поръчката за връщане към доставчик). */
+function sdNeedsZstr(l, rep){
+  return sdRespCat(l, rep) === 'excess';
+}
+function sdZstrText(l){
+  var n = l ? String(l.zstr_number || '').trim() : '';
+  return n ? '· заявка № ' + n : '';
+}
+function openStoreZstrModal(lineId){
+  var l = sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(!l || sdLineToCO(l)) return;
+  var existing = document.getElementById('sdzstr-ov'); if(existing) existing.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdzstr-ov"><div class="bmod" style="width:380px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+sdStoreBtnLabel(l, null, 'sap_done')+'</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(l.material_code||'')+' · '+esc(l.material_name||'')+'</div>'+
+    '<label class="fl">Номер на заявката *</label>'+
+    '<input class="fi" id="sdzstr-number" value="'+escVal(l.zstr_number)+'" placeholder="номерът на ZSTR тип 4 от SAP">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'sdzstr-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button id="sdzstr-save" data-lid="'+l.id+'" onclick="sdSetStoreResponse(this.dataset.lid,\'sap_done\',null,document.getElementById(\'sdzstr-number\').value)" style="border:none;background:#7c3aed;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+function sdSetStoreResponse(lineId,val,comment,zstr){
   var line = sdData.find(function(x){return String(x.id)===String(lineId);});
-  if(!line) return;
+  if(!line || sdLineToCO(line)) return;
+  var zRep = diffReports.find(function(x){return x.id===line.report_id;}) || null;
+  var zNum = null;
+  if(val==='sap_done' && sdNeedsZstr(line, zRep)){
+    zNum = String(zstr==null?'':zstr).trim();
+    if(!zNum){
+      toast('Впиши номера на заявката','#dc2626');
+      var zEl = document.getElementById('sdzstr-number'); if(zEl) zEl.focus();
+      return;
+    }
+  }
   sdKeepScroll(line.report_id);
   var at = new Date().toISOString(), by = sdActor();
-  var data = {store_response:val,store_response_by:by,store_response_at:at};
+  var data = {store_response:val,store_response_by:by,store_response_at:at,zstr_number:zNum||null};
   if(val==='no_stock') data.store_response_comment = String(comment||'').trim() || null;
   sbPatch('stock_differences','id=eq.'+lineId,data).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    line.store_response=val; line.store_response_by=by; line.store_response_at=at;
+    line.store_response=val; line.store_response_by=by; line.store_response_at=at; line.zstr_number=data.zstr_number;
     if(val==='no_stock') line.store_response_comment=data.store_response_comment;
     var ov=document.getElementById('sdnostock-ov'); if(ov) ov.remove();
+    var zov=document.getElementById('sdzstr-ov'); if(zov) zov.remove();
     toast('✅ Записано');
     var rep = diffReports.find(function(x){return x.id===line.report_id;}) || {};
     sdMarkDiffTask(line.store_name||rep.store_name);
@@ -2102,7 +2250,7 @@ function sdSetStoreResponse(lineId,val,comment){
        категория; без/друга категория — старите заглавия. */
     var srCat = sdRespCat(line, rep.id!=null?rep:null);
     var srTitle = srCat ? sdStoreResponseLabelFor(line, rep, val).replace(/^(\S+)\s+/, '$1 Разлика: ') : null;
-    if(val==='sap_done') sdNotifyInterstore(rep.counterpart, srTitle || '📄 Разлика: пуснато в SAP', (rep.store_name||'')+': '+art+' — приемете обратно');
+    if(val==='sap_done') sdNotifyInterstore(rep.counterpart, srTitle || '📄 Разлика: пуснато в SAP', (rep.store_name||'')+': '+art+(sdZstrText(line)?' '+sdZstrText(line):'')+' — приемете обратно');
     else if(val==='no_stock') sdNotifyInterstore(rep.counterpart, srTitle || '⛔ Разлика: няма наличност в логистика', (rep.store_name||'')+': '+art);
     loadStockDiff();
   });
@@ -2134,6 +2282,7 @@ function sdStoreResponseCompatible(wr, sr){
 function submitWarehouseResponse(lineId,val){
   var commentEl = document.getElementById('whr-comment');
   var whLine = sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(whLine && sdLineToCO(whLine)) return;
   sdKeepScroll(whLine?whLine.report_id:null);
   var whData = {warehouse_response:val,warehouse_comment:commentEl?commentEl.value:''};
   /* Смяна на отговора на склада не бива да оставя store_response от старата
@@ -2142,12 +2291,12 @@ function submitWarehouseResponse(lineId,val){
      междувременно" редове не се пипат. */
   var resetSr = !!whLine && whLine.status!=='received' && !sdIsLateReceive(whLine) &&
     !!whLine.store_response && !sdStoreResponseCompatible(val, whLine.store_response);
-  if(resetSr){ whData.store_response=null; whData.store_response_by=null; whData.store_response_at=null; whData.store_response_comment=null; }
+  if(resetSr){ whData.store_response=null; whData.store_response_by=null; whData.store_response_at=null; whData.store_response_comment=null; whData.zstr_number=null; }
   sbPatch('stock_differences','id=eq.'+lineId,whData).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     if(whLine){
       whLine.warehouse_response=val; whLine.warehouse_comment=whData.warehouse_comment;
-      if(resetSr){ whLine.store_response=null; whLine.store_response_by=null; whLine.store_response_at=null; whLine.store_response_comment=null; }
+      if(resetSr){ whLine.store_response=null; whLine.store_response_by=null; whLine.store_response_at=null; whLine.store_response_comment=null; whLine.zstr_number=null; }
     }
     var el=document.getElementById('whr-ov'); if(el)el.remove();
     toast('✅ Отговорът е запазен!');
@@ -2474,7 +2623,7 @@ function sdMarkTaken(id) {
    completed_by и completed_at, същите колони като при sdMarkTaken. */
 function sdConfirmInterstore(lineId, as){
   var line = sdData.find(function(x){return String(x.id)===String(lineId);});
-  if(!line) return;
+  if(!line || sdLineToCO(line)) return;
   if(!confirm('Потвърди, че стоката е получена и заприходена?')) return;
   /* Котва към бланката - иначе пре-рендирането връща потребителя най-отгоре. */
   sdKeepScroll(line.report_id);
@@ -2772,20 +2921,25 @@ function sdLineUntouchedForStoreReport(l, swaps){
   if((swaps||[]).some(function(s){ return String(s.from_line_id)===id || String(s.to_line_id)===id; })) return false;
   return true;
 }
-function sdStoreReportDeletable(rep, lines, swaps, notes){
+/* forFile (25.11.2026, razliki-dovarshvane) — „✕“ на грешно качен файл:
+   същото правило БЕЗ срока от 72 ч и БЕЗ условието за подател (всеки
+   потребител на обекта маха файл на своя обект). */
+function sdStoreReportDeletable(rep, lines, swaps, notes, forFile){
   if(!rep || !currentUser) return false;
   if(currentUser.role==='admin') return false; /* admin си има своя бутон */
   if(!canEditSD() || sdIsCOViewer()) return false;
   if(isCentralOfficeUser() || isLogisticsWarehouseUser()) return false;
   if(currentUser.store_name!==rep.store_name) return false;
-  /* Подадена от потребител на същия обект (sdIsStoreSubmitter, 22.11.2026) —
-     бланка от ЦО / офис / склад обектът не трие. */
-  if(!sdIsStoreSubmitter(rep.submitted_by, rep.store_name)) return false;
-  /* Най-много 3 денонощия от подаването (решение на Тенчо 19.11.2026: без
-     срок бутонът излизаше и на стари бланки, които само чакат склада).
-     Точно 72 ч — позволено. Без created_at / невалидна дата — без бутон. */
-  var subMs = rep.created_at ? Date.parse(rep.created_at) : NaN;
-  if(isNaN(subMs) || Date.now() - subMs > SD_STORE_DEL_REPORT_MS) return false;
+  if(!forFile){
+    /* Подадена от потребител на същия обект (sdIsStoreSubmitter, 22.11.2026) —
+       бланка от ЦО / офис / склад обектът не трие. */
+    if(!sdIsStoreSubmitter(rep.submitted_by, rep.store_name)) return false;
+    /* Най-много 3 денонощия от подаването (решение на Тенчо 19.11.2026: без
+       срок бутонът излизаше и на стари бланки, които само чакат склада).
+       Точно 72 ч — позволено. Без created_at / невалидна дата — без бутон. */
+    var subMs = rep.created_at ? Date.parse(rep.created_at) : NaN;
+    if(isNaN(subMs) || Date.now() - subMs > SD_STORE_DEL_REPORT_MS) return false;
+  }
   /* Сторното е само за четене за обекта (isWrongReceiptReadOnly). */
   if(rep.direction==='wrong_receipt') return false;
   if(rep.reviewed || rep.email_skipped_at) return false;
@@ -2857,6 +3011,149 @@ function submitSDStoreDeleteReport(reportId){
     }
     closeSDStoreDelModal();
     return sdDeleteReportFiles(fresh.rep.id, sdReportFileUrls(fresh.rep, fresh.lines));
+  });
+}
+
+/* ── ОБЕКТЪТ МАХА ГРЕШНО КАЧЕН ФАЙЛ ── (25.11.2026, razliki-dovarshvane;
+   решение на Тенчо). Снимка или стокова на бланката (differences_reports.
+   photos) и файл на реда (stock_differences.attachments). „✕“ на миниатюрата
+   — само докато никой не е действал по бланката: sdStoreReportDeletable с
+   forFile (без 72 ч и без подател). Свежа проверка в базата точно преди
+   записа. Офисът — без промяна (днешното му право).
+   Задължителните файлове пазят бланката (както при подаване): последната
+   стокова при доставчик без „Без документ“ и при сторно; последната снимка
+   при категория със задължителни снимки (без „Без документ“) или баркод
+   вместо SAP код (доставчик / сторно). Файловете на реда не са задължителни. */
+var SD_FILE_KEEP_MSG = 'Първо качете верния файл, после махнете грешния';
+function sdCanStoreRemoveFile(rep){
+  if(!rep) return false;
+  var lines = (sdData||[]).filter(function(x){ return String(x.report_id)===String(rep.id); });
+  return sdStoreReportDeletable(rep, lines, sdSwaps, sdNotes, true);
+}
+/* true = файлът p е последният задължителен и не се маха. */
+function sdReportFileRequired(rep, lines, p){
+  if(!rep || !p) return false;
+  var all = Array.isArray(rep.photos) ? rep.photos : [];
+  var dir = rep.direction || 'supplier';
+  var noDoc = dir === 'supplier' && !!rep.no_document;
+  if(diffIsStokova(p)){
+    var stk = all.filter(diffIsStokova).length;
+    return stk <= 1 && ((dir === 'supplier' && !noDoc) || dir === 'wrong_receipt');
+  }
+  var pics = all.filter(function(x){ return x && !diffIsStokova(x); }).length;
+  if(pics > 1) return false;
+  var catNeeds = (lines||[]).some(function(l){ var m = l.difference_category ? diffCatMeta(l.difference_category) : null; return !!(m && m[3]); });
+  if(catNeeds && !noDoc) return true;
+  var barcode = (dir === 'supplier' || dir === 'wrong_receipt') &&
+    (lines||[]).some(function(l){ return /^\d{8,}$/.test(String(l.material_code||'').trim()); });
+  return barcode;
+}
+function sdFileXBtnHtml(kind, ownerId, url){
+  return '<button type="button" class="sd-file-x" data-kind="'+kind+'" data-owner="'+esc(String(ownerId))+'" data-url="'+esc(url)+'" '+
+    'onclick="openSDFileRemoveModal(this.dataset.kind,this.dataset.owner,this.dataset.url)" title="Махни грешно качения файл" '+
+    'style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:10px;line-height:18px;padding:0;cursor:pointer;">✕</button>';
+}
+/* Обвивка с „✕“ около миниатюра — само ако обектът може да маха. */
+function sdFileWrapHtml(inner, kind, ownerId, url, can){
+  if(!can || !url) return inner;
+  return '<span class="sd-file-wrap" style="position:relative;display:inline-block;">'+inner+sdFileXBtnHtml(kind, ownerId, url)+'</span>';
+}
+/* kind: 'report' (ownerId = id на бланката) | 'line' (ownerId = id на реда). */
+function sdFileFind(kind, ownerId, url){
+  if(kind === 'line'){
+    var l = (sdData||[]).find(function(x){ return String(x.id)===String(ownerId); });
+    var rp = l ? diffReports.find(function(x){ return x.id===l.report_id; }) : null;
+    var a = l ? normSDAttachments(l.attachments).find(function(x){ return x && x.url===url; }) : null;
+    return { rep: rp, line: l, file: a || null };
+  }
+  var rep = diffReports.find(function(x){ return String(x.id)===String(ownerId); });
+  var p = rep && Array.isArray(rep.photos) ? rep.photos.find(function(x){ return x && x.url===url; }) : null;
+  return { rep: rep, line: null, file: p || null };
+}
+function closeSDFileRemoveModal(){ var el=document.getElementById('sdfx-ov'); if(el) el.remove(); }
+function openSDFileRemoveModal(kind, ownerId, url){
+  var f = sdFileFind(kind, ownerId, url);
+  if(!f.rep || !f.file || !sdCanStoreRemoveFile(f.rep)) return;
+  if(kind === 'report'){
+    var lines = (sdData||[]).filter(function(x){ return String(x.report_id)===String(f.rep.id); });
+    if(sdReportFileRequired(f.rep, lines, f.file)){ toast(SD_FILE_KEEP_MSG,'#dc2626'); return; }
+  }
+  closeSDFileRemoveModal();
+  var what = kind === 'line' ? 'файла на реда' : (diffIsStokova(f.file) ? 'стоковата' : 'файла');
+  var name = kind === 'line' ? (f.file.filename || 'файл') : (f.file.name || 'файл');
+  var h = '<div class="bov open" id="sdfx-ov"><div class="bmod" style="width:420px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">✕ Махни '+what+'</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+esc(f.rep.store_name||'')+(f.line?' · '+esc(f.line.material_name||''):'')+' · '+esc(name)+'</div>'+
+    '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:9px 12px;font-size:12.5px;color:#991b1b;">Файлът ще бъде изтрит окончателно. Ползвайте само ако е качен по грешка.</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">'+
+    '<button onclick="closeSDFileRemoveModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button id="sdfx-go" data-kind="'+kind+'" data-owner="'+esc(String(ownerId))+'" data-url="'+esc(url)+'" onclick="submitSDFileRemove(this.dataset.kind,this.dataset.owner,this.dataset.url)" style="border:none;background:#dc2626;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✕ Махни</button>'+
+    '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', h);
+}
+/* Свежа проверка (бланката, редовете, размените, съобщенията) → PATCH на
+   масива без елемента → триене на файла от Storage. Паднало триене на файла
+   → жълт toast, записът в базата остава. */
+function submitSDFileRemove(kind, ownerId, url){
+  var btn = document.getElementById('sdfx-go');
+  if(btn){ if(btn.disabled) return Promise.resolve(false); btn.disabled = true; }
+  var f0 = sdFileFind(kind, ownerId, url);
+  if(!f0.rep){ closeSDFileRemoveModal(); return Promise.resolve(false); }
+  var rid = encodeURIComponent(f0.rep.id);
+  var fresh = {};
+  var stop = function(msg, col){ closeSDFileRemoveModal(); if(msg) toast(msg, col||'#dc2626'); loadStockDiff(); return false; };
+  return Promise.all([
+    sbGetOk('differences_reports', 'id=eq.'+rid),
+    sbGetOk('stock_differences', 'report_id=eq.'+rid)
+  ]).then(function(res){
+    if(!res[0].ok || !res[1].ok) return { err: (!res[0].ok ? res[0] : res[1]) };
+    fresh.rep = res[0].rows[0] || null;
+    fresh.lines = res[1].rows;
+    if(!fresh.rep) return { gone: true };
+    var ids = fresh.lines.map(function(l){ return l.id; }).join(',');
+    return Promise.all([
+      ids ? sbGetOk('stock_diff_swaps', 'or=(from_line_id.in.('+ids+'),to_line_id.in.('+ids+'))') : Promise.resolve({ ok:true, rows:[] }),
+      sbGetOk('storno_notes', 'select=id,report_id&report_id=eq.'+rid)
+    ]).then(function(r2){
+      if(!r2[0].ok || !r2[1].ok) return { err: (!r2[0].ok ? r2[0] : r2[1]) };
+      fresh.swaps = r2[0].rows; fresh.notes = r2[1].rows;
+      return {};
+    });
+  }).then(function(st){
+    if(st.err) return stop('⚠️ Файлът НЕ е махнат — проверката не се зареди: '+sbErrMsg(st.err));
+    if(st.gone) return stop('Бланката вече я няма — списъкът е опреснен','#64748b');
+    if(!sdStoreReportDeletable(fresh.rep, fresh.lines, fresh.swaps, fresh.notes, true)) return stop('Някой вече е действал по бланката — файлът не може да се махне');
+    var table, filter, data, target;
+    if(kind === 'line'){
+      var fl = fresh.lines.find(function(x){ return String(x.id)===String(ownerId); });
+      var atts = fl ? normSDAttachments(fl.attachments) : [];
+      target = atts.find(function(x){ return x && x.url===url; });
+      if(!target) return stop('Файлът вече го няма — списъкът е опреснен','#64748b');
+      table = 'stock_differences'; filter = 'id=eq.'+encodeURIComponent(fl.id);
+      data = { attachments: atts.filter(function(x){ return x !== target; }) };
+    } else {
+      var ph = Array.isArray(fresh.rep.photos) ? fresh.rep.photos : [];
+      target = ph.find(function(x){ return x && x.url===url; });
+      if(!target) return stop('Файлът вече го няма — списъкът е опреснен','#64748b');
+      if(sdReportFileRequired(fresh.rep, fresh.lines, target)) return stop(SD_FILE_KEEP_MSG);
+      table = 'differences_reports'; filter = 'id=eq.'+rid;
+      data = { photos: ph.filter(function(x){ return x !== target; }) };
+    }
+    return sbPatch(table, filter, data).then(function(res){
+      if(!res.ok){ if(btn) btn.disabled = false; toast('Грешка при запис','#dc2626'); return false; }
+      closeSDFileRemoveModal();
+      sdKeepScroll(fresh.rep.id);
+      var path = sdStoragePathFromUrl(url);
+      var del = path
+        ? fetch(DIFF_SB+'/storage/v1/object/'+DIFF_BKT+'/'+path, { method:'DELETE', headers:{'Authorization':'Bearer '+DIFF_KEY} })
+            .then(function(r){ return !!(r && r.ok); }, function(){ return false; })
+        : Promise.resolve(false);
+      return del.then(function(fileOk){
+        toast(fileOk ? '✓ Файлът е махнат' : '⚠️ Файлът е махнат от бланката, но не е изтрит от хранилището', fileOk ? '#16a34a' : '#d97706');
+        loadStockDiff();
+        return true;
+      });
+    });
   });
 }
 
@@ -3080,12 +3377,16 @@ function normSDAttachments(atts){
 function diffAttachmentThumbs(l){
   var atts = normSDAttachments(l.attachments);
   if(!atts.length) return '';
+  /* „✕“ за обекта (25.11.2026) — само ако обектът може да качва по реда и
+     никой не е действал по бланката. */
+  var lRep = canAttachSDLine(l) ? (diffReports||[]).find(function(x){ return x.id===l.report_id; }) : null;
+  var canX = !!lRep && sdCanStoreRemoveFile(lRep);
   var h='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;">';
   atts.forEach(function(a){
     if(a.type==='image'){
-      h+='<a href="'+esc(a.url)+'" target="_blank"><img src="'+esc(a.url)+'" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;"></a>';
+      h+=sdFileWrapHtml('<a href="'+esc(a.url)+'" target="_blank"><img src="'+esc(a.url)+'" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;"></a>', 'line', l.id, a.url, canX);
     } else {
-      h+='<a href="'+esc(a.url)+'" target="_blank" title="'+esc(a.filename||'Файл')+'" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;text-decoration:none;">📎</a>';
+      h+=sdFileWrapHtml('<a href="'+esc(a.url)+'" target="_blank" title="'+esc(a.filename||'Файл')+'" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;text-decoration:none;">📎</a>', 'line', l.id, a.url, canX);
     }
   });
   h+='</div>';
@@ -4349,7 +4650,7 @@ function sdFilteredReports(){
     unreviewed = unreviewed.filter(function(r){
       var lines = sdReportLinesShown(r);
       var hay = [r.store_name,r.counterpart,r.document_number,r.general_comment,r.submitted_by]
-        .concat(lines.map(function(l){ return [l.material_code,l.material_name,l.comment,l.resolution_comment].join(' '); }))
+        .concat(lines.map(function(l){ return [l.material_code,l.material_name,l.comment,l.resolution_comment,l.zstr_number].join(' '); }))
         .join(' ').toLowerCase();
       return hay.indexOf(qRep) !== -1;
     });
@@ -4359,6 +4660,12 @@ function sdFilteredReports(){
 function sdReportsCount(){ return sdFilteredReports().list.length; }
 
 /* ── Секция с подадени бланки (чакат преглед) ── */
+/* Заглавието (25.11.2026, razliki-dovarshvane — решение на Тенчо): складът не
+   „преглежда" бланки, той им отговаря. Офисът и обектът — както досега.
+   Броячът в скобите е общ. */
+function sdReportsSectionTitle(){
+  return isLogisticsWarehouseUser() ? '📥 Бланки към склада — чакат отговор' : '🆕 Нови подадени бланки — чакат преглед';
+}
 function renderDiffReportsSection(){
   /* Горе стоят непрегледаните И решените, които чакат имейл (email_pending).
      Броячите за „непрегледани" НЕ ги виждат — те ползват само
@@ -4370,7 +4677,9 @@ function renderDiffReportsSection(){
        вместо секцията просто да изчезне и да изглежда, че няма нищо за преглед. */
     if(allVisible.length && (sdStoreFilter || sdSearch)){
       return '<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#5b21b6;">'+
-        '🆕 Има '+allVisible.length+' непрегледан'+(allVisible.length===1?'а бланка':'и бланки')+', но нито една не отговаря на текущия филтър. '+
+        (isLogisticsWarehouseUser()
+          ? '📥 Има '+allVisible.length+' '+(allVisible.length===1?'бланка':'бланки')+' към склада, но нито една не отговаря на текущия филтър. '
+          : '🆕 Има '+allVisible.length+' непрегледан'+(allVisible.length===1?'а бланка':'и бланки')+', но нито една не отговаря на текущия филтър. ')+
         '<button onclick="sdClearFilters()" style="border:none;background:#7c3aed;color:#fff;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;margin-left:6px;">Изчисти филтъра</button></div>';
     }
     return '';
@@ -4404,7 +4713,7 @@ function renderDiffReportsSection(){
     return String(a.id)<String(b.id) ? -1 : (String(a.id)>String(b.id) ? 1 : 0);
   });
   var h='<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:14px;">';
-  h+='<div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:10px;">🆕 Нови подадени бланки — чакат преглед ('+unreviewed.length+(unreviewed.length!==allVisible.length?' от '+allVisible.length:'')+')'+
+  h+='<div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:10px;">'+sdReportsSectionTitle()+' ('+unreviewed.length+(unreviewed.length!==allVisible.length?' от '+allVisible.length:'')+')'+
      (sdDirTabsActive()?' <span style="font-weight:500;color:#7c3aed;">· '+diffDirShortLabel(sdDirTab)+'</span>':'')+'</div>';
   unreviewed.forEach(function(rep){
     var lines = sdReportLinesShown(rep);
@@ -4547,8 +4856,8 @@ function renderDiffReportsSection(){
           '</td>':'')+
           (repShowWh?'<td style="padding:3px 6px;white-space:nowrap;">'+(sdLineRoutedHere(l,rep)
             ? sdRoutedCellHtml(l,rep)
-            : diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+markHtml+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+
-              sdInterstoreTurnHtml(l,rep)+sdCloseBtnHtml(l,rep))+'</td>':'')+
+            : diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+sdToCOHtml(l)+markHtml+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+
+              sdInterstoreTurnHtml(l,rep)+sdToCOBtnHtml(l,rep)+sdCloseBtnHtml(l,rep))+'</td>':'')+
         '</tr>';
       });
       h+='</table></div>';
@@ -4564,15 +4873,18 @@ function renderDiffReportsSection(){
        такава. Преди целият блок беше под if(photos.length) и точно тези бланки
        оставаха без изход. */
     var canAddPhoto = canAttachDiffReport(rep);
+    /* „✕“ на миниатюрата — обектът, докато никой не е действал (25.11.2026). */
+    var canXFile = sdCanStoreRemoveFile(rep);
     if(stkFiles.length){
       h+='<div class="sd-rep-stokova" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">'+
         '<span style="font-size:11.5px;font-weight:700;color:#0f766e;">📄 Стокова</span>';
       stkFiles.forEach(function(p){
         if(!p || !p.url) return;
         var isImgS = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(p.url);
-        h+= isImgS
+        h+= sdFileWrapHtml(isImgS
           ? '<a href="'+esc(p.url)+'" target="_blank" title="Стокова: '+esc(p.name||'')+'"><img src="'+esc(p.url)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #99f6e4;"></a>'
-          : '<a href="'+esc(p.url)+'" target="_blank" title="Стокова: '+esc(p.name||'Файл')+'" style="display:flex;align-items:center;justify-content:center;width:56px;height:56px;background:#f0fdfa;border:1px solid #99f6e4;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>';
+          : '<a href="'+esc(p.url)+'" target="_blank" title="Стокова: '+esc(p.name||'Файл')+'" style="display:flex;align-items:center;justify-content:center;width:56px;height:56px;background:#f0fdfa;border:1px solid #99f6e4;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>',
+          'report', rep.id, p.url, canXFile);
       });
       h+='</div>';
     }
@@ -4585,9 +4897,9 @@ function renderDiffReportsSection(){
            на екрана, макар линкът да работеше коректно при директно отваряне). */
         var isImg = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(p.url);
         if(isImg){
-          h+='<a href="'+esc(p.url)+'" target="_blank"><img src="'+esc(p.url)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+          h+=sdFileWrapHtml('<a href="'+esc(p.url)+'" target="_blank"><img src="'+esc(p.url)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>', 'report', rep.id, p.url, canXFile);
         } else {
-          h+='<a href="'+esc(p.url)+'" target="_blank" title="'+esc(p.name||'Файл')+'" style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:56px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>';
+          h+=sdFileWrapHtml('<a href="'+esc(p.url)+'" target="_blank" title="'+esc(p.name||'Файл')+'" style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:56px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>', 'report', rep.id, p.url, canXFile);
         }
       });
       /* Плътен бутон, не пунктираното квадратче с 📎 от sdLineAttachCell -
@@ -6836,6 +7148,7 @@ function renderDiffPrint(rep){
        чупеше като „Цветелин|а". Датата отдолу вече е 7pt (.p-sub), тоест
        двата реда сега са с един размер. */
     '.dp-who{font-size:7pt;}'+
+    '.dp-extra{font-size:7pt;color:#333;white-space:normal;margin-top:0.8mm;}'+
     '.dp-sec{font-size:9.5pt;font-weight:700;margin:0 0 2mm;}'+
     '.dp-photos{display:flex;flex-wrap:wrap;gap:3mm;margin-bottom:4mm;}'+
     '.dp-photos img{width:40mm;height:auto;border:1px solid #ccc;}'+
@@ -6859,7 +7172,11 @@ function renderDiffPrint(rep){
       '<td>'+statusText(l)+'</td>'+
       '<td class="dp-who">'+whoWhen(l.resolved_by,l.resolved_at)+'</td>'+
       '<td class="dp-who">'+whoWhen(l.completed_by,l.completed_at)+'</td>'+
-      '<td>'+esc(l.comment||'')+(att?' 📎'+att:'')+'</td>'+
+      /* Печатът няма колона за отговорите на склада и обекта — номерът на
+         заявката ZSTR и „Към Контролинг“ стоят под коментара (25.11.2026). */
+      '<td>'+esc(l.comment||'')+(att?' 📎'+att:'')+
+        (l.store_response==='sap_done' && sdZstrText(l)?'<div class="dp-extra dp-zstr">'+esc(sdStoreResponseLabelFor(l, rep)+' '+sdZstrText(l))+'</div>':'')+
+        (l.to_co_at?'<div class="dp-extra dp-toco">'+esc(sdToCOText(l))+'</div>':'')+'</td>'+
     '</tr>';
   }).join('');
 
@@ -7049,6 +7366,8 @@ function sdUnreviewedCountFor(reports, lines, swaps){
       if(!repLines.length) return true;
       if(repLines.some(function(l){ return lateTo[String(l.id)]; })) return true;
       return repLines.some(function(l){
+        /* Предаден на Контролинг (25.11.2026) — ходът е на ЦО, не на склада. */
+        if(sdLineToCO(l)) return false;
         /* Насочен ред (етап 5а — към ЦО / регионалния) не чака склада. */
         if(!l.warehouse_response) return !sdLineRoutedHere(l, r);
         return (l.store_response==='sap_done' || l.store_response==='no_stock') && l.status!=='received';
@@ -7147,7 +7466,8 @@ function sdRefreshTabBadge(){
   var storeBadge = !isLogisticsWarehouseUser() && !canReviewDiff();
   /* Складът (етап 5а): difference_category + direction — насочените редове
      (sdLineRoutedHere) не се броят като чакащи склада. */
-  var lineCols = storeBadge ? 'id,difference_category,' : (isLogisticsWarehouseUser() ? 'id,difference_category,' : '');
+  /* Складът (25.11.2026): to_co_at — предаденият на Контролинг ред не чака склада. */
+  var lineCols = storeBadge ? 'id,difference_category,' : (isLogisticsWarehouseUser() ? 'id,difference_category,to_co_at,' : '');
   var q = 'select=id,store_name,counterpart,reviewed'+((storeBadge || isLogisticsWarehouseUser()) ? ',direction' : '')+
     (needLines ? ',stock_differences('+lineCols+'report_id,warehouse_response,store_response,status)' : '')+
     '&reviewed=eq.false';
