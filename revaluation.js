@@ -376,6 +376,9 @@ function rvRender(){
   }
   h += '<button class="btn-sm" onclick="rvExport()">' + (rvIsCoViewer() ? '📥 Excel — този обект' : '📥 Изтегли моята бланка') + '</button>';
   if(!rvIsCoViewer() && rvSub && rvSub.status === 'processed' && rvItems.length) h += '<button class="btn-sm" onclick="rvCopyCodes()">📋 Копирай новите кодове</button>';
+  /* Етикети (етап 3, 25.11.2026) — при обработена бланка за всеки, който я
+     вижда; и без редове за печат (прозорецът го казва). */
+  if(rvSub && rvSub.status === 'processed') h += '<button class="btn-sm" id="rv-lbl-btn" onclick="rvLblOpen()">🏷 Етикети</button>';
   h += rvRegButtonsHtml();
   h += rvCoButtonsHtml();
   if(canSub){
@@ -663,9 +666,13 @@ function rvUnitsLabel(list){
   return parts.join(', ');
 }
 function rvUnitsHtml(it){
-  if(!rvUnitsApply() || !rvUnitsOk) return '';
+  if(!rvUnitsOk) return '';
   var list = rvUnits[it.id] || [];
   var h = list.length ? '<div class="rv-units" style="font-size:10px;color:#475569;white-space:normal;">№ ' + esc(rvUnitsLabel(list)) + '</div>' : '';
+  /* processed (решение на Тенчо 25.11.2026): номерата се показват само за
+     четене — без маркер „без номер" и без 🔁; ред без номера в стара бланка
+     е просто без ред с номера. rvUnitsApply остава false — нищо не се пише. */
+  if(!rvUnitsApply()) return h;
   var want = rvUnitsWant(it);
   if(list.length !== want || rvUnitErr[it.id]){
     h += '<div class="rv-unit-miss" style="font-size:10px;color:#b91c1c;font-weight:700;">' +
@@ -1252,6 +1259,24 @@ function rvRegButtonsHtml(){
 function rvRegApprove(){
   if(!rvRegCanAct()) return Promise.resolve(false);
   if(!confirm('Одобряване на бланката на ' + rvStore + '? Тя отива в Контролинг за обработка.')) return Promise.resolve(false);
+  /* Свеж прочит на редовете преди одобрение (25.11.2026): еднакъв артикул с
+     различен % / цена → НЕ се одобрява (rvSameCodeConflicts, както „Подай").
+     Паднало четене → също не. Въпросът към Елица остава отворен —
+     claude/open/23-11-preocenka-same-code-8code.md. */
+  var subId = rvSub.id;
+  return sbGetOk('revaluation_items', 'submission_id=eq.' + subId + '&select=id,sap_code,discount_pct,proposed_price').then(function(fr){
+    if(!fr.ok){ toast('Бланката не е одобрена — редовете не се прочетоха: ' + fr.error, '#dc2626'); return false; }
+    var same = rvSameCodeConflicts(fr.rows || []);
+    var codes = [];
+    (fr.rows || []).forEach(function(it){ var c = String(it.sap_code || '').trim(); if(same[it.id] && codes.indexOf(c) < 0) codes.push(c); });
+    if(codes.length){
+      toast('Бланката НЕ е одобрена — ' + RV_SAME_CODE_MSG.toLowerCase() + ': ' + codes.join(', ') + '. Върни я на обекта за поправка.', '#dc2626');
+      return false;
+    }
+    return rvRegApproveWrite();
+  });
+}
+function rvRegApproveWrite(){
   var patch = { status: 'approved', approved_at: new Date().toISOString(), approved_by: currentUser.display_name || currentUser.email };
   return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
     if(!res.ok){ toast('Бланката не е одобрена: ' + sbErrMsg(res), '#dc2626'); return false; }
@@ -1808,6 +1833,235 @@ function rvCopyCodes(){
   if(!navigator.clipboard || !navigator.clipboard.writeText){ toast('Браузърът не позволява копиране — кодовете са в „Изтегли моята бланка“', '#dc2626'); return Promise.resolve(false); }
   return navigator.clipboard.writeText(txt).then(function(){ toast('Копирани ' + codes.length + ' кода'); return true; },
     function(){ toast('Копирането не е позволено — кодовете са в „Изтегли моята бланка“', '#dc2626'); return false; });
+}
+
+/* ─── Етикети (етап 3, 25.11.2026) ────────────────────────
+   Печат за преоценените бройки от обработена бланка (бутон „🏷 Етикети").
+   · Малък 5,8 × 3,9 см — перфориран A4, 3 колони × 7 реда (мерено от Тенчо
+     25.11): етикет k (колона), r (ред) е на 13 + k×60 / 8 + r×39 мм, кутия
+     58 × 37 мм, текстът 3 мм навътре; „Започни от етикет №" — за начнат лист.
+   · Голям A5 — два на A4 изправен, 210 × 148,5 мм, линия за рязане по средата.
+   Етикет на всеки номер от revaluation_units; ред без номера (бланките
+   отпреди етап 2) → един етикет без номер. Ред без new_sap_code или без
+   sale_price не се печата. Видът и изместването (мм) се помнят в
+   localStorage (try/catch — без него стойностите по подразбиране).
+   Цените са в € — официалната валута от 01.01.2026, както Минуси / Каса.
+   Печатът е в #mod-print (както loading / transfers / picking), @page A4 без
+   поле, клетките с абсолютни координати. Само печат — износът, MM41, VK11,
+   писмото „Готово", История и „Днес" не се пипат. */
+var RV_LBL = {
+  small: { perPage: 21, cols: 3, x0: 13, y0: 8, sx: 60, sy: 39, w: 58, h: 37 },
+  big: { perPage: 2, cols: 1, x0: 0, y0: 0, sx: 210, sy: 148.5, w: 210, h: 148.5 }
+};
+var RV_LBL_KIND_KEY = 'rv_lbl_kind';
+var RV_LBL_OFF_KEY = 'rv_lbl_offset';
+var RV_LBL_HINT = 'Печатай в реален размер (100%), без „Побери в страницата“';
+function rvLblStoreGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+function rvLblStoreSet(k, val){ try { localStorage.setItem(k, val); } catch(e){} }
+function rvLblHalf(x){ x = Number(String(x == null ? '' : x).replace(',', '.')); return isFinite(x) ? Math.max(-20, Math.min(20, Math.round(x * 2) / 2)) : 0; }
+function rvLblKindSaved(){ return rvLblStoreGet(RV_LBL_KIND_KEY) === 'big' ? 'big' : 'small'; }
+function rvLblOffSaved(){
+  var o = null;
+  try { o = JSON.parse(rvLblStoreGet(RV_LBL_OFF_KEY) || 'null'); } catch(e){ o = null; }
+  return { dx: rvLblHalf(o && o.dx), dy: rvLblHalf(o && o.dy) };
+}
+function rvLblOk(it){ return !!String((it && it.new_sap_code) || '').trim() && Number(it.sale_price) > 0; }
+/* [{it, units: [unit_no | null]}] — само редовете, които се печатат. */
+function rvLblRows(){
+  return rvItems.filter(rvLblOk).map(function(it){
+    var u = (rvUnits[it.id] || []).map(function(x){ return x.unit_no; }).filter(Boolean);
+    return { it: it, units: u.length ? u : [null] };
+  });
+}
+function rvLblDate(ts){
+  if(!ts) return '';
+  var d = new Date(ts);
+  if(isNaN(d.getTime())) return '';
+  var p = function(n){ return String(n).padStart(2, '0'); };
+  return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear();
+}
+function rvLblMoney(n){ return rvFmt(n) + ' €'; }
+function rvLblMm(x){ return String(Math.round(x * 100) / 100) + 'mm'; }
+
+/* ─── Прозорецът преди печат ─── */
+function rvLblOpen(){
+  if(!rvSub || rvSub.status !== 'processed') return false;
+  rvLblModal(rvLblKindSaved(), null);
+  return true;
+}
+function rvLblClose(){ var d = document.getElementById('rv-lbl-modal'); if(d && d.parentNode) d.parentNode.removeChild(d); }
+/* on — {item_id: true} от предишния рендер (смяна на вида пази отметките). */
+function rvLblModal(kind, on){
+  var rows = rvLblRows();
+  var skipped = rvItems.filter(function(it){ return !rvLblOk(it); });
+  var off = rvLblOffSaved();
+  var start = 1;
+  var old = document.getElementById('rv-lbl-start');
+  if(old) start = Math.max(1, Math.min(21, parseInt(old.value, 10) || 1));
+  var h = '<div class="modal" style="width:640px;">' +
+    '<h3>🏷 Етикети — ' + esc(rvStore) + '</h3>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:14px;margin:8px 0;font-size:13px;">' +
+      '<label><input type="radio" name="rv-lbl-kind" id="rv-lbl-kind-small" value="small"' + (kind === 'small' ? ' checked' : '') + ' onchange="rvLblKind(\'small\')"> Малък 5,8 × 3,9 см (21 на лист)</label>' +
+      '<label><input type="radio" name="rv-lbl-kind" id="rv-lbl-kind-big" value="big"' + (kind === 'big' ? ' checked' : '') + ' onchange="rvLblKind(\'big\')"> Голям А5 (2 на лист А4)</label>' +
+    '</div>' +
+    '<div id="rv-lbl-hint" style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-bottom:8px;">🖨 ' + esc(RV_LBL_HINT) + '</div>';
+  if(!rows.length){
+    h += '<div id="rv-lbl-empty" style="padding:10px;color:#b91c1c;font-size:13px;">Няма редове за етикети — ' +
+      (rvItems.length ? 'на нито един ред няма нов код и цена.' : 'бланката няма редове.') + '</div>';
+  } else {
+    h += '<div class="tbl-wrap tbl-compact" style="max-height:40vh;overflow:auto;"><table><thead><tr><th></th><th>Нов код</th><th>Артикул</th><th>Нова цена</th><th>Етикети</th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      var chk = !on || on[r.it.id];
+      h += '<tr><td><input type="checkbox" class="rv-lbl-chk" data-id="' + escAttr(r.it.id) + '"' + (chk ? ' checked' : '') + '></td>' +
+        '<td style="font-family:DM Mono,monospace;">' + esc(r.it.new_sap_code) + '</td><td>' + esc(r.it.product_name) + '</td>' +
+        '<td>' + esc(rvLblMoney(r.it.sale_price)) + '</td><td class="rv-lbl-n">' + r.units.length + (r.units[0] == null ? ' <span style="color:#94a3b8;font-size:11px;">без номер</span>' : '') + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  if(skipped.length){
+    h += '<div id="rv-lbl-skipped" style="font-size:12px;color:#94a3b8;margin-top:6px;">Не се печатат (няма нов код или цена): ' +
+      esc(skipped.map(function(it){ return (it.sap_code || '') + ' ' + (it.product_name || ''); }).join('; ')) + '</div>';
+  }
+  h += '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;font-size:13px;">';
+  if(kind === 'small') h += '<label>Започни от етикет № <input id="rv-lbl-start" type="number" min="1" max="21" step="1" value="' + start + '" style="width:56px;"></label>';
+  h += '<label>Изместване → <input id="rv-lbl-dx" type="number" step="0.5" min="-20" max="20" value="' + off.dx + '" onchange="rvLblSaveOff()" style="width:64px;"> мм</label>' +
+    '<label>↓ <input id="rv-lbl-dy" type="number" step="0.5" min="-20" max="20" value="' + off.dy + '" onchange="rvLblSaveOff()" style="width:64px;"> мм</label>' +
+    '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">' +
+      '<button class="btn-sm" id="rv-lbl-print" onclick="rvLblPrint(false)" style="background:#16a34a;color:#fff;"' + (rows.length ? '' : ' disabled') + '>🖨 Печат</button>' +
+      '<button class="btn-sm" id="rv-lbl-test" onclick="rvLblPrint(true)">▭ Пробен лист</button>' +
+      '<button class="btn-sm" onclick="rvLblClose()">Затвори</button>' +
+    '</div></div>';
+  var d = document.getElementById('rv-lbl-modal');
+  if(!d){
+    d = document.createElement('div');
+    d.id = 'rv-lbl-modal';
+    document.body.appendChild(d);
+  }
+  d.className = 'modal-bg open';
+  d.innerHTML = h;
+}
+function rvLblChecked(){
+  var on = {};
+  Array.prototype.forEach.call(document.querySelectorAll('#rv-lbl-modal .rv-lbl-chk'), function(c){ if(c.checked) on[c.dataset.id] = true; });
+  return on;
+}
+function rvLblKind(kind){
+  kind = kind === 'big' ? 'big' : 'small';
+  rvLblStoreSet(RV_LBL_KIND_KEY, kind);
+  rvLblModal(kind, rvLblChecked());
+}
+function rvLblSaveOff(){
+  var dx = rvLblHalf(v('rv-lbl-dx')), dy = rvLblHalf(v('rv-lbl-dy'));
+  rvLblStoreSet(RV_LBL_OFF_KEY, JSON.stringify({ dx: dx, dy: dy }));
+  return { dx: dx, dy: dy };
+}
+/* Етикетите по ред на бланката: [{it, unit}] само за отметнатите редове. */
+function rvLblList(on){
+  var out = [];
+  rvLblRows().forEach(function(r){
+    if(!on[r.it.id]) return;
+    r.units.forEach(function(u){ out.push({ it: r.it, unit: u }); });
+  });
+  return out;
+}
+
+/* ─── Самият печат ─── */
+function rvLblCss(){
+  return '@page{size:A4;margin:0;}' +
+    '#rv-lbl-sheets .rv-lbl-page{position:relative;width:210mm;height:296mm;overflow:hidden;background:#fff;break-after:page;page-break-after:always;}' +
+    '#rv-lbl-sheets .rv-lbl-page:last-child{break-after:auto;page-break-after:auto;}' +
+    '#rv-lbl-sheets .rv-lbl{position:absolute;box-sizing:border-box;overflow:hidden;font-family:Arial,Helvetica,sans-serif;color:#000;line-height:1.15;}' +
+    '#rv-lbl-sheets .rv-lbl-frame{border:0.2mm solid #000;}' +
+    '#rv-lbl-sheets .rv-lbl-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+    '#rv-lbl-sheets .rv-lbl-name{font-weight:700;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;word-break:break-word;}' +
+    '#rv-lbl-sheets .rv-lbl-old{text-decoration:line-through;color:#333;}' +
+    '#rv-lbl-sheets .rv-lbl-new{font-weight:800;}' +
+    /* Малък: 58 × 37, 3 мм навътре → 52 × 31 за текста */
+    '#rv-lbl-sheets .rv-lbl-s{width:58mm;height:37mm;padding:3mm;}' +
+    '#rv-lbl-sheets .rv-lbl-s .rv-lbl-name{font-size:8pt;-webkit-line-clamp:2;max-height:2.3em;}' +
+    '#rv-lbl-sheets .rv-lbl-s .rv-lbl-prices{margin-top:0.8mm;}' +
+    '#rv-lbl-sheets .rv-lbl-s .rv-lbl-old{font-size:9pt;margin-right:2mm;}' +
+    '#rv-lbl-sheets .rv-lbl-s .rv-lbl-new{font-size:19pt;}' +
+    '#rv-lbl-sheets .rv-lbl-s .rv-lbl-small{font-size:7pt;}' +
+    /* Голям: 210 × 148,5 */
+    '#rv-lbl-sheets .rv-lbl-b{width:210mm;height:148.5mm;padding:14mm 16mm;}' +
+    '#rv-lbl-sheets .rv-lbl-b .rv-lbl-name{font-size:24pt;-webkit-line-clamp:3;max-height:3.45em;}' +
+    '#rv-lbl-sheets .rv-lbl-b .rv-lbl-prices{margin-top:5mm;}' +
+    '#rv-lbl-sheets .rv-lbl-b .rv-lbl-old{font-size:26pt;}' +
+    '#rv-lbl-sheets .rv-lbl-b .rv-lbl-new{font-size:78pt;}' +
+    '#rv-lbl-sheets .rv-lbl-b .rv-lbl-small{font-size:15pt;margin-top:1.5mm;}' +
+    '#rv-lbl-sheets .rv-lbl-b .rv-lbl-why{font-size:15pt;margin-top:2mm;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;max-height:2.3em;}' +
+    '#rv-lbl-sheets .rv-lbl-cut{position:absolute;left:0;width:210mm;height:0;border-top:0.2mm solid #999;}' +
+    '@media screen{#rv-lbl-sheets{background:#e2e8f0;padding:8mm 0;}#rv-lbl-sheets .rv-lbl-page{margin:0 auto 8mm;box-shadow:0 1px 6px rgba(0,0,0,.25);}' +
+      '#rv-lbl-sheets .rv-lbl{outline:0.2mm dashed #cbd5e1;}}' +
+    '@media print{#rv-lbl-sheets{padding:0;background:none;}#rv-lbl-sheets .rv-lbl-page{margin:0;box-shadow:none;}}';
+}
+function rvLblCellHtml(kind, x, test){
+  if(test) return '';
+  var it = x.it;
+  var name = '<div class="rv-lbl-name">' + esc(it.product_name || '') + '</div>';
+  var prices = '<div class="rv-lbl-prices rv-lbl-line">' +
+    (Number(it.std_price) > 0 ? '<span class="rv-lbl-old">' + esc(rvLblMoney(it.std_price)) + '</span>' + (kind === 'big' ? '<br>' : ' ') : '') +
+    '<span class="rv-lbl-new">' + esc(rvLblMoney(it.sale_price)) + '</span></div>';
+  var code = '<div class="rv-lbl-small rv-lbl-line rv-lbl-code">Код ' + esc(String(it.new_sap_code).trim()) + '</div>';
+  var unit = x.unit ? '<div class="rv-lbl-small rv-lbl-line rv-lbl-unit">№ ' + esc(x.unit) + '</div>' : '';
+  var date = rvLblDate(rvSub && rvSub.processed_at);
+  var when = date ? '<div class="rv-lbl-small rv-lbl-line rv-lbl-date">Преоценка ' + esc(date) + '</div>' : '';
+  var why = it.store_comment ? '<div class="rv-lbl-small rv-lbl-why' + (kind === 'small' ? ' rv-lbl-line' : '') + '">' + esc(it.store_comment) + '</div>' : '';
+  return name + prices + code + unit + when + why;
+}
+/* list — [{it, unit}]; start — от кой етикет на първия лист (само малкия);
+   test — само рамките на всички клетки на един лист. */
+function rvLblPagesHtml(kind, list, start, dx, dy, test){
+  var g = RV_LBL[kind] || RV_LBL.small;
+  var skip = kind === 'small' && !test ? Math.max(0, Math.min(20, (parseInt(start, 10) || 1) - 1)) : 0;
+  var total = test ? g.perPage : skip + list.length;
+  var pages = Math.max(1, Math.ceil(total / g.perPage));
+  var h = '';
+  for(var p = 0; p < pages; p++){
+    h += '<div class="rv-lbl-page" data-page="' + (p + 1) + '">';
+    if(kind === 'big') h += '<div class="rv-lbl-cut" style="top:' + rvLblMm(g.sy + dy) + ';"></div>';
+    for(var s = 0; s < g.perPage; s++){
+      var li = p * g.perPage + s - skip;
+      if(!test && (li < 0 || li >= list.length)) continue;
+      var k = s % g.cols, r = Math.floor(s / g.cols);
+      h += '<div class="rv-lbl ' + (kind === 'big' ? 'rv-lbl-b' : 'rv-lbl-s') + (test ? ' rv-lbl-frame' : '') + '" data-slot="' + (s + 1) + '"' +
+        ' style="left:' + rvLblMm(g.x0 + k * g.sx + dx) + ';top:' + rvLblMm(g.y0 + r * g.sy + dy) + ';">' +
+        rvLblCellHtml(kind, test ? null : list[li], test) + '</div>';
+    }
+    h += '</div>';
+  }
+  return { html: h, pages: pages };
+}
+function rvLblPrint(test){
+  var wrap = document.getElementById('mod-print');
+  if(!wrap || !document.getElementById('rv-lbl-modal')) return false;
+  var kind = (document.getElementById('rv-lbl-kind-big') || {}).checked ? 'big' : 'small';
+  var off = rvLblSaveOff();
+  var start = Math.max(1, Math.min(21, parseInt(v('rv-lbl-start'), 10) || 1));
+  var list = test ? [] : rvLblList(rvLblChecked());
+  if(!test && !list.length){ toast('Не е отметнат нито един ред за етикети', '#dc2626'); return false; }
+  var out = rvLblPagesHtml(kind, list, start, off.dx, off.dy, test);
+  var title = test ? 'Пробен лист — ' + (kind === 'big' ? 'голям А5' : 'малък 5,8 × 3,9') :
+    list.length + ' ' + (list.length === 1 ? 'етикет' : 'етикета') + ' · ' + out.pages + ' ' + (out.pages === 1 ? 'лист' : 'листа');
+  wrap.innerHTML = '<style>' + rvLblCss() + '</style>' +
+    '<div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px;">' +
+      '<div style="font-size:16px;font-weight:600;">🏷 Етикети — ' + esc(rvStore) + ' · ' + esc(title) + '</div>' +
+      '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай</button>' +
+      '<button onclick="rvLblBack()" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>' +
+      '<div style="font-size:12px;color:#92400e;width:100%;">' + esc(RV_LBL_HINT) + '</div>' +
+    '</div>' +
+    '<div id="rv-lbl-sheets" data-kind="' + kind + '">' + out.html + '</div>';
+  rvLblClose();
+  showModule('print');
+  return true;
+}
+/* @page{margin:0} е само за етикетите — махаме го, щом се излезе от печата. */
+function rvLblBack(){
+  var wrap = document.getElementById('mod-print');
+  if(wrap) wrap.innerHTML = '';
+  showModule('revaluation');
 }
 
 /* ─── Excel — кампания (лист на обект + „Общо") ────────── */
