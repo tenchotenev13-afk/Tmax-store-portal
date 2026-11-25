@@ -1,22 +1,23 @@
 /* Рекламации → Гаранционен справочник: ред „Гаранционни карти по сектори:“
-   (24.11.2026, решение на Тенчо). 8 сектора в фиксиран ред; клик показва
-   бланките на сектора (warranty_templates.sector), втори клик затваря.
-   Сектор без бланка е СИВ <button> с „няма бланка“ — не се скрива. Бланка без
-   сектор е само в общото меню „🖨 Гаранционна карта ▾“, което остава с всички.
-   „⚙️ Управление на записи“: падащо меню „Сектор“ → PATCH {sector}; грешка →
-   червен toast и изборът се връща.
+   (24.11.2026, решение на Тенчо; няколко сектора на бланка — 25.11.2026).
+   8 сектора в фиксиран ред; клик показва бланките на сектора
+   (warranty_templates.sectors — text[]; бланка в два сектора излиза и в двата),
+   втори клик затваря. Сектор без бланка е СИВ <button> с „няма бланка“ — не
+   се скрива. Бланка без сектор (null или []) е само в общото меню
+   „🖨 Гаранционна карта ▾“, което остава с всички.
+   „⚙️ Управление на записи“: 8 отметки на бланка → PATCH {sectors:[…]} в реда
+   на REF_SECTORS; без нито една отметка → {sectors:null}, не []; грешка →
+   червен toast и отметката се връща.
 
-   Мутационна проверка (24.11.2026, всяка върната след пуска):
-   М1 refSectorTemplates сравнява без сектор (filter → всички бланки)
-      → пада „Машини показва точно своите 3“ и „празните сектори са точно 6“.
-   М2 refToggleSector без затваряне (refOpenSector = idx винаги)
-      → пада „втори клик затваря списъка“.
-   М3 сектор без бланка се пропуска (return вместо сив бутон)
-      → пада „8 бутона в реда“ и „Градина е <button> с „няма бланка““.
-   Резултат: и четирите — exit 1.
-   М4 refTemplateSetSector праща sel.value без || null
-      → пада „празно → PATCH {sector:null}“.
-   Чистият код: exit 0.
+   Мутационна проверка (25.11.2026, всяка върната след пуска):
+   М1 refSectorTemplates гледа само първия сектор от масива
+      (refTplSectors(t)[0] === name)
+      → пада „hobby е и в Градина“ и броят „Градина (2)“.
+   М2 refTemplateToggleSector пише [] вместо null (val = next)
+      → пада „последната отметка → PATCH {sectors:null}“.
+   М3 без връщане на отметката при грешка (махнат cb.checked = !on)
+      → пада „отметката се връща“.
+   Резултат: и трите — exit 1. Чистият код: exit 0.
 
    Пускане: node tests/reference-sectors.test.js .
 */
@@ -30,15 +31,18 @@ const SECTORS = ['Машини','Градина','Осветление','Бои'
 
 function templates() {
   return [
-    { id: 't1', filename: 'hobby.pdf', label: 'Hobby', sort_order: 1, sector: 'Машини' },
-    { id: 't2', filename: 'heatmann.pdf', label: 'Heatmann', sort_order: 2, sector: null },
-    { id: 't3', filename: 'tayfun.pdf', label: 'Тайфун', sort_order: 3, sector: 'Машини' },
-    { id: 't4', filename: 'mehanik.pdf', label: 'Механик', sort_order: 4, sector: 'Машини' },
-    { id: 't6', filename: 'smesiteli.pdf', label: 'Смесители', sort_order: 6, sector: 'Баня' },
-    { id: 't9', filename: 'monoblok.pdf', label: 'Моноблокове', sort_order: 9, sector: 'Баня' },
-    { id: 't12', filename: 'vrati.pdf', label: 'Метални входни врати', sort_order: 12, sector: null }
+    { id: 't1', filename: 'hobby.pdf', label: 'Hobby', sort_order: 1, sectors: ['Машини', 'Градина'] },
+    { id: 't2', filename: 'heatmann.pdf', label: 'Heatmann', sort_order: 2, sectors: null },
+    { id: 't3', filename: 'tayfun.pdf', label: 'Тайфун', sort_order: 3, sectors: ['Машини'] },
+    { id: 't4', filename: 'mehanik.pdf', label: 'Механик', sort_order: 4, sectors: ['Машини'] },
+    { id: 't5', filename: 'oranzherii.pdf', label: 'Оранжерии', sort_order: 5, sectors: ['Градина'] },
+    { id: 't6', filename: 'smesiteli.pdf', label: 'Смесители', sort_order: 6, sectors: ['Баня'] },
+    { id: 't9', filename: 'monoblok.pdf', label: 'Моноблокове', sort_order: 9, sectors: ['Баня'] },
+    { id: 't11', filename: 'agromashini.pdf', label: 'Агро машини', sort_order: 11, sectors: [] },
+    { id: 't12', filename: 'vrati.pdf', label: 'Метални входни врати', sort_order: 12, sectors: null }
   ];
 }
+const N_TPL = 9;
 
 const STORE_USER = { email: 'tr@temax.bg', display_name: 'Троян', role: 'store', store_name: 'Троян' };
 const ADMIN_USER = { email: 'a@temax.bg', display_name: 'Админ', role: 'admin', store_name: 'Централен офис' };
@@ -59,6 +63,7 @@ function env(user, extra) {
   return h;
 }
 
+/* само <button> — „няма такъв бутон“ не бива да се заблуди от друг елемент */
 function sectorBtns(doc) {
   return Array.prototype.slice.call(doc.querySelectorAll('#ref-sector-wrap button'));
 }
@@ -68,6 +73,16 @@ function sectorBtn(doc, name) {
 function listHrefs(doc) {
   const l = doc.getElementById('ref-sector-list');
   return l ? Array.prototype.map.call(l.querySelectorAll('a'), a => a.getAttribute('href')) : null;
+}
+/* отметките на бланка в „Управление на записи“, в реда на показване */
+function checks(doc, id) {
+  const box = doc.querySelector('#ref-admin-ov [data-tpl-sectors="' + id + '"]');
+  return box ? Array.prototype.slice.call(box.querySelectorAll('input[type="checkbox"]')) : [];
+}
+/* истински клик по отметка: браузърът обръща checked, после пуска onchange */
+function clickCheck(w, cb) {
+  cb.checked = !cb.checked;
+  fire(w, cb, 'change');
 }
 
 (async function run() {
@@ -85,11 +100,13 @@ function listHrefs(doc) {
     ok('в зададения ред', btns.map(b => b.textContent.trim()).every((t, i) => t.indexOf(SECTORS[i]) === 0),
       btns.map(b => b.textContent.trim()).join(' | '));
 
-    const gr = sectorBtn(doc, 'Градина');
-    ok('Градина е <button> с „няма бланка“', !!gr && gr.tagName === 'BUTTON' && gr.textContent.indexOf('няма бланка') >= 0);
-    ok('Градина е сив и неактивен', gr && gr.disabled && /#94a3b8/.test(gr.getAttribute('style')));
-    ok('Машини няма „няма бланка“', sectorBtn(doc, 'Машини').textContent.indexOf('няма бланка') < 0);
-    ok('празните сектори са точно 6', btns.filter(b => b.textContent.indexOf('няма бланка') >= 0).length === 6);
+    ok('Машини (3)', sectorBtn(doc, 'Машини').textContent.indexOf('(3)') >= 0, sectorBtn(doc, 'Машини').textContent);
+    ok('Градина (2) — hobby се брои и там', sectorBtn(doc, 'Градина').textContent.indexOf('(2)') >= 0, sectorBtn(doc, 'Градина').textContent);
+    const os = sectorBtn(doc, 'Осветление');
+    ok('Осветление е <button> с „няма бланка“', !!os && os.tagName === 'BUTTON' && os.textContent.indexOf('няма бланка') >= 0);
+    ok('Осветление е сив и неактивен', os && os.disabled && /#94a3b8/.test(os.getAttribute('style')));
+    ok('празните сектори са точно 5', btns.filter(b => b.textContent.indexOf('няма бланка') >= 0).length === 5,
+      btns.filter(b => b.textContent.indexOf('няма бланка') >= 0).map(b => b.textContent.trim()).join(' | '));
 
     ok('преди клик няма списък', listHrefs(doc) === null);
     realClick(w, sectorBtn(doc, 'Машини'), 'Машини');
@@ -98,6 +115,10 @@ function listHrefs(doc) {
       ['hobby.pdf', 'tayfun.pdf', 'mehanik.pdf'].every(f => m.indexOf('warranty-templates/' + f) >= 0), String(m));
     ok('линковете се отварят в нов таб', Array.prototype.every.call(
       doc.querySelectorAll('#ref-sector-list a'), a => a.getAttribute('target') === '_blank'));
+    realClick(w, sectorBtn(doc, 'Градина'), 'Градина');
+    const g = listHrefs(doc);
+    ok('hobby е и в Градина (бланка в два сектора)', g && g.length === 2 &&
+      g.indexOf('warranty-templates/hobby.pdf') >= 0 && g.indexOf('warranty-templates/oranzherii.pdf') >= 0, String(g));
     realClick(w, sectorBtn(doc, 'Баня'), 'Баня');
     const b = listHrefs(doc);
     ok('клик на Баня сменя на смесители + моноблокове', b && b.length === 2 &&
@@ -105,29 +126,30 @@ function listHrefs(doc) {
     realClick(w, sectorBtn(doc, 'Баня'), 'Баня');
     ok('втори клик затваря списъка', listHrefs(doc) === null);
     /* празният бутон няма onclick (realClick би хвърлил) — истински DOM клик */
-    ok('празният сектор няма onclick', !sectorBtn(doc, 'Градина').getAttribute('onclick'));
-    sectorBtn(doc, 'Градина').dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+    ok('празният сектор няма onclick', !sectorBtn(doc, 'Осветление').getAttribute('onclick'));
+    sectorBtn(doc, 'Осветление').dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
     ok('клик на празен сектор не отваря нищо', listHrefs(doc) === null);
 
-    /* бланка без сектор — само в общото меню */
+    /* бланка без сектор (null или []) — само в общото меню */
     let all = [];
     sectorBtns(doc).filter(x => !x.disabled).forEach(x => {
       realClick(w, x, x.textContent);
       all = all.concat(listHrefs(doc) || []);
       realClick(w, x, x.textContent);
     });
-    ok('vrati.pdf не е в нито един сектор', all.indexOf('warranty-templates/vrati.pdf') < 0);
-    ok('heatmann.pdf не е в нито един сектор', all.indexOf('warranty-templates/heatmann.pdf') < 0);
+    ok('vrati.pdf (null) не е в нито един сектор', all.indexOf('warranty-templates/vrati.pdf') < 0);
+    ok('agromashini.pdf ([]) не е в нито един сектор', all.indexOf('warranty-templates/agromashini.pdf') < 0);
     const menu = doc.getElementById('ref-tpl-menu');
     const pick = Array.prototype.find.call(doc.querySelectorAll('#mod-reference button'),
       x => x.textContent.indexOf('Гаранционна карта') >= 0);
     realClick(w, pick, 'Гаранционна карта');
     ok('„Гаранционна карта“ отваря менюто', menu.style.display === 'block');
-    ok('общото меню е с всички 7 бланки', menu.querySelectorAll('a').length === 7);
+    ok('общото меню е с всички ' + N_TPL + ' бланки', menu.querySelectorAll('a').length === N_TPL);
     ok('общото меню има vrati.pdf', !!menu.querySelector('a[href="warranty-templates/vrati.pdf"]'));
+    ok('общото меню има hobby.pdf веднъж', menu.querySelectorAll('a[href="warranty-templates/hobby.pdf"]').length === 1);
   }
 
-  section('2. Управление на записи — избор на сектор прави PATCH');
+  section('2. Управление на записи — отметки правят PATCH {sectors}');
   {
     const h = env(ADMIN_USER);
     const { w, doc, calls } = h;
@@ -135,48 +157,79 @@ function listHrefs(doc) {
     await ticks();
     guard('openRefAdminList() не хвърля', () => w.openRefAdminList());
     const ov = doc.getElementById('ref-admin-ov');
-    const sels = ov ? ov.querySelectorAll('select[title="Сектор"]') : [];
-    ok('по едно меню „Сектор“ на бланка', sels.length === 7, 'намерени: ' + sels.length);
-    const opts = sels[0] ? Array.prototype.map.call(sels[0].options, o => o.value) : [];
-    ok('празно + 8-те сектора', opts.length === 9 && opts[0] === '' && SECTORS.every((s, i) => opts[i + 1] === s), opts.join('|'));
-    ok('hobby е с избран „Машини“', sels[0] && sels[0].value === 'Машини');
-    const vr = sels[6];
-    ok('vrati е „без сектор“', vr && vr.value === '');
-    vr.value = 'Строителство';
-    fire(w, vr, 'change');
+    ok('няма старото падащо меню „Сектор“', ov && ov.querySelectorAll('select[title="Сектор"]').length === 0);
+    ok('по 8 отметки на всяка от ' + N_TPL + ' бланки',
+      templates().every(t => checks(doc, t.id).length === 8));
+    const labels = checks(doc, 't1').map(c => c.parentNode.textContent.trim());
+    ok('отметките са в реда на REF_SECTORS', SECTORS.every((s, i) => labels[i] === s), labels.join('|'));
+    const hb = checks(doc, 't1');
+    ok('hobby: отметнати Машини и Градина, само те',
+      hb.map((c, i) => c.checked ? SECTORS[i] : null).filter(Boolean).join('|') === 'Машини|Градина');
+    ok('vrati: нищо отметнато', checks(doc, 't12').every(c => !c.checked));
+
+    /* vrati: отмятане в обратен ред — масивът пак е в реда на REF_SECTORS */
+    const vr = checks(doc, 't12');
+    clickCheck(w, vr[5]); /* Баня */
     await ticks();
-    const p = calls.patch[calls.patch.length - 1];
+    let p = calls.patch[calls.patch.length - 1];
     ok('PATCH към warranty_templates за vrati', p && p.table === 'warranty_templates' && /id=eq\.t12/.test(p.url), p && p.url);
-    ok('тяло {sector:"Строителство"}', p && JSON.stringify(p.body) === '{"sector":"Строителство"}', p && JSON.stringify(p.body));
+    ok('тяло {sectors:["Баня"]}', p && JSON.stringify(p.body) === '{"sectors":["Баня"]}', p && JSON.stringify(p.body));
+    clickCheck(w, vr[4]); /* Строителство */
+    await ticks();
+    p = calls.patch[calls.patch.length - 1];
+    ok('Строителство + Баня → в реда на REF_SECTORS', p && JSON.stringify(p.body) === '{"sectors":["Строителство","Баня"]}', p && JSON.stringify(p.body));
+    ok('тялото няма старото поле sector', p && !('sector' in p.body));
     const st = sectorBtn(doc, 'Строителство');
     ok('Строителство вече не е празен', st && !st.disabled && st.textContent.indexOf('няма бланка') < 0);
+    ok('Баня (3)', sectorBtn(doc, 'Баня').textContent.indexOf('(3)') >= 0, sectorBtn(doc, 'Баня').textContent);
     ok('зелен toast', h.toastColors.some(t => t[0].indexOf('Секторът е записан') >= 0));
-    vr.value = '';
-    fire(w, vr, 'change');
+
+    clickCheck(w, vr[5]); /* маха Баня */
     await ticks();
-    const p2 = calls.patch[calls.patch.length - 1];
-    ok('празно → PATCH {sector:null}', p2 && JSON.stringify(p2.body) === '{"sector":null}', p2 && JSON.stringify(p2.body));
+    p = calls.patch[calls.patch.length - 1];
+    ok('махане на Баня → {sectors:["Строителство"]}', p && JSON.stringify(p.body) === '{"sectors":["Строителство"]}', p && JSON.stringify(p.body));
+    clickCheck(w, vr[4]); /* маха последната */
+    await ticks();
+    p = calls.patch[calls.patch.length - 1];
+    ok('последната отметка → PATCH {sectors:null}, не []', p && JSON.stringify(p.body) === '{"sectors":null}', p && JSON.stringify(p.body));
     ok('Строителство пак е празен', sectorBtn(doc, 'Строителство').disabled);
+
+    /* hobby: махане на Машини оставя Градина */
+    clickCheck(w, checks(doc, 't1')[0]);
+    await ticks();
+    p = calls.patch[calls.patch.length - 1];
+    ok('hobby без Машини → {sectors:["Градина"]}', p && /id=eq\.t1$/.test(p.url) && JSON.stringify(p.body) === '{"sectors":["Градина"]}', p && (p.url + ' ' + JSON.stringify(p.body)));
+    ok('Машини (2)', sectorBtn(doc, 'Машини').textContent.indexOf('(2)') >= 0, sectorBtn(doc, 'Машини').textContent);
+    /* agromashini: [] от базата се третира като празно */
+    clickCheck(w, checks(doc, 't11')[1]);
+    await ticks();
+    p = calls.patch[calls.patch.length - 1];
+    ok('agromashini ([]) + Градина → {sectors:["Градина"]}', p && JSON.stringify(p.body) === '{"sectors":["Градина"]}', p && JSON.stringify(p.body));
   }
 
-  section('3. Грешка при запис — червен toast, изборът се връща');
+  section('3. Грешка при запис — червен toast, отметката се връща');
   {
-    const h = env(ADMIN_USER, { fail: { PATCH: { status: 400, body: { message: 'column "sector" does not exist' } } } });
+    const h = env(ADMIN_USER, { fail: { PATCH: { status: 400, body: { message: 'column "sectors" does not exist' } } } });
     const { w, doc, calls } = h;
     w.loadReference();
     await ticks();
     w.openRefAdminList();
-    const sel = doc.querySelectorAll('#ref-admin-ov select[title="Сектор"]')[6];
-    sel.value = 'Бои';
-    fire(w, sel, 'change');
+    const cb = checks(doc, 't12')[3]; /* Бои */
+    clickCheck(w, cb);
     await ticks();
     ok('PATCH е опитан', calls.patch.length === 1);
     const red = h.toastColors.find(t => t[1] === '#dc2626');
     ok('червен toast', !!red, JSON.stringify(h.toastColors));
-    ok('с причината от базата', red && red[0].indexOf('sector') >= 0);
+    ok('с причината от базата', red && red[0].indexOf('sectors') >= 0);
     ok('няма зелен toast', !h.toastColors.some(t => t[0].indexOf('Секторът е записан') >= 0));
-    ok('изборът се връща на „без сектор“', sel.value === '');
+    ok('отметката се връща (неотметната)', cb.checked === false);
     ok('Бои остава празен', sectorBtn(doc, 'Бои').disabled);
+    /* обратната посока: махане при грешка → отметката се връща отметната */
+    const hm = checks(doc, 't1')[0]; /* hobby, Машини */
+    clickCheck(w, hm);
+    await ticks();
+    ok('махане при грешка → отметката пак е отметната', hm.checked === true);
+    ok('Машини остава (3)', sectorBtn(doc, 'Машини').textContent.indexOf('(3)') >= 0);
   }
 
   section('4. Обектът не вижда „Управление на записи“');

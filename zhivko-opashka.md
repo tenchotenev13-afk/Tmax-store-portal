@@ -46,8 +46,8 @@
 - 24.11 · grafik_months.returned_at — timestamptz, NULL, без default
 - 24.11 · grafik_months.returned_by_name — text, NULL, без default
 
-(в базата от миграцията warranty_templates_sector, warranty-templates-sector-schema.sql, версия 20261124110821, приложена 24.11.2026; данни 24.11.2026 — 5 реда със стойност 'Машини' / 'Баня', останалите 7 NULL)
-- 24.11 · warranty_templates.sector — text, NULL, без default
+(в базата от миграцията warranty_templates_sectors, warranty-templates-sectors-schema.sql, версия 20261125182251, приложена 25.11.2026)
+- 25.11 · warranty_templates.sectors — text[], NULL, без default
 
 ## Потвърдено 23.11.2026
 
