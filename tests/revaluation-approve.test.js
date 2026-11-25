@@ -163,7 +163,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(6); a
     ok('Елица (admin, не регионален): без „Одобри"', !btn(mod(h), 'Одобри') && !btn(mod(h), 'Върни на обекта'));
     ok('rvCoDone() → отказ', (await h.w.rvCoDone()) === false && subPatches(h).length === 0);
     ok('rvCoEdit() → отказ', (await h.w.rvCoEdit('i-s-k', 'new_sap_code', '8014557')) === false && !h.calls.patch.some(x => x.table === 'revaluation_items'));
-    ok('rvVk11() / rvTransfer() → отказ', h.w.rvVk11() === false && (await h.w.rvTransfer()) === false && h.files.length === 0);
+    ok('rvVk11() / rvTransfer() → отказ', (await h.w.rvVk11()) === false && (await h.w.rvTransfer()) === false && h.files.length === 0);
     const mm = await h.w.rvMm41Collect();
     ok('rvMm41Collect → без редове', mm.ok && mm.rows.length === 0);
     await h.w.rvExportCampaign(); await ticks(4);

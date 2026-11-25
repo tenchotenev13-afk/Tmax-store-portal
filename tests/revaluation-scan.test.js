@@ -27,6 +27,11 @@
      M9  сравнение като низ (50 ≠ „50.0") → 1 („еднакъв % и цена … → подадена");
      M10 rvFillFromCat / rvAcPick без rvPctFromExisting → 4 („EAN на 53531 … → % = 30");
      M11 rvAcPick не чисти цената → 1 („цената от предишния артикул (3,19) е изчистена").
+   ОБЪРНАТО 25.11.2026 (решение на Тенчо): еднакъв артикул с различен % / цена
+   ВЕЧЕ минава „Подай" — правилото „един код = една цена" е при Контролинга
+   (tests/revaluation-diff-pct.test.js). Секции 11–12 заковават новото:
+   30 % и 60 % за един код се подават, а % във формата е винаги на бланката.
+   M6–M10 описват махнатия код и не важат.
 */
 'use strict';
 
@@ -258,69 +263,60 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
     proposed_price: Math.round(std * (1 - pct / 100) * 100) / 100, store_comment: 'дефект ' + id, sort_order: sort }, extra || {});
   const subPatch = h => h.calls.patch.filter(x => x.table === 'revaluation_submissions' && x.body.status);
   const badOf = (h, id) => { const el = h.doc.querySelector('#rv-row-' + id + ' .rv-bad'); return el ? el.textContent : ''; };
-  const MSG = 'Еднакъв артикул с различен % — в SAP е един преоценен код с една цена';
+  const OLD_MSG = 'Еднакъв артикул с различен %';
 
-  section('11. „Подай": един код с различен % → грешка на всеки от редовете');
+  section('11. „Подай": един код с различен % (30 / 60) → минава (25.11.2026)');
   {
-    const h = env({ subs: [SUB], items: [row('a', '53531', 50, 17.79, 1), row('b', '53531', 70, 17.79, 2), row('c', '77929', 50, 3.19, 3)] });
-    await h.w.loadRevaluation(); await ticks(5);
-    realClick(h.w, btn(mod(h), '✅ Подай')); await ticks(5);
-    ok('различен % → грешка на ред a', badOf(h, 'a').indexOf(MSG) >= 0, badOf(h, 'a'));
-    ok('…и на ред b', badOf(h, 'b').indexOf(MSG) >= 0, badOf(h, 'b'));
-    ok('другият артикул (77929) — без грешка', badOf(h, 'c') === '');
-    ok('подаването е спряно (нула PATCH на бланката, без confirm)', subPatch(h).length === 0 && h.calls.confirm.length === 0);
-    ok('toast „2 реда не минават"', h.calls.toast.some(t => t.indexOf('2 реда не минават') >= 0), h.calls.toast.join(' | '));
-  }
-  {
-    /* същият %, различна стандартна цена → различна предложена цена → пак грешка */
-    const h = env({ subs: [SUB], items: [row('a', '53531', 50, 17.79, 1), row('b', '53531', 50, 18.00, 2)] });
-    await h.w.loadRevaluation(); await ticks(5);
-    realClick(h.w, btn(mod(h), '✅ Подай')); await ticks(5);
-    ok('еднакъв %, различна предложена цена (8,90 / 9,00) → грешка и на двата', badOf(h, 'a').indexOf(MSG) >= 0 && badOf(h, 'b').indexOf(MSG) >= 0);
-    ok('…и не е подадена', subPatch(h).length === 0);
-  }
-  {
-    /* еднакъв % и цена → минава (граница: 50 и 50,0 са едно и също) */
-    const h = env({ subs: [SUB], items: [row('a', '53531', 50, 17.79, 1), row('b', '53531', '50.0', 17.79, 2, { proposed_price: '8.90' })] });
+    const h = env({ subs: [SUB], items: [row('a', '53531', 30, 17.79, 1), row('b', '53531', 60, 17.79, 2), row('c', '77929', 50, 3.19, 3)] });
     await h.w.loadRevaluation(); await ticks(5);
     realClick(h.w, btn(mod(h), '✅ Подай')); await ticks(8);
-    ok('един код, еднакъв % и цена (50 / „50.0", 8,9 / „8.90") → подадена', subPatch(h).length === 1 && !badOf(h, 'a') && !badOf(h, 'b'),
-      JSON.stringify(h.calls.toast));
+    ok('30 % и 60 % за 53531 → бланката е подадена (1 PATCH)', subPatch(h).length === 1, JSON.stringify(h.calls.toast));
+    ok('…без грешка на редовете', badOf(h, 'a') === '' && badOf(h, 'b') === '' && badOf(h, 'c') === '');
+    ok('…и без старото съобщение в toast', !h.calls.toast.some(t => String(t).indexOf(OLD_MSG) >= 0));
   }
   {
-    /* 8xxxxxx и неговият оригинал са РАЗЛИЧНИ кодове — не се сравняват */
+    /* същият %, различна стандартна цена → различна предложена цена → пак минава */
+    const h = env({ subs: [SUB], items: [row('a', '53531', 50, 17.79, 1), row('b', '53531', 50, 18.00, 2)] });
+    await h.w.loadRevaluation(); await ticks(5);
+    realClick(h.w, btn(mod(h), '✅ Подай')); await ticks(8);
+    ok('еднакъв %, различна предложена цена (8,90 / 9,00) → подадена', subPatch(h).length === 1 && !badOf(h, 'a') && !badOf(h, 'b'));
+  }
+  {
+    /* ред с истински проблем пак спира — проверката по ред не е пипана */
+    const h = env({ subs: [SUB], items: [row('a', '53531', 30, 17.79, 1), row('b', '53531', 60, 17.79, 2, { store_comment: '' })] });
+    await h.w.loadRevaluation(); await ticks(5);
+    realClick(h.w, btn(mod(h), '✅ Подай')); await ticks(5);
+    ok('ред без коментар пак спира „Подай" (само ред b)', subPatch(h).length === 0 && badOf(h, 'a') === '' && badOf(h, 'b').indexOf('няма коментар') >= 0);
+  }
+  {
     const h = env({ subs: [SUB], items: [row('a', '25298', 50, 5, 1), row('b', '8025298', 70, 5, 2)] });
     await h.w.loadRevaluation(); await ticks(5);
     realClick(h.w, btn(mod(h), '✅ Подай')); await ticks(8);
-    ok('25298 и 8025298 с различен % → не е конфликт, подадена', subPatch(h).length === 1);
+    ok('25298 и 8025298 с различен % → подадена', subPatch(h).length === 1);
   }
 
-  section('12. Формата: същият код → % от съществуващия ред, не от бланката');
+  section('12. Формата: същият код → % по подразбиране е на БЛАНКАТА (50), не на реда');
   {
     const h = env({ subs: [SUB], items: [row('a', '53531', 30, 17.79, 1)] });
     await openForm(h);
     ok('нова форма → % на бланката (50)', $(h, 'rv-a-pct').value === '50');
     await typeAndEnter(h, '3800123456789');
-    ok('EAN на 53531 (вече в бланката с 30 %) → % = 30', $(h, 'rv-a-pct').value === '30', $(h, 'rv-a-pct').value);
-    await typeAndEnter(h, '3800555000222');
-    realClick(h.w, h.doc.querySelectorAll('#rv-ac .rv-ean-pick')[0]); await ticks(1);
-    ok('нов код (77929) → обратно % на бланката (50)', $(h, 'rv-a-pct').value === '50');
-    /* SAP код, написан на ръка → onchange на полето */
-    $(h, 'rv-a-code').value = '53531'; fire(h.w, $(h, 'rv-a-code'), 'change');
-    ok('SAP код на ръка (onchange) → % = 30', $(h, 'rv-a-pct').value === '30');
+    ok('EAN на 53531 (вече в бланката с 30 %) → % остава 50', $(h, 'rv-a-pct').value === '50', $(h, 'rv-a-pct').value);
+    ok('полето за код вече няма onchange (без % от съществуващ ред)', !$(h, 'rv-a-code').getAttribute('onchange'));
     /* избор от автодопълването */
     h.w.rvAcRes = [{ sap_code: '53531', product_name: 'АРКА', default_unit: 'БР' }];
-    $(h, 'rv-a-pct').value = '50'; h.w.rvAcRender();
+    $(h, 'rv-a-std').value = '3,19'; h.w.rvAcRender();
     realClick(h.w, h.doc.querySelector('#rv-ac div[data-k="0"]')); await ticks(1);
-    ok('избор от автодопълването → % = 30', $(h, 'rv-a-pct').value === '30');
+    ok('избор от автодопълването → % остава 50', $(h, 'rv-a-pct').value === '50');
     ok('…и цената от предишния артикул (3,19) е изчистена', $(h, 'rv-a-std').value === '', $(h, 'rv-a-std').value);
     $(h, 'rv-a-std').value = '17,79';
-    $(h, 'rv-a-comment').value = 'втора бройка';
+    $(h, 'rv-a-pct').value = '60';
+    $(h, 'rv-a-comment').value = 'втора бройка, по-тежък дефект';
     realClick(h.w, addBtn(h)); await ticks(4);
     const p = itemPosts(h).pop();
-    ok('добавеният ред е с 30 % и същата цена (12,45)', p && p.body.discount_pct === 30 && p.body.proposed_price === 12.45, JSON.stringify(p && p.body));
+    ok('добавеният ред е със своя % (60) и цена (7,12)', p && p.body.discount_pct === 60 && p.body.proposed_price === 7.12, JSON.stringify(p && p.body));
     realClick(h.w, btn(mod(h), '✅ Подай')); await ticks(8);
-    ok('…и бланката минава „Подай"', subPatch(h).length === 1, JSON.stringify(h.w.rvBad));
+    ok('…и бланката (30 % и 60 % за 53531) минава „Подай"', subPatch(h).length === 1, JSON.stringify(h.w.rvBad));
   }
 
   section('13. ZSTOCK импорт при два реда с един код — обновява САМО последния по ред');
@@ -339,8 +335,8 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
     const a = h.w.rvItems.find(x => x.id === 'a'), b = h.w.rvItems.find(x => x.id === 'b');
     ok('b: qty 4, std 18,5', b.qty === 4 && b.std_price === 18.5);
     ok('a: непокътнат (qty 1, std 17,79)', a.qty === 1 && a.std_price === 17.79);
-    realClick(h.w, btn(mod(h), '✅ Подай')); await ticks(5);
-    ok('след импорта цените на a и b се разминават → „Подай" ги спира', badOf(h, 'a').indexOf(MSG) >= 0 && badOf(h, 'b').indexOf(MSG) >= 0 && subPatch(h).length === 0);
+    realClick(h.w, btn(mod(h), '✅ Подай')); await ticks(8);
+    ok('след импорта цените на a и b се разминават → „Подай" пак минава (25.11.2026)', !badOf(h, 'a') && !badOf(h, 'b') && subPatch(h).length === 1);
   }
 
   section('10. Нищо не се е провалило тихо');

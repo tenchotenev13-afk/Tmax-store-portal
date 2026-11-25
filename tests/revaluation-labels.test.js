@@ -1,6 +1,7 @@
 /* Преоценка — етап 3 от 3 (25.11.2026): етикети за преоценените бройки
-   (бутон „🏷 Етикети" при обработена бланка) + свеж прочит преди
-   одобрение от регионалния (rvRegApprove → rvSameCodeConflicts).
+   (бутон „🏷 Етикети" при обработена бланка). Свежият прочит преди
+   одобрение (rvRegApprove → rvSameCodeConflicts) е МАХНАТ на 25.11.2026 —
+   еднакъв артикул с различен % вече се одобрява; секция 8 е обърната.
 
    Интеграционно: shared.js + admin.js + stock-returns.js + push.js +
    email.js + loading.js + revaluation.js + revisions.js, в реда от
@@ -225,34 +226,40 @@ function setNum(h, id, val) { const el = $(h, id); el.value = String(val); fire(
     ok('апостроф / <b> — като текст', labels(h2)[0].querySelector('.rv-lbl-name').textContent === "O'NEIL <b>x</b>");
   }
 
-  section('8. rvRegApprove: свеж прочит → разминаване в % спира одобрението (реален клик)');
+  section('8. rvRegApprove: един код с различен % → одобрява се, без свеж прочит (реален клик, 25.11.2026)');
   {
     const SETTINGS = [{ key: 'revaluation_stores', value: 'Кърджали' }];
-    const sameOk = [IT('1', { sap_code: '14557', discount_pct: 50, proposed_price: 60 }), IT('2', { sap_code: '14557', discount_pct: 50, proposed_price: 60 })];
-    const fresh = [IT('1', { sap_code: '14557', discount_pct: 50, proposed_price: 60 }), IT('2', { sap_code: '14557', discount_pct: 30, proposed_price: 84 }),
-      IT('3', { sap_code: '99999', discount_pct: 50 })];
-    let h = env({ user: REG_ACC, subs: [SUB('submitted')], items: sameOk, fresh, settings: SETTINGS });
+    const diff = [IT('1', { sap_code: '14557', discount_pct: 30, proposed_price: 84 }), IT('2', { sap_code: '14557', discount_pct: 60, proposed_price: 48 })];
+    let h = env({ user: REG_ACC, subs: [SUB('submitted')], items: diff, settings: SETTINGS });
     await open(h, REG_ACC);
     const ap = btn(mod(h), '✅ Одобри');
     ok('бутонът „✅ Одобри" е там', !!ap);
     realClick(h.w, ap); await ticks(8);
-    const patches = h.calls.patch.filter(p => /revaluation_submissions/.test(p.url));
-    ok('разминаване в свежите редове → без PATCH', patches.length === 0, JSON.stringify(patches));
-    ok('червен toast с кода 14557 (и без 99999)', h.colors[h.colors.length - 1] === '#dc2626' && /НЕ е одобрена/.test(lastToast(h)) && /14557/.test(lastToast(h)) && !/99999/.test(lastToast(h)), lastToast(h));
-    ok('свеж GET към revaluation_items на бланката', h.calls.get.some(u => /revaluation_items\?submission_id=eq\.s-1&select=id,sap_code,discount_pct,proposed_price/.test(u)));
-    ok('статусът остава submitted', h.w.rvSub.status === 'submitted');
-
-    h = env({ user: REG_ACC, subs: [SUB('submitted')], items: sameOk, settings: SETTINGS });
-    await open(h, REG_ACC);
-    realClick(h.w, btn(mod(h), '✅ Одобри')); await ticks(8);
     const p2 = h.calls.patch.filter(p => /revaluation_submissions/.test(p.url));
-    ok('без разминаване → PATCH approved', p2.length === 1 && p2[0].body.status === 'approved', JSON.stringify(p2.map(p => p.body)));
+    ok('30 % и 60 % за 14557 → PATCH approved', p2.length === 1 && p2[0].body.status === 'approved', JSON.stringify(p2.map(p => p.body)));
+    ok('без свеж GET на редовете с id,sap_code,discount_pct', !h.calls.get.some(u => /select=id,sap_code,discount_pct,proposed_price/.test(u)));
+    ok('без червен toast', h.colors[h.colors.length - 1] !== '#dc2626', lastToast(h));
 
-    h = env({ user: REG_ACC, subs: [SUB('submitted')], items: sameOk, settings: SETTINGS, fail: { GET: /revaluation_items\?submission_id=eq\.s-1&select=id,sap_code/ } });
+    /* паднало четене на редовете вече не може да спре одобрението — няма такова четене */
+    h = env({ user: REG_ACC, subs: [SUB('submitted')], items: diff, settings: SETTINGS, fail: { GET: /revaluation_items\?submission_id=eq\.s-1&select=id,sap_code/ } });
     await open(h, REG_ACC);
     realClick(h.w, btn(mod(h), '✅ Одобри')); await ticks(8);
-    ok('паднал свеж прочит → без PATCH, червен toast', h.calls.patch.filter(p => /revaluation_submissions/.test(p.url)).length === 0 &&
-      h.colors[h.colors.length - 1] === '#dc2626' && /не се прочетоха/.test(lastToast(h)), lastToast(h));
+    ok('…и при „падащ" прочит пак approved', h.calls.patch.filter(p => /revaluation_submissions/.test(p.url) && p.body.status === 'approved').length === 1);
+  }
+
+  section('8б. Етикети: един артикул, два реда с различни преоценени кодове и цени → два различни етикета');
+  {
+    const items = [IT('1', { sap_code: '14557', sort_order: 1, discount_pct: 30, new_sap_code: '8014557', sale_price: 84 }),
+      IT('2', { sap_code: '14557', sort_order: 2, discount_pct: 60, new_sap_code: '8914557', sale_price: 48 })];
+    const h = env({ subs: [SUB('processed')], items, units: UNITS('1', 1).concat(UNITS('2', 1, 2)) });
+    await open(h);
+    await openModal(h);
+    await printIt(h);
+    const ls = labels(h);
+    const t = (l, sel) => { const e = l.querySelector(sel); return e ? e.textContent : null; };
+    ok('2 етикета', ls.length === 2, ls.length);
+    ok('първият: Код 8014557, 84,00 €', ls[0] && t(ls[0], '.rv-lbl-code') === 'Код 8014557' && t(ls[0], '.rv-lbl-new') === '84,00 €', ls[0] && t(ls[0], '.rv-lbl-code') + ' ' + t(ls[0], '.rv-lbl-new'));
+    ok('вторият: Код 8914557, 48,00 €', ls[1] && t(ls[1], '.rv-lbl-code') === 'Код 8914557' && t(ls[1], '.rv-lbl-new') === '48,00 €', ls[1] && t(ls[1], '.rv-lbl-code') + ' ' + t(ls[1], '.rv-lbl-new'));
   }
 
   section('9. processed: номерата под кода — само за четене (обект, ЦО, регионален, „📁 История“)');

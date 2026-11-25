@@ -217,7 +217,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     ok('supply: rvMm41() → отказ, без файл', r1 === false && !h.files.length);
     /* Бланката на обект за supply няма вход от 16.11.2026 (обзорът е
        „Нямаш достъп“) — проверява се само отказът на самата функция. */
-    const r2 = h.w.rvVk11(); await ticks(2);
+    const r2 = await h.w.rvVk11(); await ticks(2);
     ok('supply: rvVk11() → отказ, без файл', r2 === false && !h.files.length);
 
     h = env(); await openCo(h);

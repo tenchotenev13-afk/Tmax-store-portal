@@ -72,7 +72,7 @@ const pal = (store, date, v) => ({ id: store + '-' + date, store_name: store, re
     await h.w.rvCoOpenStore('Кърджали'); await ticks(5);
     h.doc.getElementById('rv-vk-from').value = '2026-10-20';
     let err = null, ret;
-    try { ret = h.w.rvVk11(); } catch (e) { err = e; }
+    try { ret = await h.w.rvVk11(); await ticks(4); } catch (e) { err = e; }
     ok('VK11: без изключение', !err, err && String(err));
     ok('VK11: файлът е направен (VK11-8-2026-10-20.xlsx)', ret === true && h.written.length === 1 && h.written[0].name === 'VK11-8-2026-10-20.xlsx',
       h.written.map(x => x.name).join(','));

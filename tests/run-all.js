@@ -90,6 +90,7 @@ const TESTS = [
   'revaluation-scan.test.js',
   'revaluation-units.test.js',
   'revaluation-labels.test.js',
+  'revaluation-diff-pct.test.js',
   'xlsx-real-datenf.test.js',
   'revision-schedule.test.js',
   'minusi.test.js',

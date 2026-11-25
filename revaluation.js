@@ -787,7 +787,7 @@ function rvAddRowHtml(){
   var f = function(id, ph, w, extra){ return '<input id="' + id + '" type="text" placeholder="' + ph + '" style="width:' + w + ';"' + (extra || '') + '>'; };
   var pct = rvPct();
   return '<div id="rv-add" style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:8px;">' +
-    '<div style="position:relative;">' + f('rv-a-code', 'SAP код или EAN', '130px', ' inputmode="numeric" oninput="rvAcSchedule(this.value)" onkeydown="rvCodeKey(event)" onchange="rvCodeChange(this.value)" autocomplete="off"') +
+    '<div style="position:relative;">' + f('rv-a-code', 'SAP код или EAN', '130px', ' inputmode="numeric" oninput="rvAcSchedule(this.value)" onkeydown="rvCodeKey(event)" autocomplete="off"') +
     '<div id="rv-ac" style="display:none;position:absolute;z-index:20;background:#fff;border:1px solid #cbd5e1;border-radius:6px;min-width:320px;"></div></div>' +
     '<button class="btn-sm" onclick="rvScanOpen()" title="Сканирай баркода с камерата">📷 Сканирай</button>' +
     f('rv-a-name', 'Описание', '220px') + f('rv-a-unit', 'МЕ', '50px') +
@@ -805,8 +805,6 @@ function rvCodeKey(ev){
   var code = v('rv-a-code');
   if(rvIsEan(code)) rvEanLookup(code);
 }
-/* SAP код, написан на ръка (без избор от списъка) — % от съществуващ ред. */
-function rvCodeChange(val){ if(!rvIsEan(val)) rvPctFromExisting(val); }
 function rvSetVal(id, val){ var el = document.getElementById(id); if(el) el.value = val == null ? '' : val; }
 function rvFocus(id){ var el = document.getElementById(id); if(el && el.focus) el.focus(); }
 /* Каталогът → полетата. Повторна преоценка (код 8xxxxxx): цената в каталога
@@ -823,18 +821,7 @@ function rvFillFromCat(p){
   if(std) std.placeholder = rep ? 'въведи текущата цена на обекта' : 'Ст. цена';
   var hint = document.getElementById('rv-a-std-hint');
   if(hint) hint.style.display = rep ? 'block' : 'none';
-  rvPctFromExisting(p.sap_code);
   rvFocus(rep ? 'rv-a-std' : 'rv-a-comment');
-}
-/* Кодът вече е в бланката → % във формата е този на съществуващия ред, не на
-   бланката: един артикул = един 8-код = една цена (rvSameCodeConflicts).
-   Нов код → процентът на бланката. Вика се при всяко попълване на кода. */
-function rvPctFromExisting(code){
-  var c = String(code == null ? '' : code).trim(), pct = rvPct();
-  for(var i = 0; i < rvItems.length; i++){
-    if(String(rvItems[i].sap_code) === c && rvItems[i].discount_pct != null){ pct = Number(rvItems[i].discount_pct); break; }
-  }
-  rvSetVal('rv-a-pct', pct == null ? '' : rvFmtQty(pct));
 }
 function rvEanLookup(code){
   /* Автодопълването не бива да изтегли резултат върху вече намерения артикул. */
@@ -939,7 +926,6 @@ function rvAcPick(k){
   /* Автодопълването не носи цена — изчисти останалата от предишно сканиране. */
   set('rv-a-std', '');
   var hint = document.getElementById('rv-a-std-hint'); if(hint) hint.style.display = 'none';
-  rvPctFromExisting(p.sap_code);
   rvAcRes = []; rvAcRender();
   var q = document.getElementById('rv-a-qty'); if(q) q.focus();
 }
@@ -1116,39 +1102,18 @@ function rvRowProblems(it){
   if(!(Number(it.proposed_price) > 0)) p.push('няма цена');
   return p;
 }
-/* Един артикул в един обект = един преоценен код 8xxxxxx (rvCoProposeCode от
-   оригиналния код) = ЕДНА цена във VK11 (по обект). Отделните редове с един
-   код остават — дефект по бройка — но % и предложената цена трябва да са
-   еднакви (решение на Тенчо 23.11.2026; въпросът към Елица —
-   claude/open/23-11-preocenka-same-code-8code.md). Връща {id: true} за всеки
-   ред от група с разминаване. */
-var RV_SAME_CODE_MSG = 'Еднакъв артикул с различен % — в SAP е един преоценен код с една цена';
-function rvSameCodeConflicts(items){
-  var key = function(x){ return x == null || x === '' ? '' : String(Number(x)); };
-  var groups = {}, out = {};
-  items.forEach(function(it){
-    var c = String(it.sap_code == null ? '' : it.sap_code).trim();
-    if(c) (groups[c] = groups[c] || []).push(it);
-  });
-  Object.keys(groups).forEach(function(c){
-    var g = groups[c];
-    if(g.length < 2) return;
-    var diff = g.some(function(it){
-      return key(it.discount_pct) !== key(g[0].discount_pct) || key(it.proposed_price) !== key(g[0].proposed_price);
-    });
-    if(diff) g.forEach(function(it){ out[it.id] = true; });
-  });
-  return out;
-}
+/* Еднакъв артикул с РАЗЛИЧЕН % / цена е позволен — всяка бройка със свой
+   дефект (решение на Тенчо 25.11.2026, заменя правилото от 23.11.2026).
+   „Един преоценен код = една цена" се пази при Контролинга: rvCoProposal не
+   предлага кода на ред с друга цена, а rvCodePriceConflicts спира „Готово" и
+   VK11. Обектът и регионалният не проверяват това. */
 function rvSubmit(){
   if(!rvCanSubmit()) return Promise.resolve(false);
   if(!rvItems.length){ toast('Няма редове — ако нямате артикули, ползвай „Нямаме за преоценка"', '#dc2626'); return Promise.resolve(false); }
   rvBad = {};
   var n = 0;
-  var same = rvSameCodeConflicts(rvItems);
   rvItems.forEach(function(it){
     var p = rvRowProblems(it);
-    if(same[it.id]) p.push(RV_SAME_CODE_MSG);
     if(p.length){ rvBad[it.id] = p; n++; }
   });
   if(n){ rvRender(); toast(n + ' ' + (n === 1 ? 'ред не минава' : 'реда не минават') + ' — маркирани са, бланката НЕ е подадена', '#dc2626'); return Promise.resolve(false); }
@@ -1259,24 +1224,8 @@ function rvRegButtonsHtml(){
 function rvRegApprove(){
   if(!rvRegCanAct()) return Promise.resolve(false);
   if(!confirm('Одобряване на бланката на ' + rvStore + '? Тя отива в Контролинг за обработка.')) return Promise.resolve(false);
-  /* Свеж прочит на редовете преди одобрение (25.11.2026): еднакъв артикул с
-     различен % / цена → НЕ се одобрява (rvSameCodeConflicts, както „Подай").
-     Паднало четене → също не. Въпросът към Елица остава отворен —
-     claude/open/23-11-preocenka-same-code-8code.md. */
-  var subId = rvSub.id;
-  return sbGetOk('revaluation_items', 'submission_id=eq.' + subId + '&select=id,sap_code,discount_pct,proposed_price').then(function(fr){
-    if(!fr.ok){ toast('Бланката не е одобрена — редовете не се прочетоха: ' + fr.error, '#dc2626'); return false; }
-    var same = rvSameCodeConflicts(fr.rows || []);
-    var codes = [];
-    (fr.rows || []).forEach(function(it){ var c = String(it.sap_code || '').trim(); if(same[it.id] && codes.indexOf(c) < 0) codes.push(c); });
-    if(codes.length){
-      toast('Бланката НЕ е одобрена — ' + RV_SAME_CODE_MSG.toLowerCase() + ': ' + codes.join(', ') + '. Върни я на обекта за поправка.', '#dc2626');
-      return false;
-    }
-    return rvRegApproveWrite();
-  });
-}
-function rvRegApproveWrite(){
+  /* Свежият прочит на редовете (051f057) пазеше само „еднакъв артикул =
+     еднакъв %" — махнат с правилото на 25.11.2026; нищо друго не проверяваше. */
   var patch = { status: 'approved', approved_at: new Date().toISOString(), approved_by: currentUser.display_name || currentUser.email };
   return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
     if(!res.ok){ toast('Бланката не е одобрена: ' + sbErrMsg(res), '#dc2626'); return false; }
@@ -1532,10 +1481,33 @@ function rvCoProposeCode(sap){
   if(/^\d{1,6}$/.test(s)) return '8' + ('000000' + s).slice(-6);
   return null;
 }
+/* Няколко реда с един sap_code (25.11.2026): обичайният код се предлага на
+   ПЪРВИЯ ред (най-малък sort_order, при равенство — по-ранният в списъка) и
+   на всички със СЪЩАТА цена като него. Ред с друга цена — без предложен код и
+   с бележка (rvCoOtherPrice): там Контролингът въвежда отделен код на ръка.
+   Цената на реда = записаната sale_price, иначе proposed_price; сравнение
+   като числа, закръглени до стотинка. */
+function rvCoPriceKey(it){
+  var x = it.sale_price != null && it.sale_price !== '' ? it.sale_price : it.proposed_price;
+  return x == null || x === '' ? null : rvRound2(Number(x));
+}
+function rvCoFirstOfCode(it, items){
+  var c = String(it.sap_code == null ? '' : it.sap_code).trim(), first = null;
+  (items || []).forEach(function(x){
+    if(String(x.sap_code == null ? '' : x.sap_code).trim() !== c) return;
+    if(!first || (Number(x.sort_order) || 0) < (Number(first.sort_order) || 0)) first = x;
+  });
+  return first || it;
+}
+function rvCoOtherPrice(it, items){
+  var f = rvCoFirstOfCode(it, items || rvItems);
+  return f !== it && rvCoPriceKey(f) !== rvCoPriceKey(it);
+}
+var RV_OTHER_PRICE_NOTE = 'същият артикул с друга цена — въведи отделен код';
 /* Предложенията само за ПРАЗНИТЕ розови полета; {} = няма какво да се предложи. */
-function rvCoProposal(it){
+function rvCoProposal(it, items){
   var p = {};
-  if(it.new_sap_code == null || it.new_sap_code === ''){ var c = rvCoProposeCode(it.sap_code); if(c) p.new_sap_code = c; }
+  if((it.new_sap_code == null || it.new_sap_code === '') && !rvCoOtherPrice(it, items)){ var c = rvCoProposeCode(it.sap_code); if(c) p.new_sap_code = c; }
   if(it.sale_price == null && it.proposed_price != null) p.sale_price = rvRound2(Number(it.proposed_price));
   /* Повторно преоценен код — само цена, без прехвърляне (14.11.2026). */
   if(it.co_qty == null && it.qty != null && !rvIsRepeat(it.sap_code)) p.co_qty = rvRound3(Number(it.qty));
@@ -1618,7 +1590,12 @@ function rvPinkCells(it, coEdit){
   var PINK = 'background:#fdf2f8;';
   /* Баджът „за създаване" / „в SAP" стои под новия код (30.10.2026, Елица). */
   var badge = rvCodeBadge(it);
-  var under = function(f){ return f === 'new_sap_code' && badge ? '<div class="rv-code-badge">' + badge + '</div>' : ''; };
+  /* Повторна преоценка: отделен код не влиза в MM41 и в прехвърлянето —
+     казва се под бележката (случаят е описан за Тенчо, 25.11.2026). */
+  var other = rvIsCoViewer() && (it.new_sap_code == null || it.new_sap_code === '') && rvCoOtherPrice(it)
+    ? '<div class="rv-code-other" style="font-size:10px;color:#b45309;max-width:150px;">' + esc(RV_OTHER_PRICE_NOTE) +
+      (rvIsRepeat(it.sap_code) ? ' (повторна преоценка — отделният код не влиза в MM41 и прехвърлянето)' : '') + '</div>' : '';
+  var under = function(f){ return f === 'new_sap_code' ? (badge ? '<div class="rv-code-badge">' + badge + '</div>' : '') + other : ''; };
   return ['new_sap_code', 'sale_price', 'co_qty', 'co_comment'].map(function(f){
     if(f === 'co_qty' && rvIsRepeat(it.sap_code)) return '<td class="rv-price-only" style="' + PINK + 'color:#6b7280;font-style:italic;">' + RV_PRICE_ONLY + '</td>';
     var v = fmt[f](val(f));
@@ -1661,12 +1638,18 @@ function rvCoPatchItem(it, p){
 function rvCoAcceptAll(){
   if(!rvCoCanEdit()) return Promise.resolve(0);
   var todo = rvItems.filter(function(it){ return Object.keys(rvCoProposal(it)).length > 0; });
-  if(!todo.length){ toast('Няма незаписани предложения'); return Promise.resolve(0); }
+  /* Редовете „същият артикул с друга цена" остават без код — казва се колко. */
+  var manualTxt = function(){
+    var m = rvItems.filter(function(it){ return (it.new_sap_code == null || it.new_sap_code === '') && rvCoOtherPrice(it); }).length;
+    return m ? ' · ' + m + (m === 1 ? ' ред остава' : ' реда остават') + ' за ръчен код (същият артикул с друга цена)' : '';
+  };
+  if(!todo.length){ var m0 = manualTxt(); toast('Няма незаписани предложения' + m0, m0 ? '#d97706' : undefined); return Promise.resolve(0); }
   if(!confirm('Да се запишат предложените стойности на ' + todo.length + ' реда?')) return Promise.resolve(0);
   var okN = 0, chain = Promise.resolve();
   todo.forEach(function(it){ chain = chain.then(function(){ return rvCoPatchItem(it, rvCoProposal(it)).then(function(ok){ if(ok) okN++; }); }); });
   return chain.then(function(){
-    if(okN < todo.length) toast((todo.length - okN) + ' реда не са записани', '#dc2626'); else toast('Записани: ' + okN + ' реда');
+    var mt = manualTxt();
+    if(okN < todo.length) toast((todo.length - okN) + ' реда не са записани' + mt, '#dc2626'); else toast('Записани: ' + okN + ' реда' + mt, mt ? '#d97706' : undefined);
     /* Като rvCoEdit: знакът „в SAP" / „за създаване" за току-що записаните
        кодове — без това се появяваше чак при ново отваряне (06.11.2026).
        Паднала порция → кодът остава непроверен → без знак. */
@@ -1704,6 +1687,40 @@ function rvCoButtonsHtml(){
 /* Отключване има смисъл само ако обектът може да подаде наново (19.10.2026). */
 var RV_UNLOCK_NO = 'Обектът не може да подаде наново — кампанията е извън прозореца или Преоценка е скрита за този обект';
 function rvCoCanUnlock(){ return rvStoreOn(rvStore) && rvCampaignOpenNow(rvCampaign()); }
+/* Пазачът (25.11.2026): един new_sap_code с две различни sale_price в една
+   бланка = две цени за един код във VK11. Спира „Готово за обект" и VK11.
+   Сравнение като ЧИСЛА (50 = 50.0), закръглени до стотинка. Ред без код или
+   без цена не участва (за „Готово" го хваща проверката по ред). */
+var RV_CODE_PRICE_MSG = 'един преоценен код с две различни цени — въведи отделен код';
+function rvCodePriceConflicts(rows){
+  var g = {}, out = { codes: [], ids: {} };
+  (rows || []).forEach(function(it){
+    var c = String(it.new_sap_code == null ? '' : it.new_sap_code).trim();
+    if(!c || it.sale_price == null || it.sale_price === '') return;
+    (g[c] = g[c] || []).push(it);
+  });
+  Object.keys(g).forEach(function(c){
+    var prices = {};
+    g[c].forEach(function(it){ prices[String(rvRound2(Number(it.sale_price)))] = 1; });
+    if(Object.keys(prices).length < 2) return;
+    out.codes.push(c);
+    g[c].forEach(function(it){ out.ids[it.id] = true; });
+  });
+  return out;
+}
+/* Проверката е върху СВЕЖ прочит от базата, не върху екрана. Паднало четене
+   = спира. what — какво не е направено, за съобщението. → Promise<bool>. */
+function rvCoCodePriceCheck(what){
+  return sbGetOk('revaluation_items', 'submission_id=eq.' + rvSub.id + '&select=id,new_sap_code,sale_price').then(function(fr){
+    if(!fr.ok){ toast(what + ' — редовете не се прочетоха: ' + fr.error, '#dc2626'); return false; }
+    var cf = rvCodePriceConflicts(fr.rows);
+    if(!cf.codes.length) return true;
+    Object.keys(cf.ids).forEach(function(id){ (rvBad[id] = rvBad[id] || []).push(RV_CODE_PRICE_MSG); });
+    rvRender();
+    toast(what + ' — един преоценен код с различни цени: ' + cf.codes.join(', ') + '. Редовете са маркирани — въведи отделен код или една цена.', '#dc2626');
+    return false;
+  });
+}
 function rvCoDone(){
   if(!rvIsCO() || !rvSub || rvSub.status !== 'approved') return Promise.resolve(false);
   rvBad = {};
@@ -1722,14 +1739,17 @@ function rvCoDone(){
     toast(n + (n === 1 ? ' ред е' : ' реда са') + ' без записан код/цена/прехвърлено — „Приеми предложените“ или попълни. Нищо не е обработено.', '#dc2626');
     return Promise.resolve(false);
   }
-  if(!confirm('Готово за ' + rvStore + '? Обектът ще получи известие и бланката се заключва.')) return Promise.resolve(false);
-  var patch = { status: 'processed', processed_at: new Date().toISOString(), processed_by: currentUser.display_name || currentUser.email };
-  return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
-    if(!res.ok){ toast('Бланката не е обработена: ' + sbErrMsg(res), '#dc2626'); return false; }
-    Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
-    toast('Обработена: ' + rvStore);
-    rvRender();
-    return rvCoNotifyDone(rvStore, rvSub, rvItems.slice()).then(function(){ return true; });
+  return (rvSub.no_items ? Promise.resolve(true) : rvCoCodePriceCheck('Нищо не е обработено')).then(function(okCodes){
+    if(!okCodes) return false;
+    if(!confirm('Готово за ' + rvStore + '? Обектът ще получи известие и бланката се заключва.')) return false;
+    var patch = { status: 'processed', processed_at: new Date().toISOString(), processed_by: currentUser.display_name || currentUser.email };
+    return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
+      if(!res.ok){ toast('Бланката не е обработена: ' + sbErrMsg(res), '#dc2626'); return false; }
+      Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
+      toast('Обработена: ' + rvStore);
+      rvRender();
+      return rvCoNotifyDone(rvStore, rvSub, rvItems.slice()).then(function(){ return true; });
+    });
   });
 }
 function rvCoUnlock(){
@@ -2528,12 +2548,17 @@ function rvVk11Aoa(items, fromIso, store){
     return [String(it.new_sap_code).trim(), rvSapUnit(it.unit).unit, Number(it.sale_price), from, to, store || ''];
   }));
 }
+/* → Promise<bool> от 25.11.2026 (пазачът чете свежо от базата). */
 function rvVk11(){
-  if(!rvIsCO() || !rvCoReady()) return false;
+  if(!rvIsCO() || !rvCoReady()) return Promise.resolve(false);
   var fromIso = v('rv-vk-from') || today();
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(fromIso)){ toast('Невалидна дата „Валидна от"', '#dc2626'); return false; }
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(fromIso)){ toast('Невалидна дата „Валидна от"', '#dc2626'); return Promise.resolve(false); }
   var aoa = rvVk11Aoa(rvSub.no_items ? [] : rvItems, fromIso, rvStore);
-  if(aoa.length < 2){ toast('Няма редове с преоценен код и цена — VK11 НЕ е направен', '#dc2626'); return false; }
+  if(aoa.length < 2){ toast('Няма редове с преоценен код и цена — VK11 НЕ е направен', '#dc2626'); return Promise.resolve(false); }
+  rvBad = {};
+  return rvCoCodePriceCheck('VK11 НЕ е направен').then(function(okCodes){ return okCodes ? rvVk11Write(aoa, fromIso) : false; });
+}
+function rvVk11Write(aoa, fromIso){
   var no = rvStoreNo(rvStore);
   /* МЕ не по SAP — предупреждение като при MM41, файлът пак се прави (20.10.2026).
      rvSapUnit е идемпотентна: SAP стойност остава ок, несведената — не. */
