@@ -31,3 +31,6 @@ docs/grafik/
 # Локални ключове (service ключът за ръчните *.live-test.ts) — никога в репото.
 .env
 .env.*
+
+# Ключът за огледалото (tools/mirror-key/make-mirror-key.js) — никога в репото.
+mirror-key.txt

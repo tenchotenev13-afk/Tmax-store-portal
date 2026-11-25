@@ -583,7 +583,8 @@ const TESTS = [
   'publish-instrukcii.test.js',
   'reference-template-picker.test.js',
   'reference-sectors.test.js',
-  'storage-files-index-readonly.test.js'
+  'storage-files-index-readonly.test.js',
+  'mirror-reader-key.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
