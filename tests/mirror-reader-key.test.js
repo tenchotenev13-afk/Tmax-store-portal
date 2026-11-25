@@ -14,14 +14,19 @@
       - при успешна самопроверка пише mirror-key.txt; токенът е HS256 с
         role=mirror_reader, exp = +2 години; тайната и токенът НЕ са в изхода;
       - при всяка провалена проверка (а–д) — exit 1 и НЯМА файл;
-      - записи само PATCH/POST към kasa_reports с тяло без редове.
+      - записи само PATCH/POST към kasa_reports с тяло без редове;
+      - PATCH носи реална колона (при '{}' PostgREST връща 204 без UPDATE),
+        204 на PATCH → провал;
+      - д) е Storage list на docs (docs е публичен — свалянето винаги е 200),
+        не сваляне: 0 обекта или 4xx → OK, >0 обекта → провал.
    3. .gitignore съдържа mirror-key.txt.
 
    ГРАНИЦИ: не вижда базата и не говори с живия проект. Истинската проверка
    е самопроверката при пускане на скрипта от Тенчо и сверката с
    set local role mirror_reader след миграцията.
 
-   Мутационна проверка (25.11.2026) — виж claude/log/2026-11-25-mirror-reader-key.md.
+   Мутационна проверка (25.11.2026) — виж claude/log/2026-11-25-mirror-reader-key.md
+   и claude/log/2026-11-25-mirror-key-selfcheck-fix.md.
 
    Пускане:  node tests/mirror-reader-key.test.js .
 */
@@ -42,6 +47,9 @@ const SCRIPT = path.join(ROOT, 'tools', 'mirror-key', 'make-mirror-key.js');
 const EIGHT = ['daily_turnover', 'kasa_documents', 'kasa_glavna', 'kasa_reports',
   'kasa_storno', 'kasa_storno_items', 'kasa_zoborot', 'storage_files_index'];
 const SEVEN = EIGHT.filter(t => t !== 'storage_files_index');
+// Колоните на kasa_reports, в които PATCH на самопроверката може да пише
+// (сверени в базата 25.11.2026: information_schema.columns).
+const KASA_REPORTS_COLS = ['status', 'return_reason', 'confirmed_by', 'ready_by', 'returned_by'];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 (async function () {
@@ -124,6 +132,9 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
         const b = u.pathname.split('/')[5];
         key = 'DL ' + b;
         status = b === 'kasa-docs' ? 200 : 400;
+      } else if (u.pathname.startsWith('/storage/v1/object/list/')) {
+        key = 'LIST ' + u.pathname.split('/')[5];
+        status = 200; json = [];
       } else { key = 'OTHER'; status = 500; }
       if (over[key] !== undefined) {
         const o = over[key];
@@ -188,16 +199,26 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     ok(!r.out.includes(token) && !r.out.includes(parts[2]), 'токенът НЕ е в изхода');
     ok(!r.calls.some(c => JSON.stringify(c).includes(SECRET)), 'тайната не излиза в нито една заявка');
     ok(r.calls.every(c => c.headers.Authorization === 'Bearer ' + token), 'всяка заявка е с Authorization: Bearer <ключа>');
-    const writes = r.calls.filter(c => c.method !== 'GET');
+    const writes = r.calls.filter(c => c.method !== 'GET' && c.url.includes('/rest/v1/'));
+    const stPosts = r.calls.filter(c => c.method !== 'GET' && !c.url.includes('/rest/v1/'));
+    ok(stPosts.length === 1 && new URL(stPosts[0].url).pathname === '/storage/v1/object/list/docs', 'извън REST единственият не-GET е Storage list на docs (четене)');
     ok(writes.length === 2 && writes.every(c => /\/rest\/v1\/kasa_reports(\?|$)/.test(c.url)), 'записите са само PATCH/POST към kasa_reports');
     const patch = writes.find(c => c.method === 'PATCH');
     const post = writes.find(c => c.method === 'POST');
     ok(patch && /created_at=lt\.1900-01-01/.test(patch.url), 'PATCH е с филтър, който не хваща ред');
     ok(post && post.body === '[]', 'POST е с празен масив');
+    let pb = null; try { pb = JSON.parse(patch && patch.body); } catch (e) { pb = null; }
+    ok(patch && patch.body !== '{}' && pb && typeof pb === 'object' && Object.keys(pb).length > 0,
+      'PATCH НЕ е с празно тяло (при {} PostgREST връща 204 без UPDATE)');
+    ok(pb && Object.keys(pb).every(k => KASA_REPORTS_COLS.includes(k)), 'PATCH тялото е с реални колони на kasa_reports (' + (pb ? Object.keys(pb).join(',') : '-') + ')');
     EIGHT.forEach(t => ok(r.calls.some(c => c.method === 'GET' && c.url.includes('/rest/v1/' + t + '?select=*')), 'а) GET ' + t));
     ok(r.calls.some(c => c.url.includes('/object/authenticated/kasa-docs/x/y%20z.pdf')), 'б) сваля файл от kasa-docs (пътят е кодиран)');
     ok(r.calls.some(c => c.url.includes('/rest/v1/users')), 'в) пробва users');
-    ok(r.calls.some(c => c.url.includes('/object/authenticated/docs/')), 'д) пробва bucket docs');
+    const lst = r.calls.filter(c => new URL(c.url).pathname === '/storage/v1/object/list/docs');
+    ok(lst.length === 1 && lst[0].method === 'POST', 'д) Storage list на docs (POST /object/list/docs)');
+    let lb = null; try { lb = JSON.parse(lst[0] && lst[0].body); } catch (e) { lb = null; }
+    ok(lb && lb.prefix === '', 'д) list е с prefix ""');
+    ok(!r.calls.some(c => c.url.includes('/object/authenticated/docs/') || c.url.includes('/object/public/docs/')), 'д) НЕ сваля от docs (публичен — свалянето не доказва нищо)');
   }
   // провал на всяка проверка → без файл
   const FAILS = [
@@ -207,14 +228,25 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     ['б) няма файл в kasa-docs', { 'GET storage_files_index': { status: 200, json: [] } }],
     ['в) users 200', { 'GET users': 200 }],
     ['г) PATCH 204', { 'PATCH kasa_reports': 204 }],
+    ['г) PATCH 200', { 'PATCH kasa_reports': 200 }],
     ['г) POST 201', { 'POST kasa_reports': 201 }],
-    ['д) docs 200', { 'DL docs': 200 }],
+    ['д) list docs — 1 обект', { 'LIST docs': { status: 200, json: [{ name: 'a.pdf' }] } }],
+    ['д) list docs — 3 обекта', { 'LIST docs': { status: 200, json: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] } }],
+    ['д) list docs — 200 без масив', { 'LIST docs': { status: 200, json: { error: 'x' } } }],
+    ['д) list docs — 500', { 'LIST docs': 500 }],
   ];
   for (const [name, over] of FAILS) {
     const dir = freshDir();
     const r = await run({ SUPABASE_JWT_SECRET: SECRET }, over, dir);
     ok(r.code === 1 && fs.readdirSync(dir).length === 0, 'провал „' + name + '" → exit 1, няма файл (' + r.code + ')');
     ok(!r.out.includes(SECRET), 'провал „' + name + '" — тайната не е в изхода');
+  }
+  // д) отказ 4xx при списъка също е OK; публичното сваляне вече не участва
+  for (const [name, over] of [['д) list docs 400', { 'LIST docs': 400 }], ['д) list docs 403', { 'LIST docs': 403 }],
+    ['д) сваляне от docs 200 (публичен) — не се пита', { 'DL docs': 200 }]]) {
+    const dir = freshDir();
+    const r = await run({ SUPABASE_JWT_SECRET: SECRET }, over, dir);
+    ok(r.code === 0 && fs.existsSync(path.join(dir, M.OUT_NAME)), '„' + name + '" → exit 0, файлът е записан (' + r.code + ')');
   }
   // мрежова грешка
   {

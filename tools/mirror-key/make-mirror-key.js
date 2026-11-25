@@ -34,6 +34,8 @@ var OTHER_BUCKET = 'docs';
 var FORBIDDEN_TABLE = 'users';
 var VALID_YEARS = 2;
 var OUT_NAME = 'mirror-key.txt';
+// Колона на kasa_reports (сверена в базата 25.11.2026) — виж г).
+var PATCH_BODY = JSON.stringify({ status: 'mirror-check' });
 
 function b64url(buf) {
   return Buffer.from(buf).toString('base64')
@@ -117,9 +119,12 @@ async function selfCheck(token, fetchFn) {
 
   // г) запис в kasa_reports → отказ. PATCH с филтър, който не хваща ред;
   // POST с празен масив — не вмъква нищо дори при грешно дадено право.
+  // Тялото на PATCH носи РЕАЛНА колона: при '{}' PostgREST изобщо не пуска
+  // UPDATE и връща 204 без проверка на правата (първото пускане, 25.11.2026).
+  // created_at < 1900 не хваща нито един ред, затова стойността не се пише.
   var writeH = Object.assign({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }, H);
   try {
-    var p = await fetchFn(SB_URL + '/rest/v1/kasa_reports?created_at=lt.1900-01-01', { method: 'PATCH', headers: writeH, body: '{}' });
+    var p = await fetchFn(SB_URL + '/rest/v1/kasa_reports?created_at=lt.1900-01-01', { method: 'PATCH', headers: writeH, body: PATCH_BODY });
     line(p.status === 401 || p.status === 403, 'г) PATCH kasa_reports → ' + p.status + ' (очаква се отказ 401/403)');
   } catch (e) {
     line(false, 'г) PATCH kasa_reports → мрежова грешка');
@@ -131,24 +136,28 @@ async function selfCheck(token, fetchFn) {
     line(false, 'г) POST kasa_reports → мрежова грешка');
   }
 
-  // д) сваляне от друг bucket → отказ
-  var otherName = null;
+  // д) друг bucket → ролята не го вижда. Не е „отказ при сваляне": docs е
+  // public=true (като bulletin-files, contacts, Pictures — само kasa-docs е
+  // private), значи файлът му се сваля от всеки и без ключ; на 25.11.2026
+  // такава проба върна 200 при напълно верни права. Проверява се списъкът:
+  // политиката на mirror_reader в storage.objects е само за kasa-docs, тоест
+  // Storage list за docs трябва да е празен (или отказ 4xx).
   try {
-    var lo = await fetchFn(SB_URL + '/rest/v1/storage_files_index?select=name&bucket_id=eq.' + OTHER_BUCKET + '&limit=1', { method: 'GET', headers: H });
-    if (lo.status === 200) {
-      var arr2 = await lo.json();
-      if (arr2 && arr2.length) otherName = arr2[0].name;
+    var o = await fetchFn(SB_URL + '/storage/v1/object/list/' + OTHER_BUCKET, {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, H),
+      body: JSON.stringify({ prefix: '', limit: 1 })
+    });
+    if (o.status === 200) {
+      var items = null;
+      try { items = await o.json(); } catch (e) { items = null; }
+      var n = Array.isArray(items) ? items.length : -1;
+      line(n === 0, 'д) списък на ' + OTHER_BUCKET + ' → 200, обекти: ' + (n < 0 ? '?' : n) + ' (очаква се 0)');
+    } else {
+      line(o.status >= 400 && o.status < 500, 'д) списък на ' + OTHER_BUCKET + ' → ' + o.status + ' (очаква се 0 обекта или отказ 4xx)');
     }
-  } catch (e) { /* отчита се долу */ }
-  if (!otherName) {
-    line(false, 'д) няма файл в ' + OTHER_BUCKET + ' за проба');
-  } else {
-    try {
-      var o = await fetchFn(SB_URL + '/storage/v1/object/authenticated/' + OTHER_BUCKET + '/' + encPath(otherName), { method: 'GET', headers: H });
-      line(o.status >= 400, 'д) сваляне от ' + OTHER_BUCKET + ' → ' + o.status + ' (очаква се отказ)');
-    } catch (e) {
-      line(false, 'д) сваляне от ' + OTHER_BUCKET + ' → мрежова грешка');
-    }
+  } catch (e) {
+    line(false, 'д) списък на ' + OTHER_BUCKET + ' → мрежова грешка');
   }
 
   return { ok: ok, lines: lines };
@@ -200,7 +209,7 @@ async function main(opts) {
   return 0;
 }
 
-module.exports = { main: main, signToken: signToken, selfCheck: selfCheck, TABLES: TABLES, ROLE: ROLE, OUT_NAME: OUT_NAME };
+module.exports = { main: main, PATCH_BODY: PATCH_BODY, signToken: signToken, selfCheck: selfCheck, TABLES: TABLES, ROLE: ROLE, OUT_NAME: OUT_NAME };
 
 if (require.main === module) {
   main().then(function (code) { process.exitCode = code; }, function () {
