@@ -1551,6 +1551,14 @@ push по вариант А — решение на Тенчо 24.11, виж л�
 „Пожелателна преоценка 11.2026“ (89530, чернова, П0001–П0002 и П0004–П0005)
 остават нарочно — решение на Тенчо 25.11, за да ги види Теодор. Проба на
 истински перфориран лист и на А5 — `claude/open/25-11-preocenka-etiketi-proba.md`.
+Заглавен ред (25.11, сесия preocenka-zaglaven-red): от 1200px общото
+`.tbl-compact thead th{position:sticky;top:var(--nav-h)}` в кутията със скрол
+(`#mod-revaluation .tbl-compact{overflow-x:auto}`) сваляше заглавието 58px върху
+редовете — списък на обектите, бланка, прозорец „🏷 Етикети“ (той е в body, не в
+модула). Поправка само в `index.html`: `#mod-revaluation .tbl-compact thead th,
+#rv-lbl-modal .tbl-compact thead th{top:0}` в `@media(min-width:1200px)`; в
+прозореца (max-height:40vh) заглавието стои горе при скрол. Тест: раздел 1 на
+`tests/korekcii-1511.test.js`.
 
 **Сигурност** — `users` затворен (30.09). Етап 5б (01.11): колоната
 `users.password` махната (`users-drop-password-schema.sql`, миграция

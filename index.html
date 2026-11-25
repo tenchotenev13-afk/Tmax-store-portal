@@ -196,6 +196,14 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 #mod-revaluation .tbl-compact{overflow-x:auto;}
 #mod-revaluation .tbl-compact table{table-layout:auto;}
 #mod-revaluation .tbl-rv-sheet td:nth-child(2),#mod-revaluation .tbl-rv-sheet td:nth-child(5){overflow-wrap:anywhere;min-width:160px;}
+/* Заглавният ред (25.11.2026): от 1200px общото правило закача thead на top:var(--nav-h),
+   но кутията тук е със скрол, става контейнер за sticky и заглавието падаше с височината на
+   лентата ВЪРХУ редовете. top:0 — в списъка и бланката (без max-height) е като static, а в
+   прозореца „🏷 Етикети“ (max-height:40vh) държи заглавието видимо при скрол. Прозорецът е
+   в body, не в #mod-revaluation — затова #rv-lbl-modal изрично. */
+@media(min-width:1200px){
+  #mod-revaluation .tbl-compact thead th,#rv-lbl-modal .tbl-compact thead th{top:0;}
+}
 /* Разлики (.tbl-sd-compact), изглед „Решени редове“: 7 колони (8 в „Междускладови“ — там е
    „Склад · Магазин“). Общият модел е .tbl-compact: под 1200px — хоризонтален скрол в кутията,
    от 1200px — закачен thead. Ширините са по КЛАС на клетката (sd-c-*), не по :nth-child, защото

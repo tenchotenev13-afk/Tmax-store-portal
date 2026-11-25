@@ -91,6 +91,17 @@ const inRvCompact = h => {
     ok('след @media блока на .tbl-compact и извън него', media > 0 && mine > mediaEnd, media + ' / ' + mediaEnd + ' / ' + mine);
     ok('глобалните .tbl-compact правила — непипнати', INDEX.indexOf('.tbl-compact table{width:100%;table-layout:fixed;}') >= 0 && INDEX.indexOf('  .tbl-compact{overflow:visible;}') >= 0);
     ok('нито едно ново правило без #mod-revaluation', !/^\.tbl-compact td\{[^}]*overflow-wrap/m.test(INDEX));
+    /* Заглавният ред (25.11.2026): от 1200px общото правило закача thead на --nav-h; в кутия със
+       скрол това го сваляше 58px върху редовете (мерено в браузър: 351 срещу 327 в списъка).
+       Прозорецът „🏷 Етикети“ е в body — затова и #rv-lbl-modal. */
+    const thRule = '@media(min-width:1200px){\n  #mod-revaluation .tbl-compact thead th,#rv-lbl-modal .tbl-compact thead th{top:0;}\n}';
+    const thAt = INDEX.indexOf(thRule);
+    ok('thead в Преоценка и в „🏷 Етикети“: top:0 от 1200px', thAt > 0);
+    ok('…след общото sticky правило', thAt > mediaEnd, mediaEnd + ' / ' + thAt);
+    ok('общото .tbl-compact thead th — непипнато', INDEX.indexOf('  .tbl-compact thead th{position:sticky;top:var(--nav-h,58px);z-index:2;background:var(--surf);}') >= 0);
+    const RVJS = fs.readFileSync(path.join(ROOT, 'revaluation.js'), 'utf8');
+    ok('#rv-lbl-modal се закача в body (не в #mod-revaluation) — затова правилото го назовава изрично',
+      /d\.id = 'rv-lbl-modal';\s*document\.body\.appendChild\(d\);/.test(RVJS));
   }
 
   section('1б. Всички изгледи рисуват таблицата в .tbl-compact вътре в #mod-revaluation');
