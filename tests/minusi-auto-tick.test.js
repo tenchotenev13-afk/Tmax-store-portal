@@ -31,6 +31,10 @@
      M7 стъпката след темите в Deno.serve: пада 2.10.
      M4b съществуващият ред не се гледа при подбора на кандидати (само при
          записа): пада 2.5 „движенията не се четат".
+   Мутационна проверка (25.11.2026, v31 — късно качване от 18:00 вчера):
+     L1 прагът махнат (всяко вчерашно качване): пада 2.6 и 2.11 „17:59“ / „17:04“;
+     L2 прагът 18:01: пада 2.11 „точно 18:00“ / DST „18:00“;
+     L3 часът по UTC вместо по София: пада 2.11 „точно 18:00“ / DST.
    Пускане: node tests/minusi-auto-tick.test.js . */
 'use strict';
 
@@ -58,7 +62,7 @@ function endOfFn(lines, start) {
   }
   return lines.length - 1;
 }
-const REQUIRED = ['runMinusAutoTick', 'mnuTickDecide', 'bgNow'];
+const REQUIRED = ['runMinusAutoTick', 'mnuTickDecide', 'bgNow', 'mnuUploadCountsFor'];
 function buildModule() {
   const lines = fs.readFileSync(SRC, 'utf8').split(/\r?\n/);
   const missing = [];
@@ -273,9 +277,10 @@ const at = (d, hm) => new Date(d + 'T' + hm + ':00+02:00');
     let d = mkData({ uploads: [{ uploaded_at: '2026-10-28T22:30:00+00:00' }] }); /* 00:30 София, 29.10 */
     let r = await tick(d, at('2026-10-29', '10:00'));
     ok('22:30 UTC на 28.10 = 00:30 на 29.10 София → брои се за днес', r.rows.length === 2, JSON.stringify(r.res.first_upload));
-    d = mkData({ uploads: [{ uploaded_at: '2026-10-28T21:30:00+00:00' }] }); /* 23:30 София, 28.10 */
+    /* До v31 тук беше „23:30 вчера → НЕ е днес“; от 25.11.2026 вчера след 18:00 се брои (2.11). */
+    d = mkData({ uploads: [{ uploaded_at: '2026-10-28T15:30:00+00:00' }] }); /* 17:30 София, 28.10 */
     r = await tick(d, at('2026-10-29', '10:00'));
-    ok('21:30 UTC на 28.10 = 23:30 на 28.10 София → НЕ е днес', r.rows.length === 0, JSON.stringify(r.res.first_upload));
+    ok('15:30 UTC на 28.10 = 17:30 на 28.10 София → НЕ е днес', r.rows.length === 0, JSON.stringify(r.res.first_upload));
   }
 
   section('2.7 Уикенд, ден извън due_weekdays, изключена седмица, невключен обект');
@@ -318,6 +323,50 @@ const at = (d, hm) => new Date(d + 'T' + hm + ':00+02:00');
     const iTick = serve.indexOf('await runMinusAutoTick(supabase, bg, dryRun)', serve.indexOf('notification_topics'));
     const iTopics = serve.indexOf('results.push(await runTopic(supabase, t, bg, dryRun))');
     ok('в планирания клон runMinusAutoTick е преди runTopic', iTick > 0 && iTopics > 0 && iTick < iTopics, iTick + ' / ' + iTopics);
+  }
+
+  section('2.11 Късно качване: вчера от 18:00 по София се брои за днес (v31, 25.11.2026)');
+  {
+    /* 25.11.2026 (сряда) е зимно време — UTC+2. */
+    const Z = (iso) => new Date(iso);
+    const one = async (upIso, whenIso, label, exp, expFirst) => {
+      const d = mkData({ uploads: upIso ? [{ uploaded_at: upIso }] : [] });
+      const r = await tick(d, Z(whenIso));
+      ok(label + ' → ' + exp + ' отметки', r.rows.length === exp, JSON.stringify(r.res.first_upload) + ' ' + JSON.stringify((r.res.planned || []).map(p => p.reshenie)));
+      if (expFirst !== undefined) ok('… first_upload = ' + expFirst, r.res.first_upload === expFirst, JSON.stringify(r.res.first_upload));
+      return r;
+    };
+    await one('2026-11-24T21:25:00+00:00', '2026-11-25T08:00:00Z', 'вчера 23:25 София, днес 10:00', 2, '2026-11-24T21:25:00+00:00');
+    await one('2026-11-24T15:59:00+00:00', '2026-11-25T08:00:00Z', 'вчера 17:59 София, днес 10:00', 0, null);
+    await one('2026-11-24T16:00:00+00:00', '2026-11-25T08:00:00Z', 'вчера точно 18:00 София, днес 10:00', 2, '2026-11-24T16:00:00+00:00');
+    await one('2026-11-24T22:16:00+00:00', '2026-11-25T08:00:00Z', 'днес 00:16 София (както досега)', 2, '2026-11-24T22:16:00+00:00');
+    await one('2026-11-24T15:04:00+00:00', '2026-11-25T08:00:00Z', 'вчера 17:04 София (за вчера, не за днес)', 0, null);
+    await one('2026-11-25T15:04:00+00:00', '2026-11-25T15:30:00Z', 'днес 17:04 София, кронът 17:30 (както досега)', 2, '2026-11-25T15:04:00+00:00');
+    await one('2026-11-23T21:25:00+00:00', '2026-11-25T08:00:00Z', 'ЗАВЧЕРА 23:25 София', 0, null);
+    await one(null, '2026-11-25T08:00:00Z', 'без качване, днес 10:00', 0, null);
+    await one(null, '2026-11-25T18:00:00Z', 'без качване, днес 20:00 (due_time, както досега)', 2, null);
+    {
+      const d = mkData({ uploads: [{ uploaded_at: '2026-11-24T15:04:00+00:00' }, { uploaded_at: '2026-11-24T21:25:00+00:00' }, { uploaded_at: '2026-11-25T06:00:00+00:00' }] });
+      const r = await tick(d, Z('2026-11-25T08:00:00Z'), true);
+      ok('17:04 + 23:25 вчера + 08:00 днес → first_upload е 23:25 вчера (17:04 прескочено)', r.res.first_upload === '2026-11-24T21:25:00+00:00', JSON.stringify(r.res.first_upload));
+    }
+    {
+      const d = mkData({ uploads: [{ uploaded_at: '2026-11-24T21:25:00+00:00' }], movs: ONE_OPEN_GD });
+      const r = await tick(d, Z('2026-11-25T08:00:00Z'));
+      ok('вчера 23:25 + 1 непопълнен в ГД → само Монтана', r.rows.map(pair).join('|') === 'обща:Монтана', r.rows.map(pair).join('|'));
+    }
+    /* Граница при смяна на часа: заявката тегли от вчера 00:00Z, прагът е по София.
+       Есен: 26.10.2026 (пон.), след смяната на 25.10 → 18:00 София на 25.10 = 16:00Z. */
+    await one('2026-10-25T16:00:00+00:00', '2026-10-26T08:00:00Z', 'DST есен: 25.10 18:00 EET (16:00Z), 26.10', 2, '2026-10-25T16:00:00+00:00');
+    await one('2026-10-25T15:59:00+00:00', '2026-10-26T08:00:00Z', 'DST есен: 25.10 17:59 EET (15:59Z), 26.10', 0, null);
+    /* Пролет: 29.03.2027 (пон.), след смяната на 28.03 → 18:00 София на 28.03 = 15:00Z. */
+    await one('2027-03-28T15:00:00+00:00', '2027-03-29T07:00:00Z', 'DST пролет: 28.03 18:00 EEST (15:00Z), 29.03', 2, '2027-03-28T15:00:00+00:00');
+    await one('2027-03-28T14:59:00+00:00', '2027-03-29T07:00:00Z', 'DST пролет: 28.03 17:59 EEST (14:59Z), 29.03', 0, null);
+    const C = mod.mnuUploadCountsFor;
+    ok('25.10 23:59 EET (21:59Z) → за 26.10', C('2026-10-25T21:59:00Z', '2026-10-26') === true);
+    ok('26.10 00:00 EET (22:00Z на 25.10) → за 26.10 (днешно)', C('2026-10-25T22:00:00Z', '2026-10-26') === true);
+    ok('26.10 00:00 EET → НЕ за 25.10 (утрешно)', C('2026-10-25T22:00:00Z', '2026-10-25') === false);
+    ok('лятно: 28.03 18:00 EEST = 15:00Z (по UTC+2 би било 17:00) → брои се', C('2027-03-28T15:00:00Z', '2027-03-29') === true);
   }
 
   section('2.9 mnuTickDecide — граници');

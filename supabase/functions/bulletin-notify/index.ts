@@ -14,6 +14,13 @@
 //   store_open_items_regional — Незавършено за вашите обекти: по едно писмо
 //                    на регионален, част на обект (v26)
 //
+// v31 (25.11.2026, след v30; сесия minusi-late-upload) — ЕДНО нещо:
+//   автоматичната отметка на „СПРАВКА МИНУСИ" брои за днешно и качване в
+//   minus_uploads ПРЕДИШНИЯ ден по София от 18:00 до 23:59
+//   (MNU_LATE_UPLOAD_FROM, mnuUploadCountsFor). Повод: файлът за утре, качен
+//   24.11 23:25 — всички обекти чакаха до 20:00 на 25.11. mnuTickDecide,
+//   темите, порталът и схемата — непипнати.
+//
 // v30 (20.11.2026, след v29; сесия soi-transport) — ЕДНО нещо: нова секция
 //   „🚚 Транспорт — закъснели" в двете сутрешни писма (store_open_items и
 //   store_open_items_regional; решение на Тенчо 20.11 — САМО закъснелите,
@@ -2858,6 +2865,22 @@ function mnuTickDecide(o: { unfilled: number; uploadedToday: boolean; dueMin: nu
   return 'tick';
 }
 
+/* Късно качване (25.11.2026). Миглена понякога качва файла за утре късно
+   вечерта — 12.11 23:22 („общ 13.11“), 24.11 23:25 („общ 25.11“). Със само
+   „днешно качване“ обектите, попълнили всичко сутринта, чакаха до due_time
+   (25.11: Петрич попълни в 13:25, отметнат в 20:00:09). Затова качване
+   ПРЕДИШНИЯ календарен ден по София от 18:00 до 23:59 се брои като днешно.
+   Качване в 17:04 същия ден (06.11, 13.11) е за деня си — прагът е над него. */
+const MNU_LATE_UPLOAD_FROM = '18:00';
+
+/* Брои ли се качването ts (UTC низ от minus_uploads) за деня today (София). */
+function mnuUploadCountsFor(ts: string, today: string): boolean {
+  const b = bgNow(new Date(ts));
+  if (b.dateStr === today) return true;
+  if (b.dateStr !== plusDaysISO(today, -1)) return false;
+  return (b.hours % 24) * 60 + b.minutes >= (minutesOf(MNU_LATE_UPLOAD_FROM) as number);
+}
+
 /* target_stores празно/NULL = „всички" — същото правило като на екрана. */
 function mnuTaskHasStore(t: any, store: string): boolean {
   const ts = Array.isArray(t.target_stores) ? t.target_stores : [];
@@ -2910,13 +2933,14 @@ async function runMinusAutoTick(supabase: any, bg: ReturnType<typeof bgNow>, dry
   const has: Record<string, string> = {};
   for (const r of ex.data || []) has[String(r.recurring_task_id) + '\u0001' + r.store_name] = r.status || 'done';
 
-  /* Качване ДНЕС по българско време. Тегли се от вчера (UTC) нататък и се
-     сверява през bgNow — полунощ в София е 21:00/22:00 UTC предния ден. */
+  /* Качване ДНЕС по българско време — или вчера от MNU_LATE_UPLOAD_FROM
+     нататък (mnuUploadCountsFor). Тегли се от вчера 00:00 UTC нататък: това е
+     02:00/03:00 София вчера, тоест преди 18:00 вчера и зимно, и лятно. */
   const up = await supabase.from('minus_uploads').select('uploaded_at')
     .gte('uploaded_at', plusDaysISO(today, -1) + 'T00:00:00Z').order('uploaded_at', { ascending: true });
   if (up.error) return fail('minus_uploads: ' + up.error.message);
   const firstUp = (up.data || []).map((r: any) => r.uploaded_at)
-    .filter((ts: string) => bgNow(new Date(ts)).dateStr === today)[0] || null;
+    .filter((ts: string) => mnuUploadCountsFor(ts, today))[0] || null;
 
   const nowMin = bg.hours * 60 + bg.minutes;
   const decide = (p: any, n: number) => mnuTickDecide({ unfilled: n, uploadedToday: !!firstUp, dueMin: minutesOf(p.task.due_time), nowMin: nowMin });
