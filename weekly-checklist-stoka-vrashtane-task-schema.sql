@@ -1,8 +1,9 @@
 -- weekly-checklist-stoka-vrashtane-task-schema.sql — Чек лист: „Стока за
 -- връщане- ТАБЛИЦИ" (stoka_vrashtane) от постоянната задача „СПИСЪК СТОКА ЗА
 -- ИЗТЕГЛЯНЕ ПО РАЗЛИКИ" (24.11.2026, сесия checklist-returns-from-task).
--- Миграция 20261124120000_weekly_checklist_stoka_vrashtane_task — ЧАКА
--- ПРИЛАГАНЕ (след „давай" от Тенчо). Този файл е ОГЛЕДАЛО на миграцията.
+-- ПРИЛОЖЕНО В SUPABASE НА 24.11.2026 като миграция
+-- 20261124120000_weekly_checklist_stoka_vrashtane_task (версия в базата
+-- 20261124151504) и прочетено обратно. Този файл е ОГЛЕДАЛО на миграцията.
 -- Rollback: supabase/migrations/20261124120000_weekly_checklist_stoka_vrashtane_task_down.sql.
 --
 -- ЗАЩО. Писмо на Миглена Павлова 24.11 „чек лист": колоната броеше ВСИЧКИ
