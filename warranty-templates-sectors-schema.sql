@@ -23,10 +23,15 @@ alter table public.warranty_templates add column sectors text[];
 -- ── ROLLBACK ──
 -- alter table public.warranty_templates drop column sectors;
 
--- ── DROP на старата колона sector (ОТДЕЛНА миграция, след push, сверка на
---    Pages и проверка на живо — live кодът вече не чете .sector; преди нея
---    сверка, че sectors = array[sector] за всеки ред със sector) ──
--- alter table public.warranty_templates drop column sector;
+-- DATA изпълнено 25.11.2026 23:21 София с execute_sql, непосредствено преди
+-- push-а на 4fa376a: 10 реда с масив от един елемент, 2 NULL.
+
+-- ── DROP на старата колона sector (миграция warranty_templates_drop_sector,
+--    версия 20261125212745, приложена 25.11.2026 — след push, сверка на Pages
+--    и проверка на живо от чата; преди нея: живият reference.js без .sector,
+--    сверка sectors = array[sector] 10/0/2/0, без зависимости в изгледи и
+--    функции). Огледалото никога не е имало sector — ред за Живко няма. ──
+alter table public.warranty_templates drop column sector;
 -- Rollback:
 -- alter table public.warranty_templates add column sector text;
 -- update public.warranty_templates set sector = sectors[1];

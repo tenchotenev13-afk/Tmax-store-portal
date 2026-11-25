@@ -1,3 +1,4 @@
+-- 25.11.2026: колоната sector е премахната (миграция warranty_templates_drop_sector, версия 20261125212745) — виж warranty-templates-sectors-schema.sql.
 -- warranty-templates-sector-schema.sql
 -- Рекламации → Гаранционен справочник: бланките (warranty_templates) се
 -- закачат към сектор. Редът „Гаранционни карти по сектори:“ в reference.js
