@@ -61,6 +61,11 @@
 (в базата от миграцията warranty_templates_sectors, warranty-templates-sectors-schema.sql, версия 20261125182251, приложена 25.11.2026)
 - 25.11 · warranty_templates.sectors — text[], NULL, без default
 
+## Изпратено 26.11.2026
+
+(в базата от миграцията mirror_reader_audit_log, mirror-reader-audit-log-schema.sql, версия 20261126062013, приложена 26.11.2026)
+- 26.11 · mirror_reader чете и audit_log — същият ключ; service_role може да се махне от сървъра на огледалото
+
 ## Потвърдено 23.11.2026
 
 (в базата от миграцията checklist_transit_deadline, weekly-checklist-transit-deadline-schema.sql, версия 20261123123732, приложена 23.11.2026; data миграцията checklist_transit_history_data — версия 20261123132452, приложена 23.11.2026: 108 клетки stoka_na_pat в седмици 40, 42–45, 47 → NULL)

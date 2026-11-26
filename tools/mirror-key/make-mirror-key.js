@@ -27,7 +27,8 @@ var ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 var ROLE = 'mirror_reader';
 var TABLES = [
   'kasa_reports', 'kasa_glavna', 'kasa_zoborot', 'kasa_documents',
-  'kasa_storno', 'kasa_storno_items', 'daily_turnover', 'storage_files_index'
+  'kasa_storno', 'kasa_storno_items', 'daily_turnover', 'storage_files_index',
+  'audit_log' // mirror-reader-audit-log-schema.sql (26.11.2026)
 ];
 var BUCKET = 'kasa-docs';
 var OTHER_BUCKET = 'docs';
@@ -71,7 +72,7 @@ async function selfCheck(token, fetchFn) {
   }
   var H = headersFor(token);
 
-  // а) четене на осемте → 200/206 + брой
+  // а) четене на деветте → 200/206 + брой
   for (var i = 0; i < TABLES.length; i++) {
     var t = TABLES[i];
     try {

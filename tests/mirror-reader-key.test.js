@@ -13,6 +13,7 @@
         същото като отделен процес;
       - при успешна самопроверка пише mirror-key.txt; токенът е HS256 с
         role=mirror_reader, exp = +2 години; тайната и токенът НЕ са в изхода;
+      - а) чете и audit_log (mirror-reader-audit-log-schema.sql, 26.11.2026);
       - при всяка провалена проверка (а–д) — exit 1 и НЯМА файл;
       - записи само PATCH/POST към kasa_reports с тяло без редове;
       - PATCH носи реална колона (при '{}' PostgREST връща 204 без UPDATE),
@@ -123,7 +124,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
         key = method + ' ' + t;
         if (method !== 'GET') status = 403;
         else if (t === 'users') status = 403;
-        else if (EIGHT.includes(t)) {
+        else if (EIGHT.includes(t) || t === 'audit_log') {
           status = 200; range = '0-0/42';
           if (t === 'storage_files_index') json = [{ name: u.searchParams.get('bucket_id') === 'eq.docs' ? 'a/b.pdf' : 'x/y z.pdf' }];
           else json = [{}];
@@ -211,7 +212,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     ok(patch && patch.body !== '{}' && pb && typeof pb === 'object' && Object.keys(pb).length > 0,
       'PATCH НЕ е с празно тяло (при {} PostgREST връща 204 без UPDATE)');
     ok(pb && Object.keys(pb).every(k => KASA_REPORTS_COLS.includes(k)), 'PATCH тялото е с реални колони на kasa_reports (' + (pb ? Object.keys(pb).join(',') : '-') + ')');
-    EIGHT.forEach(t => ok(r.calls.some(c => c.method === 'GET' && c.url.includes('/rest/v1/' + t + '?select=*')), 'а) GET ' + t));
+    EIGHT.concat(['audit_log']).forEach(t => ok(r.calls.some(c => c.method === 'GET' && c.url.includes('/rest/v1/' + t + '?select=*')), 'а) GET ' + t));
     ok(r.calls.some(c => c.url.includes('/object/authenticated/kasa-docs/x/y%20z.pdf')), 'б) сваля файл от kasa-docs (пътят е кодиран)');
     ok(r.calls.some(c => c.url.includes('/rest/v1/users')), 'в) пробва users');
     const lst = r.calls.filter(c => new URL(c.url).pathname === '/storage/v1/object/list/docs');
@@ -224,6 +225,8 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const FAILS = [
     ['а) kasa_storno 401', { 'GET kasa_storno': 401 }],
     ['а) storage_files_index 403', { 'GET storage_files_index': 403 }],
+    ['а) audit_log 403', { 'GET audit_log': 403 }],
+    ['а) audit_log 401', { 'GET audit_log': 401 }],
     ['б) сваляне 400', { 'DL kasa-docs': 400 }],
     ['б) няма файл в kasa-docs', { 'GET storage_files_index': { status: 200, json: [] } }],
     ['в) users 200', { 'GET users': 200 }],
