@@ -19,5 +19,9 @@
   { "file": "График-ТРЗ.pdf", "path": "instrukcii/grafik-trz.pdf", "title": "График — ТРЗ", "category": "Само за офиса", "description": "Кратка инструкция за ТРЗ" },
   { "file": "График-инструкция.pdf", "path": "instrukcii/grafik-palna.pdf", "title": "График — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
   { "file": "Каса-обекти.pdf", "path": "instrukcii/kasa-obekti.pdf", "title": "Каса — обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
-  { "file": "Каса-инструкция.pdf", "path": "instrukcii/kasa-palna.pdf", "title": "Каса — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" }
+  { "file": "Каса-инструкция.pdf", "path": "instrukcii/kasa-palna.pdf", "title": "Каса — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" },
+  { "file": "Преоценка-обекти.pdf", "path": "instrukcii/preocenka-obekti.pdf", "title": "Ревизии и преоценка — Преоценка — обекти", "category": "Само за офиса", "description": "Кратка инструкция за обекти" },
+  { "file": "Преоценка-регионални.pdf", "path": "instrukcii/preocenka-regionalni.pdf", "title": "Ревизии и преоценка — Преоценка — регионални", "category": "Само за офиса", "description": "Кратка инструкция за одобряващите" },
+  { "file": "Преоценка-контролинг.pdf", "path": "instrukcii/preocenka-kontroling.pdf", "title": "Ревизии и преоценка — Преоценка — Контролинг", "category": "Само за офиса", "description": "Кратка инструкция за Контролинг" },
+  { "file": "Преоценка-инструкция.pdf", "path": "instrukcii/preocenka-palna.pdf", "title": "Ревизии и преоценка — Преоценка — пълна справка", "category": "Само за офиса", "description": "Пълна справка за офиса" }
 ]
