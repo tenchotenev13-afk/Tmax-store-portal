@@ -4,4 +4,4 @@
 - Миграция `revaluation_valid_from` (`revaluation-valid-from-schema.sql`), версия 20261126062108, приложена 26.11: `revaluation_submissions.prices_valid_from` date NULL; проверено — date, NULL, без default, 0 от 7 бланки попълнени. Ред за Живко в „Чака изпращане“. Rollback — във файла (`drop column`).
 - Без промяна: Excel износите, MM41, „Прехвърляне“, `history.js`, „Днес“.
 - Тест: `tests/revaluation-etiketi-proces.test.js` (50 проверки, нов) + секции в `revaluation-units.test.js`; 4 стари теста потвърждават новия прозорец. Мутанти 12/12 убити. Пълен `npm test` (25.11) — 533 теста, exit 0.
-- SHA: — (попълва се след комита).
+- SHA: `105b1e8` (push 26.11 по SHA върху `28c0e52`; преди него пълен `npm test` на `850afc5` — 534 теста, exit 0; след последния rebase вариант А — check, smoke, колизии, 14 теста на Преоценка, handover-structure, всички exit 0). Pages сверен байт по байт в 08:49 — `revaluation.js` 195 804 байта, маркер `rvDoneModalOpen` (0 в старата версия, 2 в живата).
