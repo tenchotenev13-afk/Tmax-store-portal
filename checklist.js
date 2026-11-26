@@ -2375,6 +2375,24 @@ function checklistEmailGapsHtml(store, weekNumber, items) {
     '</div>';
 }
 
+/* Блоковете „Пропуски" на НЯКОЛКО обекта — за регионалния и общата група
+   (26.11.2026). stores е вече в реда на мрежата.
+     · 'regional' — всеки обект: червен блок или зелен ред „Няма пропуски на X";
+     · 'general'  — само обектите с пропуски; нито един → един зелен ред
+       „Няма пропуски за седмицата" (същият като в писмото на обекта). */
+function checklistEmailGapsMultiHtml(stores, mode, weekNumber, rows, metrics, gapDays) {
+  var out = '';
+  (stores || []).forEach(function (store) {
+    var items = checklistStoreGaps(store, rows, metrics, gapDays);
+    if (items.length) { out += checklistEmailGapsHtml(store, weekNumber, items); return; }
+    if (mode === 'regional') {
+      out += '<div style="margin-bottom:10px;padding:8px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:13px;color:#166534;font-weight:600;">' +
+        'Няма пропуски на ' + escVal(store) + ' за седмица ' + escVal(String(weekNumber)) + '</div>';
+    }
+  });
+  return out || checklistEmailGapsHtml('', weekNumber, []);
+}
+
 /* Дните без отметка за колоните 'count' на показаната седмица — от
    checklistRecurringChanges (правилото на checklistComputePortalValues).
    → Promise { 'обект|колона': [ISO дати] }. Отхвърля при провал — вика се
@@ -2504,10 +2522,12 @@ function checklistEmailResponsesHtml(year, weekNumber, rows, metrics, stores, ex
     '</table>' +
     '<div style="margin-top:6px;font-size:12px;color:#334155;">Обектите с „не" пишат становище в портала, таб „Чек лист", до петък ' +
       dlText + ', 18:00.</div>' +
-    /* Бутонът — само тук, само при поне едно „не" (секцията без „не" я няма). */
+    /* Бутонът — само тук, само при поне едно „не" (секцията без „не" я няма).
+       Регионалният и общата група не пишат становище — при тях същият линк
+       е „Отвори Чек листа →" (extra.audience = 'office', 26.11.2026). */
     '<div style="margin-top:12px;"><a href="' + escAttr(checklistDeepLinkUrl(year, weekNumber)) + '" ' +
       'style="display:inline-block;background:#1E2761;color:#fff;text-decoration:none;font-size:13px;font-weight:700;padding:10px 18px;border-radius:7px;">' +
-      'Напиши становище в портала →</a></div>' +
+      (extra && extra.audience === 'office' ? 'Отвори Чек листа →' : 'Напиши становище в портала →') + '</a></div>' +
     '</div>';
 }
 
@@ -2526,8 +2546,13 @@ function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, no
 
   var cellCss = 'padding:6px 8px;border:1px solid #E5E9F0;font-size:12px;';
   var body = checklistEmailVersionBanner(version, note);
-  /* Писмо ДО ОБЕКТ (extra.gapStore) → неговите пропуски най-горе. */
-  if (extra && extra.gapStore) {
+  /* Писмо ДО ОБЕКТ (extra.gapStore) → неговите пропуски най-горе.
+     Писмо до регионален / общата група (extra.gapStores + gapMode, 26.11.2026)
+     → блоковете на няколко обекта (checklistEmailGapsMultiHtml). */
+  if (extra && Array.isArray(extra.gapStores) && extra.gapMode) {
+    body += checklistEmailGapsMultiHtml(extra.gapStores, extra.gapMode, weekNumber,
+      rows, metrics, extra.gapDays || null);
+  } else if (extra && extra.gapStore) {
     body += checklistEmailGapsHtml(extra.gapStore, weekNumber,
       checklistStoreGaps(extra.gapStore, rows, metrics, extra.gapDays || null));
   }
@@ -2634,20 +2659,106 @@ function checklistPickStoreEmail(users) {
 
 /* Обектите с адресите им, в реда на мрежата. Обект без годен адрес НЕ влиза
    в списъка — по-добре да липсва, отколкото да стои с празна отметка. */
-function checklistBuildSendList(users) {
+/* ПОЛУЧАТЕЛИ ИЗВЪН ОБЕКТИТЕ (решение на Тенчо 26.11.2026). Три вида, всеки
+   ред на списъка е ЕДНО писмо:
+     · kind 'store'    — управителят на обекта (както досега); gapStores = [обекта];
+     · kind 'regional' — users.is_regional, активен, с имейл; gapStores =
+       assigned_stores ∩ отчетните, в реда на мрежата; без нито един → не влиза;
+     · kind 'general'  — контролингът (notify_groups съдържа 'controlling',
+       активен) + адресите от app_settings.checklist_email_extra; gapStores =
+       всички отчетни (в писмото излизат само тези с пропуски).
+   Един адрес в няколко вида → ЕДНО писмо, по приоритет обща група >
+   регионален > обект. Два обекта с един адрес → едно писмо с двата блока.
+   Сравнението на адресите е без значение на главни/малки букви. */
+var CHECKLIST_EXTRA_KEY = 'checklist_email_extra';
+
+function checklistMailKey(e) { return String(e || '').trim().toLowerCase(); }
+
+/* Редовете от app_settings → масив адреси. Липсващ или повреден ключ →
+   [] + console.error: общата група остава само контролингът, писмата
+   тръгват. */
+function checklistParseExtraEmails(settingsRows) {
+  var row = (Array.isArray(settingsRows) ? settingsRows : []).filter(function (r) {
+    return r && r.key === CHECKLIST_EXTRA_KEY;
+  })[0];
+  if (!row) {
+    console.error('Чек лист: липсва app_settings.' + CHECKLIST_EXTRA_KEY + ' — общата група е само контролингът');
+    return [];
+  }
+  var arr = null;
+  try { arr = JSON.parse(row.value); } catch (e) { arr = null; }
+  if (!Array.isArray(arr)) {
+    console.error('Чек лист: app_settings.' + CHECKLIST_EXTRA_KEY + ' не е JSON масив — общата група е само контролингът');
+    return [];
+  }
+  return arr.filter(function (x) {
+    return typeof x === 'string' && x.indexOf('@') > 0;
+  }).map(function (x) { return x.trim(); });
+}
+
+function checklistBuildSendList(users, extraEmails) {
+  users = Array.isArray(users) ? users : [];
   var byStore = {};
-  (Array.isArray(users) ? users : []).forEach(function (u) {
+  users.forEach(function (u) {
     if (!u || !u.store_name || !isReportableStore(u.store_name)) return;
     if (!byStore[u.store_name]) byStore[u.store_name] = [];
     byStore[u.store_name].push(u);
   });
-  var out = [];
+  var live = function (u) { return u && u.email && u.active !== false; };
+
+  /* Обща група: контролингът, после допълнителните адреси в реда на ключа. */
+  var general = [], taken = {};
+  users.forEach(function (u) {
+    if (!live(u) || !Array.isArray(u.notify_groups) || u.notify_groups.indexOf('controlling') < 0) return;
+    var k = checklistMailKey(u.email);
+    if (taken[k]) return;
+    taken[k] = 'general';
+    general.push({ kind: 'general', name: u.display_name || u.email, email: u.email,
+      gapStores: checklistStores.slice(), checked: true });
+  });
+  (Array.isArray(extraEmails) ? extraEmails : []).forEach(function (e) {
+    var k = checklistMailKey(e);
+    if (!k || taken[k]) return;
+    taken[k] = 'general';
+    var u = users.filter(function (x) { return x && checklistMailKey(x.email) === k; })[0];
+    general.push({ kind: 'general', name: (u && u.display_name) || e, email: e,
+      gapStores: checklistStores.slice(), checked: true });
+  });
+
+  /* Регионални: един ред на адрес, обединен обхват. */
+  var regional = [], regByKey = {};
+  users.forEach(function (u) {
+    if (!live(u) || u.is_regional !== true) return;
+    var k = checklistMailKey(u.email);
+    if (taken[k] === 'general') return;
+    if (!regByKey[k]) {
+      regByKey[k] = { kind: 'regional', name: u.display_name || u.email, email: u.email, scope: [], checked: true };
+      regional.push(regByKey[k]);
+    }
+    (Array.isArray(u.assigned_stores) ? u.assigned_stores : []).forEach(function (s) {
+      if (regByKey[k].scope.indexOf(s) < 0) regByKey[k].scope.push(s);
+    });
+  });
+  regional = regional.filter(function (r) {
+    r.gapStores = checklistStores.filter(function (s) { return r.scope.indexOf(s) >= 0; });
+    delete r.scope;
+    return r.gapStores.length > 0;
+  });
+  regional.forEach(function (r) { taken[checklistMailKey(r.email)] = 'regional'; });
+
+  /* Обекти — както досега; адрес от горните групи отпада. */
+  var stores = [], storeByKey = {};
   checklistStores.forEach(function (store) {
     var email = checklistPickStoreEmail(byStore[store] || []);
     if (!email) return;
-    out.push({ store: store, email: email, checked: true });
+    var k = checklistMailKey(email);
+    if (taken[k]) return;
+    if (storeByKey[k]) { storeByKey[k].gapStores.push(store); storeByKey[k].store += ', ' + store; return; }
+    storeByKey[k] = { kind: 'store', store: store, email: email, gapStores: [store], checked: true };
+    stores.push(storeByKey[k]);
   });
-  return out;
+
+  return stores.concat(regional, general);
 }
 
 function checklistSendSubject(version) {
@@ -2658,8 +2769,11 @@ function checklistSendSubject(version) {
 function openChecklistSendModal() {
   if (!canEditChecklist() || checklistSendBusy) return;
 
-  sbGet('users', 'select=store_name,email,role,active&order=store_name').then(function (users) {
-    checklistSendList = checklistBuildSendList(users);
+  Promise.all([
+    sbGet('users', 'select=store_name,email,role,active,display_name,is_regional,assigned_stores,notify_groups&order=store_name'),
+    sbGet('app_settings', 'key=eq.' + CHECKLIST_EXTRA_KEY + '&select=key,value', true)
+  ]).then(function (res) {
+    checklistSendList = checklistBuildSendList(res[0], checklistParseExtraEmails(res[1]));
     if (!checklistSendList.length) {
       toast('Няма нито един обект с адрес — няма на кого да се прати', '#dc2626');
       return;
@@ -2695,13 +2809,26 @@ function _renderChecklistSendModal() {
 
   h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">Кой ще получи (' +
     checklistSendList.length + ')</div>' +
-    '<div style="border:1px solid #e2e8f0;border-radius:8px;max-height:260px;overflow:auto;">';
-  checklistSendList.forEach(function (r, i) {
-    h += '<label style="display:block;padding:7px 10px;border-bottom:1px solid #f1f5f9;font-size:12px;cursor:pointer;">' +
-      '<input type="checkbox" class="cl-send-cb" data-i="' + i + '"' + (r.checked ? ' checked' : '') +
-      ' style="margin-right:8px;vertical-align:middle;">' +
-      '<b>' + escVal(r.store) + '</b> · <span style="color:#64748b;">' + escVal(r.email) + '</span>' +
-      '</label>';
+    '<div style="border:1px solid #e2e8f0;border-radius:8px;max-height:320px;overflow:auto;">';
+  /* Три групи с брой в заглавието; празна група не се показва. data-i е
+     индексът в общия checklistSendList. */
+  [['store', 'Обекти'], ['regional', 'Регионални'], ['general', 'Контролинг и ръководство']].forEach(function (g) {
+    var n = checklistSendList.filter(function (r) { return (r.kind || 'store') === g[0]; }).length;
+    if (!n) return;
+    h += '<div class="cl-send-grp" data-kind="' + g[0] + '" style="padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;' +
+      'font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.3px;">' +
+      g[1] + ' (' + n + ')</div>';
+    checklistSendList.forEach(function (r, i) {
+      if ((r.kind || 'store') !== g[0]) return;
+      var who = g[0] === 'store' ? r.store : r.name;
+      h += '<label style="display:block;padding:7px 10px;border-bottom:1px solid #f1f5f9;font-size:12px;cursor:pointer;">' +
+        '<input type="checkbox" class="cl-send-cb" data-i="' + i + '" data-kind="' + g[0] + '"' + (r.checked ? ' checked' : '') +
+        ' style="margin-right:8px;vertical-align:middle;">' +
+        '<b>' + escVal(who) + '</b> · <span style="color:#64748b;">' + escVal(r.email) + '</span>' +
+        (g[0] === 'regional' ? '<div style="margin-left:24px;font-size:11px;color:#94a3b8;">' +
+          escVal(r.gapStores.join(', ')) + '</div>' : '') +
+        '</label>';
+    });
   });
   h += '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
@@ -2802,10 +2929,14 @@ function submitChecklistSend() {
     var gapDays = pre[2];
     var subject = checklistSendSubject(version);
     /* Колони 'count' с пропуск от портала, за които дни не излязоха. */
-    var daysLost = 0;
+    var daysLost = 0, seenStores = {};
     targets.forEach(function (r) {
-      checklistStoreGaps(r.store, checklistRows, checklistMetrics, gapDays).forEach(function (g) {
-        if (g.daysLost) daysLost++;
+      (r.gapStores || [r.store]).forEach(function (s) {
+        if (seenStores[s]) return;
+        seenStores[s] = true;
+        checklistStoreGaps(s, checklistRows, checklistMetrics, gapDays).forEach(function (g) {
+          if (g.daysLost) daysLost++;
+        });
       });
     });
     if (daysLost && !gapDaysFailed) {
@@ -2818,22 +2949,35 @@ function submitChecklistSend() {
        Обектите не бива да виждат чуждите адреси — това е и причината да не
        се праща накуп, макар накуп да е една заявка вместо осемнайсет.
        От 23.11.2026 и HTML-ът е по получател: блокът „Пропуски на <обект>"
-       най-горе (checklistEmailGapsHtml); таблицата е обща. */
+       най-горе (checklistEmailGapsHtml); таблицата е обща.
+       От 26.11.2026 и регионалните / общата група — блоковете на няколко
+       обекта (gapMode) и бутон „Отвори Чек листа →" (audience 'office'). */
     return Promise.all(targets.map(function (r) {
+      var kind = r.kind || 'store';
       if (typeof sendEmail !== 'function') {
-        return Promise.resolve({ email: r.email, ok: false });
+        return Promise.resolve({ email: r.email, kind: kind, ok: false });
+      }
+      var opt = { history: extra.history, prevResponses: extra.prevResponses, gapDays: gapDays };
+      if (kind === 'store' && (r.gapStores || [r.store]).length === 1) opt.gapStore = r.store;
+      else {
+        opt.gapStores = r.gapStores;
+        opt.gapMode = kind === 'general' ? 'general' : 'regional';
+        if (kind !== 'store') opt.audience = 'office';
       }
       var html = checklistEmailHtml(checklistYear, checklistWeek, version,
-        checklistRows, checklistMetrics, checklistStores, note || null,
-        { history: extra.history, prevResponses: extra.prevResponses, gapStore: r.store, gapDays: gapDays });
+        checklistRows, checklistMetrics, checklistStores, note || null, opt);
       return sendEmail([r.email], subject, html).then(function (res) {
-        return { email: r.email, ok: !!(res && res.ok) };
+        return { email: r.email, kind: kind, ok: !!(res && res.ok) };
       }).catch(function () {
-        return { email: r.email, ok: false };
+        return { email: r.email, kind: kind, ok: false };
       });
     })).then(function (results) {
       var sent = results.filter(function (x) { return x.ok; }).map(function (x) { return x.email; });
       var failed = results.length - sent.length;
+      var nKind = function (k) { return results.filter(function (x) { return x.ok && x.kind === k; }).length; };
+      var okText = nKind('store') + ' обекта' +
+        (nKind('regional') ? ' · ' + nKind('regional') + ' регионални' : '') +
+        (nKind('general') ? ' · ' + nKind('general') + ' от ръководството' : '');
 
       /* НУЛА УСПЕЛИ → НЕ СЕ ЗАПИСВА РЕД. Запис на изпращане, което не е
          станало, заема номер на версия и оставя следа за писмо, каквото
@@ -2874,7 +3018,7 @@ function submitChecklistSend() {
             ' — записани са само успелите' + daysNote, '#dc2626');
           return;
         }
-        toast('✅ Изпратено до ' + sent.length + ' обекта (версия ' + version + ')' + daysNote,
+        toast('✅ Изпратено до ' + okText + ' (версия ' + version + ')' + daysNote,
           daysNote ? '#d97706' : undefined);
       });
     });

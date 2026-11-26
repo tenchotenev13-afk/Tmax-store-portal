@@ -461,6 +461,7 @@ const TESTS = [
   'checklist-transit-deadline.test.js',
   'checklist-email.test.js',
   'checklist-send.test.js',
+  'checklist-email-recipients.test.js',
   'checklist-store-view.test.js',
   'checklist-responses-view.test.js',
   'checklist-streak.test.js',
