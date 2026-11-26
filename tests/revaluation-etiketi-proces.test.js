@@ -110,6 +110,36 @@ const DONE_ITEMS = () => [IT('1', { qty: 2, co_qty: 2, new_sap_code: '8061540', 
     ok('печат: избраните — П0002, П0003', JSON.stringify(unitsOf(h)) === '["П0002","П0003"]', JSON.stringify(unitsOf(h)));
   }
 
+  section('А1в. Отметките на бройките: кратък номер „П0123" (пълният — в title), колоната „Етикети" е по-широка (26.11.2026)');
+  {
+    /* jsdom не смята лейаут — „побира ли се" е мерено в браузър (1280 / 375 px,
+       лога 2026-11-26-preocenka-etiketi-nomer-otryazan). Тук се заковава текстът
+       и стиловете, от които зависи измерването. */
+    const GD = 'Гоце Делчев';
+    const units = [121, 122, 123].map((n, k) => ({ id: 'u-gd-' + k, item_id: '1', submission_id: 's-1', store_name: GD,
+      unit_no: GD + '-П' + String(n).padStart(4, '0'), created_at: '2026-11-10T10:00:0' + k + 'Z' }));
+    const GD_USER = Object.assign({}, STORE_USER, { email: 'gd@temax.bg', store_name: GD });
+    const h = env({ user: GD_USER, subs: [SUB('processed', { store_name: GD })], items: [IT('1', { store_name: GD, qty: 3, co_qty: 2 })], units });
+    h.w.rvStoresList = [GD];
+    await open(h, GD_USER);
+    await openModal(h);
+    const lbl = uChk(h, '1').map(c => c.parentNode);
+    ok('текстът на отметките е „П0121", „П0122", „П0123" — 4 цифри, без името на обекта',
+      JSON.stringify(lbl.map(l => l.textContent.trim())) === '["П0121","П0122","П0123"]', JSON.stringify(lbl.map(l => l.textContent.trim())));
+    ok('пълният номер е в title на отметката', JSON.stringify(lbl.map(l => l.title)) === JSON.stringify(units.map(u => u.unit_no)), JSON.stringify(lbl.map(l => l.title)));
+    ok('data-u носи пълния номер (печатът го ползва)', uChk(h, '1').every((c, k) => c.dataset.u === units[k].unit_no));
+    const ths = Array.prototype.slice.call(h.doc.querySelectorAll('#rv-lbl-modal thead th'));
+    ok('колоната с отметката е 32px, „Етикети" — 26%', /(^|;)\s*width:\s*32px/.test(ths[0].getAttribute('style') || '') &&
+      ths[4].textContent === 'Етикети' && /(^|;)\s*width:\s*26%/.test(ths[4].getAttribute('style') || ''), ths.map(t => t.getAttribute('style')).join(' | '));
+    const note = h.doc.querySelector('#rv-lbl-modal .rv-lbl-pick > div');
+    ok('бележката „прехвърлени…" се пренася и посред дума (телефон)', !!note && /overflow-wrap:\s*anywhere/.test(note.getAttribute('style') || ''), note && note.getAttribute('style'));
+    await printIt(h);
+    ok('печатът — пак пълният номер „№ Гоце Делчев-П0121"', labels(h).length === 2 && labels(h)[0].querySelector('.rv-lbl-unit').textContent === '№ Гоце Делчев-П0121',
+      labels(h)[0] && labels(h)[0].querySelector('.rv-lbl-unit') && labels(h)[0].querySelector('.rv-lbl-unit').textContent);
+    ok('rvLblUnitShort: без „-П" → без промяна; null → празно', h.w.rvLblUnitShort('стар-номер') === 'стар-номер' && h.w.rvLblUnitShort(null) === '' &&
+      h.w.rvLblUnitShort('Гоце Делчев-П12345') === 'П12345');
+  }
+
   section('А1б. co_qty = 0 → нито един етикет, редът е сив; co_qty ≥ номерата → всички');
   {
     const items = [IT('1', { qty: 2, co_qty: 0, sort_order: 1 }), IT('2', { qty: 2, co_qty: 2, sort_order: 2 })];

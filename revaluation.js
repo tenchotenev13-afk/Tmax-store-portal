@@ -2005,6 +2005,10 @@ function rvLblDate(ts){
 }
 function rvLblMoney(n){ return rvFmt(n) + ' €'; }
 function rvLblMm(x){ return String(Math.round(x * 100) / 100) + 'mm'; }
+/* „Гоце Делчев-П0123" → „П0123" за отметките на бройките — обектът е в
+   заглавието на прозореца, а целият номер не се побира в колоната на 640 px
+   (26.11.2026). Пълният номер — в title на отметката. */
+function rvLblUnitShort(u){ var s = String(u == null ? '' : u), k = s.lastIndexOf('-П'); return k >= 0 ? s.slice(k + 1) : s; }
 
 /* ─── Прозорецът преди печат ─── */
 function rvLblOpen(){
@@ -2033,17 +2037,17 @@ function rvLblModal(kind, on, onU){
     h += '<div id="rv-lbl-empty" style="padding:10px;color:#b91c1c;font-size:13px;">Няма редове за етикети — ' +
       (rvItems.length ? 'на нито един ред няма нов код и цена.' : 'бланката няма редове.') + '</div>';
   } else {
-    h += '<div class="tbl-wrap tbl-compact" style="max-height:40vh;overflow:auto;"><table><thead><tr><th></th><th>Нов код</th><th>Артикул</th><th>Нова цена</th><th>Етикети</th></tr></thead><tbody>';
+    h += '<div class="tbl-wrap tbl-compact" style="max-height:40vh;overflow:auto;"><table><thead><tr><th style="width:32px;"></th><th>Нов код</th><th>Артикул</th><th>Нова цена</th><th style="width:26%;">Етикети</th></tr></thead><tbody>';
     rows.forEach(function(r){
       var chk = !r.zero && (!on || on[r.it.id]);
       var n;
       if(r.zero) n = '0 <span class="rv-lbl-zero" style="color:#94a3b8;font-size:11px;">нищо не е прехвърлено</span>';
       else if(r.pick != null){
         var sel = onU && onU[r.it.id];
-        n = '<div class="rv-lbl-pick" data-id="' + escAttr(r.it.id) + '"><div style="font-size:11px;color:#92400e;">прехвърлени ' + r.pick + ' от ' + r.units.length + ' — отметни кои бройки</div>' +
+        n = '<div class="rv-lbl-pick" data-id="' + escAttr(r.it.id) + '"><div style="font-size:11px;color:#92400e;overflow-wrap:anywhere;">прехвърлени ' + r.pick + ' от ' + r.units.length + ' — отметни кои бройки</div>' +
           r.units.map(function(u, k){
             var on1 = sel ? sel.indexOf(u) >= 0 : k < r.pick;
-            return '<label style="display:inline-block;margin-right:8px;font-size:11px;white-space:nowrap;"><input type="checkbox" class="rv-lbl-u" data-id="' + escAttr(r.it.id) + '" data-u="' + escAttr(u) + '"' + (on1 ? ' checked' : '') + '> ' + esc(u) + '</label>';
+            return '<label title="' + escAttr(u) + '" style="display:inline-block;margin-right:8px;font-size:11px;white-space:nowrap;"><input type="checkbox" class="rv-lbl-u" data-id="' + escAttr(r.it.id) + '" data-u="' + escAttr(u) + '"' + (on1 ? ' checked' : '') + '> ' + esc(rvLblUnitShort(u)) + '</label>';
           }).join('') + '</div>';
       } else n = r.units.length + (r.units[0] == null ? ' <span style="color:#94a3b8;font-size:11px;">без номер</span>' : '');
       h += '<tr id="rv-lbl-row-' + escAttr(r.it.id) + '"' + (r.zero ? ' class="rv-lbl-row-zero" style="color:#94a3b8;background:#f8fafc;"' : '') + '><td><input type="checkbox" class="rv-lbl-chk" data-id="' + escAttr(r.it.id) + '"' + (chk ? ' checked' : '') + (r.zero ? ' disabled' : '') + '></td>' +
