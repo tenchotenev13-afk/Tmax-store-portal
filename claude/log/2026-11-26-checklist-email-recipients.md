@@ -5,3 +5,4 @@
 - Миграция (само данни) `checklist_email_extra` (`checklist-email-extra-schema.sql`, `supabase/migrations/20261126120000_checklist_email_extra*.sql`) — insert on conflict do nothing; чака apply. Опашката на Живко: „промяна само в данни".
 - Без промяна: неделният отчет (report.js, send-scheduled-report), „Днес", табът.
 - Тест: `tests/checklist-email-recipients.test.js` (51 проверки, нов, истински клик); мутанти 8/8 убити; старите 6 теста на писмото на чек листа — exit 0.
+- SHA: `6acacb9` (комит 26.11 върху `60e12e3`; пълен `npm test` преди комита — 535 теста, exit 0). Миграцията и push-ът — чакат.
