@@ -14,7 +14,7 @@
 
 ## Чака изпращане
 
-(промяна само в данни, checklist-email-extra-schema.sql; миграция checklist_email_extra — чака apply)
+(промяна само в данни, checklist-email-extra-schema.sql; миграция checklist_email_extra — версия 20261126094441, приложена 26.11.2026)
 - 26.11 · app_settings — промяна само в данни (нов ред checklist_email_extra), без промяна за огледалото
 
 (в базата от миграцията revaluation_valid_from, revaluation-valid-from-schema.sql, версия 20261126062108, приложена 26.11.2026)
