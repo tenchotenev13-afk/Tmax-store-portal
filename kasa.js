@@ -2523,26 +2523,24 @@ function submitStornoForm(){
 }
 
 /* Записва редовете с артикули за дадена сторно бележка: изтрива старите (ако има, при
-   редакция) и записва наново текущия списък — просто и предвидимо, без diff логика. */
+   редакция) и записва наново текущия списък — просто и предвидимо, без diff логика.
+   Етап 2 на Каса (26.11.2026): през kasa-api „storno_items_save“ — браузърът
+   няма права върху kasa_storno_items. Изтриването и записът са в функцията, в
+   същия ред; провалено изтриване не продължава към записа (иначе сторното се
+   удвоява). БЕЗ резервен път през sbDelete/sbPost: след миграцията той не
+   може да работи. true / false — както преди. */
 function stornoSaveItems(stornoId, returnedItems, replacementItems){
-  return sbDelete('kasa_storno_items','storno_id=eq.'+stornoId).then(function(delRes){
-    /* Провалилото се изтриване НЕ бива да продължи към записа — иначе старите
-       редове остават и новите се добавят върху тях, тоест сторното се удвоява.
-       count===0 обаче е нормално: при НОВА бележка няма какво да се трие. */
-    if(!delRes.ok){
-      console.error('stornoSaveItems: старите редове НЕ бяха изтрити',stornoId,delRes.error);
-      return false;
-    }
-    var rows=[];
-    returnedItems.forEach(function(x,i){
-      rows.push({storno_id:stornoId,kind:'returned',sap_code:x.sap_code.trim(),article_name:(x.article_name||'').trim()||null,line_no:i+1});
-    });
-    replacementItems.forEach(function(x,i){
-      rows.push({storno_id:stornoId,kind:'replacement',sap_code:x.sap_code.trim(),article_name:(x.article_name||'').trim()||null,line_no:i+1});
-    });
-    if(!rows.length) return true;
-    return sbPost('kasa_storno_items',rows).then(function(r){return r.ok;});
-  }).catch(function(){return false;});
+  var items=[];
+  returnedItems.forEach(function(x,i){
+    items.push({kind:'returned',sap_code:x.sap_code.trim(),article_name:(x.article_name||'').trim()||null,line_no:i+1});
+  });
+  replacementItems.forEach(function(x,i){
+    items.push({kind:'replacement',sap_code:x.sap_code.trim(),article_name:(x.article_name||'').trim()||null,line_no:i+1});
+  });
+  return kasaApi('storno_items_save',{storno_id:stornoId,items:items}).then(function(){return true;},function(e){
+    try{console.error('stornoSaveItems: артикулите НЕ са записани',stornoId,e&&e.reason,e&&e.message);}catch(x){}
+    return false;
+  });
 }
 
 /* Push нотификация до admin+accounting при разминаване (нова сума < върната) —
@@ -2557,11 +2555,15 @@ function notifyStornoDiscrepancy(p){
   pushToRole('accounting',title,msg);
 }
 
+/* Етап 2 на Каса (26.11.2026): през kasa-api „storno_delete“ — само сторно в
+   обхвата (свой обект; admin — всички), артикулите се трият каскадно в базата.
+   Без резервен път през sbDelete — DELETE за браузъра е отнет. */
 function deleteStornoEntry(id){
   if(!confirm('Изтрий сторно бележката?'))return;
-  sbDelete('kasa_storno','id=eq.'+id).then(function(res){
-    if(!res.ok){toast('Грешка при изтриване','#dc2626');return;}
+  kasaApi('storno_delete',{id:id}).then(function(){
     toast('🗑 Изтрито');
     loadStorno();
+  },function(e){
+    toast('Грешка при изтриване: '+((e&&e.message)||'няма отговор'),'#dc2626');
   });
 }

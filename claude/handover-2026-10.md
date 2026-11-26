@@ -1360,6 +1360,16 @@ M − N; разминат ли се или провал → без дни + cons
 `kasa_cleanup_bak_20260920` — махната 04.11, заедно с още четири резервни
 (виж „Резервни таблици“ долу). Отворени истински: Добрич 15.09,
 Дупница 16.09.
+**Каса — защита през kasa-api (етап 2, 26.11.2026, сесия kasa-etap2):** всички
+четения минават през kasa-api от 24.11 (`kasa_api_stores='all'`); сторното се
+трие и артикулите му се записват през kasa-api (`storno_delete`,
+`storno_items_save`); качването на документ е с `x-upsert: false`. Миграцията
+`kasa-etap2-schema.sql` (anon/authenticated: без SELECT на седемте таблици —
+само колонен по филтрите на записите; kasa_documents — само INSERT;
+kasa_storno_items — нищо; без TRUNCATE/REFERENCES/TRIGGER; три политики на
+kasa-docs) — **чака отделно „давай“ рано сутрин**, виж
+`claude/open/26-11-kasa-etap2-migraciya.md`. Етап 3 (записите) —
+`claude/open/26-11-kasa-etap3-zapisi.md`. Лог — `claude/log/2026-11-26-kasa-etap2.md`.
 
 **UI редизайн (от 01.10)** — обектите се оплакват от скрол; решения: първо
 бъговете от одита (`claude/ui-audit-2026-10-01.md`), после общ layout

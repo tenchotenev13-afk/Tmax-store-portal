@@ -2,12 +2,25 @@
 // Repo на kasa-api върху supabase-js със service ключа. Отделно от index.ts,
 // за да се тества handler.ts без мрежа (handler.test.ts) и без Deno.serve при импорт.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import type { Query, Repo, Row, User } from "./handler.ts";
+import type { AuditEntry, Query, Repo, Row, User } from "./handler.ts";
 
 // Само безопасни колони — никога password_hash / history_pin_hash.
 const USER_COLS = "id,email,display_name,store_name,role,is_regional,assigned_stores,active";
 const BUCKET = "kasa-docs";
 const PAGE = 1000;
+
+// Етап 2 (26.11.2026): записът е САМО за сторно — бял списък таблица → колона
+// за изтриване. Всичко друго гърми, преди да стигне до базата.
+export const STORNO_WRITE_TABLES: Record<string, string[]> = {
+  kasa_storno: ["id"],
+  kasa_storno_items: ["storno_id"],
+};
+export function guardWrite(table: string, col?: string): void {
+  const cols = STORNO_WRITE_TABLES[table];
+  if (!cols) throw new Error("kasa-api: запис в непозволена таблица " + table);
+  if (col !== undefined && cols.indexOf(col) < 0) throw new Error("kasa-api: изтриване по непозволена колона " + table + "." + col);
+}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // deno-lint-ignore no-explicit-any
 type R = { data: any; error: { message: string } | null };
@@ -64,6 +77,25 @@ export function makeRepo(): Repo {
       const r = await db.storage.from(BUCKET).createSignedUrl(path, seconds);
       if (r.error || !r.data) return null;
       return r.data.signedUrl;
+    },
+    async deleteEq(table, col, val) {
+      guardWrite(table, col);
+      // Изтриване без конкретна стойност би било „изтрий всичко“ — не тръгва.
+      if (!UUID.test(String(val))) throw new Error("kasa-api: изтриване без валиден id");
+      const r = await db.from(table).delete({ count: "exact" }).eq(col, val);
+      if (r.error) throw new Error(r.error.message);
+      return r.count ?? 0;
+    },
+    async insertRows(table, rows) {
+      guardWrite(table);
+      if (!rows.length) return 0;
+      const r = await db.from(table).insert(rows, { count: "exact" });
+      if (r.error) throw new Error(r.error.message);
+      return r.count ?? rows.length;
+    },
+    async audit(e: AuditEntry) {
+      const r = await db.from("audit_log").insert({ ...e, success: true });
+      if (r.error) throw new Error(r.error.message);
     },
   };
 }

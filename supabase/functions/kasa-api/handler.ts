@@ -8,7 +8,10 @@
 // Всяка заявка към таблица минава през scopedQuery(), която слага филтъра по
 // store_name — без него repo.rows() отказва (виж guardQuery).
 //
-// Само ЧЕТЕНЕ. Записите (етап 3) и DELETE за сторно (етап 2) не са тук.
+// ЧЕТЕНЕ + двата записа за сторно от етап 2 (26.11.2026, решение 1 от 19.11):
+// storno_items_save (артикулите на сторно — изтриване + запис, като
+// stornoSaveItems днес) и storno_delete (бележката; артикулите — ON DELETE
+// CASCADE). Останалите записи (W1–W23) — етап 3.
 import { verifySession } from "../_shared/session.ts";
 // @ts-ignore — обикновен JS модул (копие от kasa.js), без типове.
 import { stornoIndicator } from "./storno-rule.js";
@@ -32,19 +35,26 @@ export type Query = {
   embedOrder?: { table: string; cols: string[] };
   cap: number;                        // repo връща най-много cap+1 реда
 };
+// Запис — само в бял списък от таблици (STORNO_WRITE_TABLES в repo.ts).
+export type AuditEntry = { event: string; user_email: string; user_role: string; store_name: string | null; details: Record<string, unknown> };
 export interface Repo {
   getUser(id: string): Promise<User | null>;
   rows(q: Query): Promise<Row[]>;
   signUrl(path: string, seconds: number): Promise<string | null>;
+  deleteEq(table: string, col: string, val: string): Promise<number>;
+  insertRows(table: string, rows: Row[]): Promise<number>;
+  audit(e: AuditEntry): Promise<void>;
 }
 
 export class HttpError extends Error {
   constructor(public status: number, public reason: string, message: string) { super(message); }
 }
 
-export type Action = "day" | "range" | "storno_items" | "banner" | "report_rows" | "doc_url";
+export type Action = "day" | "range" | "storno_items" | "banner" | "report_rows" | "doc_url" | "storno_items_save" | "storno_delete";
+export const ACTIONS: Action[] = ["day", "range", "storno_items", "banner", "report_rows", "doc_url", "storno_items_save", "storno_delete"];
 export type Scope = {
   role: string;
+  email: string;                      // за audit_log при запис
   own: string | null;                 // users.store_name
   stores: string[] | "all";           // обхват за day / range / storno_items / doc_url
   reportStores: string[] | "all";     // обхват за report_rows
@@ -57,6 +67,11 @@ export const DOC_URL_SECONDS = 300;   // решение 8
 export const ROW_CAP = 20000;         // таван на таблица в един отговор
 export const MAX_RANGE_DAYS = 400;    // за заявка през повече от един обект
 export const STORNO_BANNER_DAYS = 30;
+export const STORNO_ITEMS_MAX = 200;  // най-много днес: 50 на една бележка (26.11.2026)
+const STORNO_KINDS = ["returned", "replacement"];
+// Сторно се пише от kasa, manager, admin (canEdit в kasa.js — loadStorno);
+// accounting само връща за коментар (W11, етап 3), не пише артикули и не трие.
+const STORNO_WRITE = ["storno_items_save", "storno_delete"] as Action[];
 
 const STORE_ROLES = ["kasa", "manager"];
 const DENOM_COLS = ["bills_500", "bills_200", "bills_100", "bills_50", "bills_20", "bills_10", "bills_5", "bills_2", "bills_1",
@@ -88,30 +103,31 @@ export function assignedList(v: User["assigned_stores"]): string[] {
 
 export function resolveScope(u: User): Scope {
   const own = u.store_name || null;
+  const email = String(u.email || "");
   const ownList = own ? [own] : [];
   const assigned = assignedList(u.assigned_stores);
   // 3) admin — всички обекти, винаги (assigned не го ограничава).
   if (u.role === "admin") {
-    return { role: u.role, own, stores: "all", reportStores: "all",
-      actions: ["day", "range", "storno_items", "banner", "report_rows", "doc_url"], stornoBanner: true };
+    return { role: u.role, email, own, stores: "all", reportStores: "all",
+      actions: (["day", "range", "storno_items", "banner", "report_rows", "doc_url"] as Action[]).concat(STORNO_WRITE), stornoBanner: true };
   }
   // 2) accounting — assigned ограничава, ако го има (като storeQ); иначе всички.
   if (u.role === "accounting") {
     const s: string[] | "all" = assigned.length ? assigned : "all";
-    return { role: u.role, own, stores: s, reportStores: s,
+    return { role: u.role, email, own, stores: s, reportStores: s,
       actions: ["day", "range", "storno_items", "banner", "report_rows", "doc_url"], stornoBanner: true };
   }
   // 4) controlling — само report_rows за всички (+ банерът за своя обект).
   if (u.role === "controlling") {
-    return { role: u.role, own, stores: ownList, reportStores: "all", actions: ["report_rows", "banner"], stornoBanner: false };
+    return { role: u.role, email, own, stores: ownList, reportStores: "all", actions: ["report_rows", "banner"], stornoBanner: false };
   }
   // Обектът — само своя.
   if (STORE_ROLES.indexOf(u.role) >= 0) {
-    return { role: u.role, own, stores: ownList, reportStores: ownList,
-      actions: ["day", "range", "storno_items", "banner", "doc_url"], stornoBanner: false };
+    return { role: u.role, email, own, stores: ownList, reportStores: ownList,
+      actions: (["day", "range", "storno_items", "banner", "doc_url"] as Action[]).concat(STORNO_WRITE), stornoBanner: false };
   }
   // 4) logistics и всички останали — само банерът за своя обект.
-  return { role: u.role, own, stores: ownList, reportStores: ownList, actions: ["banner"], stornoBanner: false };
+  return { role: u.role, email, own, stores: ownList, reportStores: ownList, actions: ["banner"], stornoBanner: false };
 }
 
 export function inScope(stores: string[] | "all", store: string): boolean {
@@ -167,10 +183,36 @@ async function fetchRows(repo: Repo, q: Query | null): Promise<Row[]> {
 }
 const wrap = (rows: Row[]) => ({ rows, partial: false });
 
+// Артикулите на сторно от тялото → редове за kasa_storno_items. storno_id се
+// слага тук (от проверения родител), не от тялото; id и created_at — от базата.
+export function needStornoItems(v: unknown, stornoId: string): Row[] {
+  if (!Array.isArray(v)) throw new HttpError(400, "bad_request", "Невалиден списък артикули.");
+  if (v.length > STORNO_ITEMS_MAX) throw new HttpError(400, "bad_request", "Твърде много артикули (над " + STORNO_ITEMS_MAX + ").");
+  return v.map((x, i) => {
+    const it = (x && typeof x === "object" && !Array.isArray(x)) ? x as Record<string, unknown> : null;
+    const bad = (what: string) => new HttpError(400, "bad_request", "Ред " + (i + 1) + ": " + what + ".");
+    if (!it) throw bad("невалиден артикул");
+    if (STORNO_KINDS.indexOf(String(it.kind)) < 0) throw bad("невалиден вид");
+    const code = typeof it.sap_code === "string" ? it.sap_code.trim() : "";
+    if (!code || code.length > 200) throw bad("липсващ или твърде дълъг SAP код");
+    const nameRaw = it.article_name;
+    if (nameRaw !== null && nameRaw !== undefined && typeof nameRaw !== "string") throw bad("невалидно име");
+    const name = typeof nameRaw === "string" ? nameRaw.trim() : "";
+    if (name.length > 500) throw bad("твърде дълго име");
+    const ln = it.line_no;
+    if (typeof ln !== "number" || !Number.isInteger(ln) || ln < 1 || ln > 10000) throw bad("невалиден пореден номер");
+    return { storno_id: stornoId, kind: String(it.kind), sap_code: code, article_name: name || null, line_no: ln };
+  });
+}
+// Одитът при запис не бива да провали вече направения запис — грешката отива в лога.
+async function auditSafe(repo: Repo, e: AuditEntry): Promise<void> {
+  try { await repo.audit(e); } catch (x) { console.error("kasa-api audit:", x); }
+}
+
 // ── Действия ──────────────────────────────────────────────────────────────
 export async function dispatch(repo: Repo, sc: Scope, b: Record<string, unknown>, now: number): Promise<Record<string, unknown>> {
   const action = String(b.action || "") as Action;
-  if (["day", "range", "storno_items", "banner", "report_rows", "doc_url"].indexOf(action) < 0) {
+  if (ACTIONS.indexOf(action) < 0) {
     throw new HttpError(400, "bad_action", "Непознато действие.");
   }
   if (sc.actions.indexOf(action) < 0) throw new HttpError(403, "forbidden", "Нямате достъп до касовите данни.");
@@ -299,6 +341,40 @@ export async function dispatch(repo: Repo, sc: Scope, b: Record<string, unknown>
       const url = await repo.signUrl(path, DOC_URL_SECONDS);
       if (!url) throw new HttpError(404, "no_file", "Файлът липсва в хранилището.");
       return { url, expires_in: DOC_URL_SECONDS, file_name: rows[0].file_name || null };
+    }
+
+    // Артикулите на сторно (W14 + W15, stornoSaveItems): старите се трият, новите
+    // се записват — две стъпки, като днес (транзакцията — етап 3, storno_save).
+    // Провалено изтриване НЕ продължава към записа: иначе сторното се удвоява.
+    case "storno_items_save": {
+      const id = needId(b.storno_id, "storno_id");
+      const parent = await fetchRows(repo, scopedQuery(sc.stores, { table: "kasa_storno", select: "id,store_name", eq: { id }, order: ["id.asc"], cap: 1 }));
+      if (!parent.length) throw new HttpError(404, "not_found", "Няма такава сторно бележка във вашия обхват.");
+      const rows = needStornoItems(b.items, id);
+      const removed = await repo.deleteEq("kasa_storno_items", "storno_id", id);
+      let added = 0;
+      try {
+        added = rows.length ? await repo.insertRows("kasa_storno_items", rows) : 0;
+      } catch (e) {
+        // Старите вече ги няма — казва се изрично, за да се запази бележката пак.
+        console.error("kasa-api storno_items_save insert:", e);
+        throw new HttpError(500, "items_not_saved", "Артикулите не се записаха — запази бележката отново.");
+      }
+      await auditSafe(repo, { event: "kasa_storno_items_save", user_email: sc.email, user_role: sc.role,
+        store_name: String(parent[0].store_name), details: { storno_id: id, removed, added } });
+      return { storno_id: id, removed, added };
+    }
+
+    // Сторно бележка (W16, deleteStornoEntry). Артикулите — ON DELETE CASCADE.
+    case "storno_delete": {
+      const id = needId(b.id, "id");
+      const parent = await fetchRows(repo, scopedQuery(sc.stores, { table: "kasa_storno",
+        select: "id,store_name,storno_date,original_receipt_date,articles,returned_sum,new_sum,status,created_by", eq: { id }, order: ["id.asc"], cap: 1 }));
+      if (!parent.length) throw new HttpError(404, "not_found", "Няма такава сторно бележка във вашия обхват.");
+      const deleted = await repo.deleteEq("kasa_storno", "id", id);
+      await auditSafe(repo, { event: "kasa_storno_delete", user_email: sc.email, user_role: sc.role,
+        store_name: String(parent[0].store_name), details: { ...parent[0], deleted } });
+      return { id, deleted };
     }
   }
   throw new HttpError(400, "bad_action", "Непознато действие.");

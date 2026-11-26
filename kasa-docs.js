@@ -17,7 +17,11 @@ function uploadKasaDoc(file, reportType, docType, onDone) {
       headers: {
         'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
         'Content-Type': file.type||'application/octet-stream',
-        'x-upsert': 'true'
+        /* 'false' от етап 2 на Каса (26.11.2026): за anon остава САМО INSERT
+           политика върху kasa-docs, а upsert иска и SELECT + UPDATE. Пътят е
+           уникален (Date.now() в името), презаписване и досега нямаше (UPDATE
+           политика никога не е имало). Сблъсък → 409 → „Грешка при качване“. */
+        'x-upsert': 'false'
       },
       body: e.target.result
     }).then(function(r) {

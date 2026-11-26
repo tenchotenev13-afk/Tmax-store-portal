@@ -40,8 +40,10 @@ const ROOT = path.resolve(process.argv[2] || '.');
 
 const DELETE_ALLOWED = [
   'bulletin_tasks', 'bus_routes', 'client_orders', 'contact_topics', 'contacts',
-  'differences_reports', 'documents', 'goods_transit', 'kasa_storno',
-  'kasa_storno_items', 'loading_list_items', 'loading_list_photos',
+  'differences_reports', 'documents', 'goods_transit',
+  // kasa_storno, kasa_storno_items — махнати 26.11.2026 (Каса, етап 2):
+  // триенето минава през kasa-api, DELETE се отнема в kasa-etap2-schema.sql.
+  'loading_list_items', 'loading_list_photos',
   // loading_lists — от 18.11.2026 („🗑 Изтрий черновата“, ll-nahodki т.10);
   // базата пуска DELETE само при status = 'draft' (миграция 20261118095818).
   'loading_list_products', 'loading_lists', 'notification_matrix', 'notification_overrides',
@@ -137,8 +139,20 @@ ok('няма триене извън DELETE_ALLOWED', extra.length === 0,
 ok('няма запис в DELETE_ALLOWED без код', unused.length === 0,
    '\n      ' + unused.map(t => t + ' → махни от DELETE_ALLOWED (и revoke delete в нова миграция)').join('\n      '));
 ok('DELETE_ALLOWED без повторения', new Set(DELETE_ALLOWED).size === DELETE_ALLOWED.length);
-/* 45 от anon-revoke-delete-schema.sql + loading_lists (18.11.2026) + revaluation_units (23.11.2026, нова таблица). */
-ok('47 таблици (45 от anon-revoke-delete-schema.sql + loading_lists + revaluation_units)', DELETE_ALLOWED.length === 47, 'реално: ' + DELETE_ALLOWED.length);
+/* 45 от anon-revoke-delete-schema.sql + loading_lists (18.11.2026) + revaluation_units (23.11.2026, нова таблица)
+   − kasa_storno, kasa_storno_items (26.11.2026, kasa-etap2-schema.sql). */
+ok('45 таблици (45 от anon-revoke-delete-schema.sql + loading_lists + revaluation_units − 2 касови)', DELETE_ALLOWED.length === 45, 'реално: ' + DELETE_ALLOWED.length);
+
+/* Таблици, отнети по-късно с ОТДЕЛНА миграция — revoke delete трябва да е там. */
+const REVOKED_LATER = { kasa_storno: 'kasa-etap2-schema.sql', kasa_storno_items: 'kasa-etap2-schema.sql' };
+section('Отнетите по-късно — revoke в своята миграция и извън DELETE_ALLOWED');
+Object.keys(REVOKED_LATER).forEach(t => {
+  const f = path.join(ROOT, REVOKED_LATER[t]);
+  const s = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+  const up = s.split(/^-- ROLLBACK/m)[0];
+  ok(t + ': revoke с delete (или all) в ' + REVOKED_LATER[t], new RegExp('^revoke (all|[a-z, ]*\\bdelete\\b[a-z, ]*) on public\\.' + t + ' from anon, authenticated;$', 'm').test(up));
+  ok(t + ': не е в DELETE_ALLOWED', DELETE_ALLOWED.indexOf(t) < 0);
+});
 
 /* Таблици, отнети на 02.11 и върнати по-късно с ОТДЕЛНА миграция. Всяка трябва
    да има grant delete в посочения schema файл — иначе записът тук е лъжа. */

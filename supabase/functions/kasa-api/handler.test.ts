@@ -3,9 +3,9 @@
 // База в паметта (MemRepo) — без мрежа. MemRepo изпълнява Query БУКВАЛНО
 // (вкл. липсващ филтър по обект), затова „обект А не получава ред на Б“ се
 // проверява от самата функция, не от фикстурата.
-import { handleKasa, resolveScope, needStore, daysBetween, HttpError, ROW_CAP, DOC_URL_SECONDS,
-  type Query, type Repo, type Row, type User } from "./handler.ts";
-import { guardQuery } from "./repo.ts";
+import { handleKasa, resolveScope, needStore, daysBetween, HttpError, ROW_CAP, DOC_URL_SECONDS, STORNO_ITEMS_MAX,
+  type AuditEntry, type Query, type Repo, type Row, type User } from "./handler.ts";
+import { guardQuery, guardWrite } from "./repo.ts";
 import { signSession } from "../_shared/session.ts";
 
 Deno.env.set("PORTAL_SESSION_SECRET", "test-secret-" + "x".repeat(48));
@@ -83,6 +83,24 @@ class MemRepo implements Repo {
     return out.slice(0, q.cap + 1);
   }
   async signUrl(path: string, seconds: number) { this.calls++; this.signed.push(path); return "https://signed.example/" + path + "?e=" + seconds; }
+  // Запис — същият бял списък като repo.ts; каскадата kasa_storno → items като в базата.
+  writes: string[] = [];
+  audits: AuditEntry[] = [];
+  failInsert = false;
+  async deleteEq(table: string, col: string, val: string) {
+    this.calls++; guardWrite(table, col); this.writes.push("DELETE " + table + "." + col + "=" + val);
+    const before = this.t[table].length;
+    this.t[table] = this.t[table].filter((r) => String(r[col]) !== val);
+    if (table === "kasa_storno") this.t.kasa_storno_items = this.t.kasa_storno_items.filter((i) => String(i.storno_id) !== val);
+    return before - this.t[table].length;
+  }
+  async insertRows(table: string, rows: Row[]) {
+    this.calls++; guardWrite(table); this.writes.push("INSERT " + table + " x" + rows.length);
+    if (this.failInsert) throw new Error("вмъкването падна");
+    for (const r of rows) this.t[table].push({ id: nid(), ...r });
+    return rows.length;
+  }
+  async audit(e: AuditEntry) { this.calls++; this.audits.push(e); }
 }
 
 async function call(repo: MemRepo, who: User | null, body: Record<string, unknown>, opts: { token?: string; now?: number } = {}) {
@@ -293,6 +311,132 @@ Deno.test("needStore: тялото само избира вътре в обхв�
   let threw = false;
   try { needStore([K], R); } catch (e) { threw = e instanceof HttpError && e.status === 403; }
   assert(threw, "чужд → 403");
+});
+
+// ── Етап 2: запис на сторно (storno_items_save, storno_delete) ────────────
+const stornoOf = (repo: MemRepo, s: string) => repo.t.kasa_storno.find((r) => r.store_name === s && r.articles === "123456")!;
+const itemsOf = (repo: MemRepo, id: unknown) => repo.t.kasa_storno_items.filter((i) => i.storno_id === id);
+const ITEMS = [
+  { kind: "returned", sap_code: " 111 ", article_name: " Стол ", line_no: 1 },
+  { kind: "returned", sap_code: "222", article_name: "", line_no: 2 },
+  { kind: "replacement", sap_code: "333", article_name: null, line_no: 1 },
+];
+
+Deno.test("storno_items_save: свой обект — старите се трият, новите се записват, storno_id от сървъра", async () => {
+  const repo = new MemRepo();
+  const sK = stornoOf(repo, K);
+  const r = await call(repo, U.mgrK, { action: "storno_items_save", storno_id: sK.id,
+    items: ITEMS.map((x) => ({ ...x, storno_id: "00000000-0000-4000-8000-999999999999" })) });
+  eq(r.status, 200, "статус"); eq([r.data.removed, r.data.added], [1, 3], "1 изтрит, 3 записани");
+  const got = itemsOf(repo, sK.id).map((i) => [i.kind, i.sap_code, i.article_name, i.line_no]);
+  eq(got, [["returned", "111", "Стол", 1], ["returned", "222", null, 2], ["replacement", "333", null, 1]], "редовете (trim, празно име → null)");
+  eq(repo.t.kasa_storno_items.filter((i) => i.storno_id === "00000000-0000-4000-8000-999999999999").length, 0, "storno_id от тялото на реда се игнорира");
+  eq(repo.writes.slice(0, 2), ["DELETE kasa_storno_items.storno_id=" + sK.id, "INSERT kasa_storno_items x3"], "ред: изтриване, после запис");
+  eq(repo.audits.length, 1, "одит"); eq(repo.audits[0].event, "kasa_storno_items_save", "одит: събитие");
+  eq([repo.audits[0].store_name, repo.audits[0].user_email], [K, U.mgrK.email], "одит: обект и имейл от users");
+});
+
+Deno.test("storno_items_save: празен списък → само изтриване; kasa на своя обект; admin на чужд", async () => {
+  const repo = new MemRepo();
+  const sR = stornoOf(repo, R);
+  const r = await call(repo, U.kasaR, { action: "storno_items_save", storno_id: sR.id, items: [] });
+  eq([r.status, r.data.removed, r.data.added], [200, 1, 0], "kasa, празно");
+  eq(repo.writes.filter((w) => w.startsWith("INSERT")).length, 0, "без INSERT при празен списък");
+  const sSH = stornoOf(repo, SH);
+  const a = await call(repo, U.admin, { action: "storno_items_save", storno_id: sSH.id, items: ITEMS });
+  eq([a.status, a.data.added], [200, 3], "admin — всички обекти");
+});
+
+Deno.test("storno_items_save: чуждо сторно → 404 и НИЩО не се трие", async () => {
+  const repo = new MemRepo();
+  const sR = stornoOf(repo, R);
+  const r = await call(repo, U.mgrK, { action: "storno_items_save", storno_id: sR.id, items: ITEMS });
+  eq(r.status, 404, "чуждо"); eq(repo.writes, [], "без запис");
+  eq(itemsOf(repo, sR.id).length, 1, "артикулът на Р е непокътнат");
+  const n = await call(repo, U.mgrK, { action: "storno_items_save", storno_id: "00000000-0000-4000-8000-777777777777", items: ITEMS });
+  eq(n.status, 404, "несъществуващо");
+});
+
+Deno.test("storno_items_save / storno_delete: роли без запис → 403, без нито един запис", async () => {
+  for (const who of [U.accAll, U.accAsg, U.ctrl, U.logi, U.sklK]) {
+    const repo = new MemRepo();
+    const sid = stornoOf(repo, who.store_name === K ? K : SH).id;
+    for (const body of [{ action: "storno_items_save", storno_id: sid, items: ITEMS }, { action: "storno_delete", id: sid }]) {
+      const r = await call(repo, who, body);
+      eq(r.status, 403, who.role + " " + body.action); eq(r.data.reason, "forbidden", who.role + " причина");
+    }
+    eq(repo.writes, [], who.role + ": без запис");
+  }
+});
+
+Deno.test("storno_items_save: невалидни артикули → 400 преди изтриването", async () => {
+  const bads: unknown[] = [
+    null, "x", [null], [{ ...ITEMS[0], kind: "other" }], [{ ...ITEMS[0], sap_code: "  " }], [{ ...ITEMS[0], sap_code: 5 }],
+    [{ ...ITEMS[0], sap_code: "x".repeat(201) }], [{ ...ITEMS[0], article_name: 7 }], [{ ...ITEMS[0], article_name: "x".repeat(501) }],
+    [{ ...ITEMS[0], line_no: 0 }], [{ ...ITEMS[0], line_no: 1.5 }], [{ ...ITEMS[0], line_no: "1" }],
+    Array.from({ length: STORNO_ITEMS_MAX + 1 }, (_, i) => ({ ...ITEMS[0], line_no: i + 1 })),
+  ];
+  for (const items of bads) {
+    const repo = new MemRepo();
+    const sK = stornoOf(repo, K);
+    const r = await call(repo, U.mgrK, { action: "storno_items_save", storno_id: sK.id, items });
+    eq(r.status, 400, "лоши: " + JSON.stringify(items).slice(0, 60)); eq(repo.writes, [], "без запис: " + JSON.stringify(items).slice(0, 40));
+  }
+  // Точно на лимита — минава.
+  const repo = new MemRepo();
+  const sK = stornoOf(repo, K);
+  const ok = await call(repo, U.mgrK, { action: "storno_items_save", storno_id: sK.id,
+    items: Array.from({ length: STORNO_ITEMS_MAX }, (_, i) => ({ ...ITEMS[0], sap_code: "x".repeat(200), article_name: "y".repeat(500), line_no: i + 1 })) });
+  eq([ok.status, ok.data.added], [200, STORNO_ITEMS_MAX], "точно 200 реда, 200 знака код, 500 знака име");
+  const badId = await call(repo, U.mgrK, { action: "storno_items_save", storno_id: "1; delete", items: [] });
+  eq(badId.status, 400, "невалиден storno_id");
+});
+
+Deno.test("storno_items_save: паднал запис след изтриването → 500 items_not_saved (ясно съобщение)", async () => {
+  const repo = new MemRepo();
+  repo.failInsert = true;
+  const sK = stornoOf(repo, K);
+  const r = await call(repo, U.mgrK, { action: "storno_items_save", storno_id: sK.id, items: ITEMS });
+  eq([r.status, r.data.reason], [500, "items_not_saved"], "статус и причина");
+  assert(/запази бележката отново/.test(String(r.data.message)), "съобщението казва какво да се направи");
+});
+
+Deno.test("storno_delete: свой → изтрит + каскада на артикулите + одит със снимка; чужд → 404", async () => {
+  const repo = new MemRepo();
+  const sK = stornoOf(repo, K), sR = stornoOf(repo, R);
+  const foreign = await call(repo, U.mgrK, { action: "storno_delete", id: sR.id });
+  eq(foreign.status, 404, "чуждо"); eq(repo.writes, [], "чуждо: без запис");
+  const r = await call(repo, U.mgrK, { action: "storno_delete", id: sK.id });
+  eq([r.status, r.data.deleted], [200, 1], "свое");
+  eq(repo.t.kasa_storno.some((x) => x.id === sK.id), false, "бележката я няма");
+  eq(itemsOf(repo, sK.id).length, 0, "артикулите — каскадно");
+  eq(repo.t.kasa_storno.some((x) => x.id === sR.id), true, "чуждата е непокътната");
+  eq(repo.audits[0].event, "kasa_storno_delete", "одит");
+  eq([repo.audits[0].details.returned_sum, repo.audits[0].details.storno_date], [100, "2026-11-10"], "одит: снимка на изтритото");
+  const again = await call(repo, U.mgrK, { action: "storno_delete", id: sK.id });
+  eq(again.status, 404, "второ изтриване → 404");
+  const admin = await call(repo, U.admin, { action: "storno_delete", id: sR.id });
+  eq(admin.status, 200, "admin — чужд обект");
+  eq((await call(repo, U.mgrK, { action: "storno_delete", id: "abc" })).status, 400, "невалиден id");
+});
+
+Deno.test("storno_*: изтекъл пропуск → 401 без нито едно обръщение към базата", async () => {
+  const repo = new MemRepo();
+  const sid = stornoOf(repo, K).id;
+  for (const body of [{ action: "storno_items_save", storno_id: sid, items: ITEMS }, { action: "storno_delete", id: sid }]) {
+    const r = await call(repo, U.mgrK, body, { now: NOW + 13 * 3600 });
+    eq(r.status, 401, body.action);
+  }
+  eq(repo.calls, 0, "repo не се пипа");
+});
+
+Deno.test("guardWrite: запис само в kasa_storno(id) и kasa_storno_items(storno_id)", () => {
+  guardWrite("kasa_storno", "id"); guardWrite("kasa_storno_items", "storno_id"); guardWrite("kasa_storno_items");
+  for (const [t, c] of [["kasa_reports", "id"], ["kasa_storno", "store_name"], ["kasa_storno_items", "id"], ["users", undefined]] as const) {
+    let threw = false;
+    try { guardWrite(t, c); } catch { threw = true; }
+    assert(threw, t + "." + c);
+  }
 });
 
 Deno.test("guardQuery: заявка без обхват, без таван или без подредба не тръгва", () => {
