@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията razliki_pallet_suppliers, razliki-pallet-suppliers-data.sql, версия 20261126103558, приложена 26.11.2026)
+- 26.11 · stock_differences.difference_category — нова стойност 'pallet_inbound'; app_settings — нов ред с ключ 'diff_pallet_suppliers'. Промяна само в данни, без промяна за огледалото
+
 (промяна само в данни, checklist-email-extra-schema.sql; миграция checklist_email_extra — версия 20261126094441, приложена 26.11.2026)
 - 26.11 · app_settings — промяна само в данни (нов ред checklist_email_extra), без промяна за огледалото
 

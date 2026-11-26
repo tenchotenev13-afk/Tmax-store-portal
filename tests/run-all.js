@@ -146,6 +146,7 @@ const TESTS = [
   'razliki-etap7b.test.js',
   'razliki-co-findings.test.js',
   'razliki-chete-se-kato.test.js',
+  'razliki-vhodyashta-palet.test.js',
   'bulletin-problem-articles.test.js',
   'diff-report-no-document.test.js',
   'docs-office-only.test.js',

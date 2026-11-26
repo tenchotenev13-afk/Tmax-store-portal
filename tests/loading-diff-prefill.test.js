@@ -61,8 +61,13 @@ const crypto = require('crypto');
    едно срещане и нищо друго: без него HTML-ът е байт по байт старата снимка
    4519db9f… (6575), проверено машинно. Полето се появява само при
    „грешен баркод“ — виж razliki-chete-se-kato.test.js. */
-const MODAL_SHA = '143bcbf3b0f602087ea3f01d5da50b894bc4b4cc1699fd9a131c57e3ce6f6fb0';
-const MODAL_LEN = 6608;
+/* Обновена на 26.11.2026 (6608 -> 6642): „🟫 Входяща за палет“
+   (razliki-vhodyashta-palet) — празният <div class="di-pallet-wrap"></div> (34),
+   едно срещане и нищо друго: без него HTML-ът е байт по байт старата снимка
+   143bcbf3… (6608), проверено машинно. Падащото „Палет на *“ се появява само
+   при тази категория — виж razliki-vhodyashta-palet.test.js. */
+const MODAL_SHA = '1b7fae2acc0848918736a056c8961efbfedd26fda87ddf076b1eedf2587bb6e4';
+const MODAL_LEN = 6642;
 
 const WH = 'Логистичен склад Търговище';
 const STORE = { email: 'petrich@temax.bg', display_name: 'Управител Петрич',

@@ -3794,6 +3794,11 @@ var DIFF_CATEGORIES = [
   ['damaged','💔 Увредена стока / липсват части', ['supplier','interstore'], true, null, 'увредена стока'],
   ['wrong_barcode','🏷️ Грешен баркод / етикет / описание', ['supplier','interstore'], true, 'j.jeliazkov@temax.bg, m.pavlova@temax.bg', 'грешен баркод'],
   ['similar_item','🎨 Сходен артикул (различен цвят/размер)', ['interstore'], false, 'm.pavlova@temax.bg (за ZPACK корекция)', 'сходен артикул'],
+  /* Входяща за палет (решение Д1 от 12.11.2026 + Тенчо 26.11.2026): само към
+     доставчик. Редът е обикновен — material_code / material_name от
+     настройката app_settings 'diff_pallet_suppliers', quantity 0,
+     quantity_received = брой палети. Формата: sdPallet* по-долу. */
+  ['pallet_inbound','🟫 Входяща за палет', ['supplier'], false, null, 'входяща за палет'],
   /* Сторна по грешен прием - разликата е между ФАКТУРАТА и реално заприходеното
      по нея, не между поръчка и доставка. Затова двете стойности са отделни от
      undelivered/excess, макар да звучат близко: там мярката е входящата
@@ -3819,8 +3824,8 @@ function diffCatMeta(key){
 }
 /* Опции за <select>, филтрирани по посока - доставчик и междускладов трансфер
    имат различни, невзаимозаменяеми списъци категории (по реалните бланки) */
-function diffCategoryOptionsForDirection(direction,selected){
-  var list=DIFF_CATEGORIES.filter(function(c){return c[2].indexOf(direction)>=0;});
+function diffCategoryOptionsForDirection(direction,selected,exclude){
+  var list=DIFF_CATEGORIES.filter(function(c){return c[2].indexOf(direction)>=0 && !(exclude && exclude.indexOf(c[0])>=0);});
   return '<option value="">-- категория --</option>'+list.map(function(c){
     return '<option value="'+c[0]+'"'+(selected===c[0]?' selected':'')+'>'+c[1]+'</option>';
   }).join('');
@@ -5001,7 +5006,9 @@ function openSDMoveModal(rid){
   if(!sdCanMoveReport(rep)){ toast('Бланката има решен ред — първо върни типа, после смени посоката','#dc2626'); return; }
   var target = sdMoveTarget(rep);
   var lines = sdData.filter(function(l){ return l.report_id===rep.id; });
-  var cats = DIFF_CATEGORIES.filter(function(c){ return c[2].indexOf(target)>=0; });
+  /* „Входяща за палет" не се избира тук: кодът, името и 0-та идват от формата
+     за подаване (sdPallet*), а този модал сменя само категорията. */
+  var cats = DIFF_CATEGORIES.filter(function(c){ return c[2].indexOf(target)>=0 && c[0]!=='pallet_inbound'; });
   var ords = lines.map(function(l){ return String(l.order_number||'').trim(); });
   var ord0 = (ords.length && diffOrderNumValid(ords[0]) && ords.every(function(o){ return o===ords[0]; })) ? ords[0] : '';
   var wk = (typeof getWeekNumber==='function' && rep.created_at) ? getWeekNumber(rep.created_at) : null;
@@ -5020,7 +5027,7 @@ function openSDMoveModal(rid){
     var pick = cats.some(function(c){ return c[0]===cur; }) ? cur : ((SD_MOVE_CAT[target]||{})[cur]||'');
     h += '<div style="display:grid;grid-template-columns:1fr 230px;gap:6px;align-items:center;margin-bottom:6px;">'+
       '<div style="font-size:12px;">'+(i+1)+'. '+esc(l.material_name||'')+' <span style="color:#94a3b8;">('+esc(diffCategoryLabel(cur))+')</span></div>'+
-      '<select class="fi sdm-cat" data-id="'+l.id+'" style="margin:0;">'+diffCategoryOptionsForDirection(target, pick)+'</select></div>';
+      '<select class="fi sdm-cat" data-id="'+l.id+'" style="margin:0;">'+diffCategoryOptionsForDirection(target, pick, ['pallet_inbound'])+'</select></div>';
   });
   h += '<label class="fl">Поръчка № * <span style="color:#94a3b8;font-weight:400;">(41… или 43…, не входяща доставка)</span></label>'+
     '<input class="fi" id="sdm-order" inputmode="numeric" placeholder="напр. 4100135756" value="'+escVal(ord0)+'" style="max-width:220px;">'+
@@ -5046,7 +5053,7 @@ function submitSDMove(rid){
   lines.forEach(function(l, i){
     var sel = document.querySelector('#sdm-ov .sdm-cat[data-id="'+l.id+'"]');
     var v = sel ? sel.value : '';
-    var ok = DIFF_CATEGORIES.some(function(c){ return c[0]===v && c[2].indexOf(target)>=0; });
+    var ok = v!=='pallet_inbound' && DIFF_CATEGORIES.some(function(c){ return c[0]===v && c[2].indexOf(target)>=0; });
     if(!ok) missing.push(i+1); else picks[l.id] = v;
   });
   if(missing.length){ toast((missing.length===1?'Ред ':'Редове ')+missing.join(', ')+': избери категория','#dc2626'); return; }
@@ -5189,6 +5196,8 @@ function diffItemRowHtml(item,direction){
       '</div>';
     })()+
     '<div style="margin-bottom:6px;"><select class="fi di-cat" style="width:100%;" onchange="updateDiffItemHint(this)">'+catOpts+'</select></div>'+
+    /* „Палет на *" — само при „🟫 Входяща за палет" (sdPalletRowOn). */
+    '<div class="di-pallet-wrap"></div>'+
     '<div class="di-reads-wrap">'+sdReadsAsFieldHtml(item.category, item.readsAs)+'</div>'+
     '<div class="di-hint"></div>'+
     '<div style="display:flex;gap:6px;">'+
@@ -5220,8 +5229,138 @@ function sdReadsAsFromRow(row, cat){
   var v = el ? String(el.value || '').trim() : '';
   return v || null;
 }
+/* ══ „🟫 Входяща за палет" (pallet_inbound) ══
+   Решение Д1 от срещата на 12.11.2026 + решение на Тенчо 26.11.2026. Списъкът
+   с палети е НАСТРОЙКА — app_settings 'diff_pallet_suppliers' (JSON масив
+   {label, code, name}, razliki-pallet-suppliers-data.sql): нов доставчик се
+   добавя там, без промяна в кода. Чете се при всяко отваряне на формата.
+   Изборът на палет попълва SAP кода и наименованието (само за четене);
+   „По входяща доставка" = 0 (само за четене); „Реално получено" става
+   „Брой палети *" (цяло число > 0). В базата — обикновен ред. */
+var sdPalletList = null;    /* null = не е прочетен / паднал; [] = празен */
+var sdPalletLoading = null; /* обещанието, докато се чете */
+var SD_PALLET_FAIL_MSG = 'Списъкът с палети не се зареди — опитайте пак';
+function sdParsePalletList(v){
+  var arr;
+  try{ arr = JSON.parse(String(v==null?'':v)); }catch(e){ return []; }
+  if(!Array.isArray(arr)) return [];
+  return arr.filter(function(p){
+    return p && String(p.label||'').trim() && String(p.code||'').trim() && String(p.name||'').trim();
+  }).map(function(p){
+    return { label:String(p.label).trim(), code:String(p.code).trim(), name:String(p.name).trim() };
+  });
+}
+function sdLoadPalletList(){
+  var p = sbGetOk('app_settings','key=eq.diff_pallet_suppliers&select=key,value').then(function(r){
+    if(sdPalletLoading === p) sdPalletLoading = null;
+    if(!r || !r.ok){ sdPalletList = null; return null; }
+    var row = (r.rows||[]).filter(function(x){ return x && x.key === 'diff_pallet_suppliers'; })[0];
+    sdPalletList = row ? sdParsePalletList(row.value) : [];
+    return sdPalletList;
+  });
+  sdPalletLoading = p;
+  return p;
+}
+function sdPalletFind(code){
+  code = String(code==null?'':code);
+  return (sdPalletList||[]).filter(function(p){ return p.code === code; })[0] || null;
+}
+function sdPalletFieldHtml(code){
+  return '<div style="margin-bottom:6px;">'+
+    '<div class="di-lbl" style="font-size:10.5px;line-height:1.25;color:#64748b;margin-bottom:2px;">Палет на *</div>'+
+    '<select class="fi di-pallet" style="width:100%;" onchange="sdPalletPick(this)"><option value="">-- избери доставчик на палета --</option>'+
+    (sdPalletList||[]).map(function(p){
+      return '<option value="'+escVal(p.code)+'"'+(p.code===code?' selected':'')+'>'+esc(p.label)+'</option>';
+    }).join('')+
+    '</select></div>';
+}
+/* Надписът над „Реално получено" на реда (diffItemRowHtml → fld). */
+function sdPalletRealLbl(row){
+  var real = row.querySelector('.di-qty-real');
+  var fld = real ? real.closest('.di-fld') : null;
+  return fld ? fld.querySelector('.di-lbl') : null;
+}
+function sdPalletRowOn(row, code){
+  var sap=row.querySelector('.di-sap'), name=row.querySelector('.di-name'),
+      qty=row.querySelector('.di-qty'), real=row.querySelector('.di-qty-real'),
+      unit=row.querySelector('.di-unit'), wrap=row.querySelector('.di-pallet-wrap');
+  row.setAttribute('data-pallet','1');
+  sap.readOnly = true; name.readOnly = true;
+  var p = sdPalletFind(code);
+  sap.value = p ? p.code : ''; name.value = p ? p.name : '';
+  qty.value = '0'; qty.readOnly = true;
+  real.step = '1'; real.min = '1';
+  unit.value = 'бр.'; unit.disabled = true;
+  var lbl = sdPalletRealLbl(row);
+  if(lbl){
+    if(!lbl.hasAttribute('data-orig')) lbl.setAttribute('data-orig', lbl.textContent);
+    lbl.textContent = 'Брой палети *';
+  }
+  var hint = row.querySelector('.di-lookup-hint'); if(hint) hint.innerHTML = '';
+  var pa = row.querySelector('.di-pa-warn'); if(pa) pa.innerHTML = '';
+  if(wrap) wrap.innerHTML = sdPalletFieldHtml(p ? p.code : '');
+}
+/* Обратно към обикновен ред: отключва и чисти попълненото от палета (код,
+   име, 0-та). Броят палети остава — човекът го е писал сам. */
+function sdPalletRowOff(row){
+  if(!row || row.getAttribute('data-pallet') !== '1') return;
+  var sap=row.querySelector('.di-sap'), name=row.querySelector('.di-name'),
+      qty=row.querySelector('.di-qty'), real=row.querySelector('.di-qty-real'),
+      unit=row.querySelector('.di-unit'), wrap=row.querySelector('.di-pallet-wrap');
+  row.removeAttribute('data-pallet');
+  sap.readOnly = false; name.readOnly = false; sap.value = ''; name.value = '';
+  qty.readOnly = false; qty.value = '';
+  real.step = '0.001'; real.removeAttribute('min');
+  unit.disabled = false;
+  var lbl = sdPalletRealLbl(row);
+  if(lbl && lbl.hasAttribute('data-orig')){ lbl.textContent = lbl.getAttribute('data-orig'); lbl.removeAttribute('data-orig'); }
+  if(wrap) wrap.innerHTML = '';
+}
+function sdPalletPick(sel){
+  var row = sel.closest('.diff-item-row'); if(!row) return;
+  var p = sdPalletFind(sel.value);
+  row.querySelector('.di-sap').value = p ? p.code : '';
+  row.querySelector('.di-name').value = p ? p.name : '';
+}
+/* Смяна на категорията на реда. Списъкът не е прочетен / празен → червен
+   toast, категорията се връща на „-- категория --" и се пробва ново четене
+   за следващия опит. Докато се чете — изчаква четенето. */
+function sdPalletCatChange(selectEl){
+  var row = selectEl.closest('.diff-item-row'); if(!row) return;
+  if(selectEl.value !== 'pallet_inbound'){ sdPalletRowOff(row); return; }
+  if(row.getAttribute('data-pallet') === '1') return;
+  var go = function(){
+    if(selectEl.value !== 'pallet_inbound' || row.getAttribute('data-pallet') === '1') return;
+    if(!sdPalletList || !sdPalletList.length){
+      toast(SD_PALLET_FAIL_MSG,'#dc2626');
+      selectEl.value = '';
+      var h = row.querySelector('.di-hint'); if(h) h.innerHTML = '';
+      if(!sdPalletLoading) sdLoadPalletList();
+      return;
+    }
+    sdPalletRowOn(row, '');
+  };
+  if(sdPalletLoading) sdPalletLoading.then(go); else go();
+}
+/* Първият проблем по редовете „входяща за палет" при подаване, или null. */
+function diffPalletRowsProblem(){
+  var rows = document.querySelectorAll('#diff-items .diff-item-row');
+  for(var i=0;i<rows.length;i++){
+    var row = rows[i];
+    if(row.querySelector('.di-cat').value !== 'pallet_inbound') continue;
+    if(!sdPalletList || !sdPalletList.length) return { msg: SD_PALLET_FAIL_MSG };
+    var sel = row.querySelector('.di-pallet');
+    if(!sdPalletFind(sel ? sel.value : '')) return { msg: 'Ред '+(i+1)+': избери „Палет на"', el: sel };
+    var real = row.querySelector('.di-qty-real');
+    var v = String(real.value||'').trim();
+    if(!/^\d+$/.test(v) || parseInt(v,10) <= 0) return { msg: 'Ред '+(i+1)+': брой палети — цяло число над 0', el: real };
+  }
+  return null;
+}
+
 function updateDiffItemHint(selectEl){
   var row=selectEl.closest('.diff-item-row');
+  sdPalletCatChange(selectEl);
   sdReadsAsFieldSync(row, selectEl.value);
   var hintEl=row?row.querySelector('.di-hint'):null;
   if(!hintEl)return;
@@ -5245,7 +5384,23 @@ function renderDiffItemRows(items){
   if(!items||!items.length)items=[{}];
   var dirEl=document.getElementById('diff-direction');
   var direction=dirEl?dirEl.value:'interstore';
+  /* „Входяща за палет" е само към доставчик: при друга посока редът губи
+     категорията и попълненото от палета (код, име, 0-та). */
+  items=items.map(function(it){
+    if(!it || it.category!=='pallet_inbound' || direction==='supplier') return it;
+    var c={}; for(var k in it){ if(Object.prototype.hasOwnProperty.call(it,k)) c[k]=it[k]; }
+    c.sap=''; c.name=''; c.qty=null; c.category=null; c.palletCode='';
+    return c;
+  });
   el.innerHTML=items.map(function(it){return diffItemRowHtml(it,direction);}).join('');
+  /* Редовете с палет се връщат в режима си след пре-рендиране (смяна на
+     посоката). Списъкът липсва → редът остава без категория. */
+  var rowEls=el.querySelectorAll('.diff-item-row');
+  items.forEach(function(it,i){
+    if(!it || it.category!=='pallet_inbound' || !rowEls[i]) return;
+    if(sdPalletList && sdPalletList.length) sdPalletRowOn(rowEls[i], it.palletCode);
+    else rowEls[i].querySelector('.di-cat').value='';
+  });
 }
 function addDiffItemRow(){
   var el=document.getElementById('diff-items'); if(!el)return;
@@ -5277,6 +5432,7 @@ function collectDiffItemsForRedraw(){
       unit:row.querySelector('.di-unit').value||'бр.',
       category:row.querySelector('.di-cat').value||null,
       readsAs:(row.querySelector('.di-reads')||{}).value||'',
+      palletCode:(row.querySelector('.di-pallet')||{}).value||'',
       comment:row.querySelector('.di-comment').value
     });
   });
@@ -5370,6 +5526,24 @@ function collectDiffItems(){
     var name=row.querySelector('.di-name').value.trim();
     if(!name)return;
     var supDocEl=row.querySelector('.di-qty-supdoc');
+    /* „Входяща за палет": код и име от настройката (не от полетата),
+       quantity 0, брой палети - цяло число. Проверката е в submitDiffReport
+       (diffPalletRowsProblem). */
+    if(row.querySelector('.di-cat').value==='pallet_inbound'){
+      var pal=sdPalletFind((row.querySelector('.di-pallet')||{}).value);
+      items.push({
+        sap:pal?pal.code:'',
+        name:pal?pal.name:name,
+        qty:0,
+        qtySupplierDoc:supDocEl?(parseFloat(supDocEl.value)||null):null,
+        qtyReal:parseInt(row.querySelector('.di-qty-real').value,10)||null,
+        unit:'бр.',
+        category:'pallet_inbound',
+        readsAs:null,
+        comment:row.querySelector('.di-comment').value.trim()
+      });
+      return;
+    }
     items.push({
       sap:row.querySelector('.di-sap').value.trim(),
       name:name,
@@ -5704,6 +5878,7 @@ function openDiffSubmitModal(prefill){
   sdStornoNoteFor=null; /* „Направи сторно" го задава СЛЕД отварянето */
   var old=document.getElementById('diff-submit-ov'); if(old)old.remove();
   document.body.insertAdjacentHTML('beforeend',diffSubmitModalHtml());
+  sdLoadPalletList(); /* „🟫 Входяща за палет" — свеж прочит при всяко отваряне */
   renderDiffItemRows([{}]);
   var ov=document.getElementById('diff-submit-ov');
   ov.classList.add('open');
@@ -6469,6 +6644,15 @@ function submitDiffReport(){
      избрал" е стойност по подразбиране, не изключение. */
   if(!counterpart){
     toast(direction==='interstore'?'Избери склад изпращач':'Избери доставчик','#dc2626');
+    return;
+  }
+  /* „🟫 Входяща за палет": избран палет, брой палети цяло > 0, списъкът
+     прочетен - иначе нищо не се записва. Преди проверката за наименование:
+     ред без избран палет е с празно име и иначе би казал „впиши наименование". */
+  var palletBad=diffPalletRowsProblem();
+  if(palletBad){
+    toast(palletBad.msg,'#dc2626');
+    if(palletBad.el) palletBad.el.focus();
     return;
   }
   /* Започнат ред без наименование спира подаването и се посочва поименно -
