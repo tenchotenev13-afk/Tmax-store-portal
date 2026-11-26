@@ -1,12 +1,16 @@
 # Ключ само за четене за огледалото (mirror_reader)
 
-Ключът дава на огледалото на Живко само четене на седемте касови таблици
-(`kasa_reports`, `kasa_glavna`, `kasa_zoborot`, `kasa_documents`,
-`kasa_storno`, `kasa_storno_items`, `daily_turnover`), изгледа
-`storage_files_index`, файловете в bucket `kasa-docs` и `audit_log` (от
-26.11.2026, `mirror-reader-audit-log-schema.sql` — с него огледалото не
-иска service_role ключ). Нищо друго — нито запис, нито други таблици.
-Ролята е от `mirror-reader-schema.sql`; без приложените миграции
+Ключът дава на огледалото на Живко само четене на всичките 93 таблици от
+`mirror-tables.txt` (списъкът е от Живко, tables-93.txt, 26.11.2026),
+изгледа `storage_files_index` и файловете в bucket `kasa-docs`. Нищо
+друго — нито запис, нито таблиците извън списъка (`grafik_*`, бекъпи,
+архиви). `users` и `stores` — само изброени колони: без `password_hash`,
+`history_pin_hash` и `pass`; `select=*` върху тях е отказ, затова се четат с
+изричен списък колони.
+
+Миграциите: `mirror-reader-schema.sql` (ролята + касата + `kasa-docs`),
+`mirror-reader-audit-log-schema.sql` (`audit_log`),
+`mirror-reader-all-schema.sql` (останалите 85). Без приложените миграции
 самопроверката пада и файл не се пише.
 
 Ключът се прави от Тенчо. Сесиите на Claude не пускат скрипта и не искат
@@ -39,10 +43,11 @@ Remove-Item Env:SUPABASE_JWT_SECRET
 Скриптът печата датата на изтичане (+2 години) и по един ред за всяка
 проверка — само статуси и броеве:
 
-- а) GET на всяка от деветте (седемте касови, `storage_files_index`,
-  `audit_log`) → 200/206 и брой редове;
+- а) GET на всяка таблица от `mirror-tables.txt` и на `storage_files_index`
+  → 200/206 и брой редове (`users`/`stores` — с изброените колони);
 - б) сваляне на един файл от `kasa-docs` → 200;
-- в) GET на `users` → отказ (401/403);
+- в) GET на `users.password_hash`, `users.history_pin_hash`, `stores.pass` и
+  на `grafik_staff` (извън списъка) → отказ (401/403);
 - г) PATCH (с реална колона — при празно тяло PostgREST връща 204, без да
   стигне до правата) и POST към `kasa_reports` (без засегнати редове) → отказ;
 - д) списък на bucket `docs` (Storage list) → 0 обекта или отказ 4xx. Не сваляне:
@@ -58,6 +63,11 @@ Remove-Item Env:SUPABASE_JWT_SECRET
 заглавният ред `apikey` остава публичният anon ключ (шлюзът на Supabase иска
 познат ключ там, а ролята се взема от `Authorization`). Самопроверката е
 пусната точно с тази комбинация.
+
+С този ключ `users` и `stores` **не** се четат със `select=*` (отказ 401/403
+— ролята няма права за `password_hash`, `history_pin_hash`, `pass`). Скриптът
+трябва да ги иска с изричен списък — колоните са в `COLS` на
+`make-mirror-key.js`.
 
 ## Ако ключът изтече или трябва да се спре
 

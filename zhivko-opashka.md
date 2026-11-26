@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(права, без промяна на схемата: mirror-reader-all-schema.sql; миграция mirror_reader_all — версия 20261126222936, приложена 27.11.2026)
+- 27.11 · mirror_reader чете всичките 93 таблици от tables-93.txt (users и stores — само изброените колони) — смени скрипта да чете всичко с нейния ключ; users и stores с изричен select на колоните (с select=* ключът получава отказ — няма права за password_hash, history_pin_hash, stores.pass; колоните са в COLS на tools/mirror-key/make-mirror-key.js)
+
 (права, без промяна на схемата: kasa-etap2-schema.sql; миграция kasa_etap2_revoke_reads — версия 20261126211702, приложена 26.11.2026)
 - 26.11 · касовите таблици и kasa-docs вече не се четат с публичния ключ — само с mirror_reader; моля пусни повторната проба
 

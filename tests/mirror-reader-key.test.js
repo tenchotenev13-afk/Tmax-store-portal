@@ -14,6 +14,9 @@
       - при успешна самопроверка пише mirror-key.txt; токенът е HS256 с
         role=mirror_reader, exp = +2 години; тайната и токенът НЕ са в изхода;
       - а) чете и audit_log (mirror-reader-audit-log-schema.sql, 26.11.2026);
+        от mirror-reader-all-schema.sql (26.11.2026) — всички от
+        mirror-tables.txt, users/stores с изброени колони (select=* → 403);
+      - в) хешовете в users, stores.pass и grafik_staff → отказ;
       - при всяка провалена проверка (а–д) — exit 1 и НЯМА файл;
       - записи само PATCH/POST към kasa_reports с тяло без редове;
       - PATCH носи реална колона (при '{}' PostgREST връща 204 без UPDATE),
@@ -121,10 +124,13 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
       let key, status, json = null, range = null;
       if (u.pathname.startsWith('/rest/v1/')) {
         const t = u.pathname.slice(9);
-        key = method + ' ' + t;
+        const sel = u.searchParams.get('select') || '';
+        const forbidden = ['password_hash', 'history_pin_hash', 'pass'].includes(sel) || /^grafik_/.test(t);
+        key = method + ' ' + t + (forbidden ? '?' + sel : '');
         if (method !== 'GET') status = 403;
-        else if (t === 'users') status = 403;
-        else if (EIGHT.includes(t) || t === 'audit_log') {
+        else if (forbidden) status = 403;
+        else if ((t === 'users' || t === 'stores') && sel === '*') status = 403; // колонен grant
+        else if (M.TABLES.includes(t)) {
           status = 200; range = '0-0/42';
           if (t === 'storage_files_index') json = [{ name: u.searchParams.get('bucket_id') === 'eq.docs' ? 'a/b.pdf' : 'x/y z.pdf' }];
           else json = [{}];
@@ -214,7 +220,8 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     ok(pb && Object.keys(pb).every(k => KASA_REPORTS_COLS.includes(k)), 'PATCH тялото е с реални колони на kasa_reports (' + (pb ? Object.keys(pb).join(',') : '-') + ')');
     EIGHT.concat(['audit_log']).forEach(t => ok(r.calls.some(c => c.method === 'GET' && c.url.includes('/rest/v1/' + t + '?select=*')), 'а) GET ' + t));
     ok(r.calls.some(c => c.url.includes('/object/authenticated/kasa-docs/x/y%20z.pdf')), 'б) сваля файл от kasa-docs (пътят е кодиран)');
-    ok(r.calls.some(c => c.url.includes('/rest/v1/users')), 'в) пробва users');
+    ['users?select=password_hash', 'users?select=history_pin_hash', 'stores?select=pass', 'grafik_staff?select=*'].forEach(q =>
+      ok(r.calls.some(c => c.url.includes('/rest/v1/' + q + '&')), 'в) пробва ' + q));
     const lst = r.calls.filter(c => new URL(c.url).pathname === '/storage/v1/object/list/docs');
     ok(lst.length === 1 && lst[0].method === 'POST', 'д) Storage list на docs (POST /object/list/docs)');
     let lb = null; try { lb = JSON.parse(lst[0] && lst[0].body); } catch (e) { lb = null; }
@@ -229,7 +236,13 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     ['а) audit_log 401', { 'GET audit_log': 401 }],
     ['б) сваляне 400', { 'DL kasa-docs': 400 }],
     ['б) няма файл в kasa-docs', { 'GET storage_files_index': { status: 200, json: [] } }],
-    ['в) users 200', { 'GET users': 200 }],
+    ['в) users.password_hash 200', { 'GET users?password_hash': 200 }],
+    ['в) users.history_pin_hash 200', { 'GET users?history_pin_hash': 200 }],
+    ['в) stores.pass 200', { 'GET stores?pass': 200 }],
+    ['в) grafik_staff 200', { 'GET grafik_staff?*': 200 }],
+    ['а) users (колони) 403', { 'GET users': 403 }],
+    ['а) stores (колони) 403', { 'GET stores': 403 }],
+    ['а) weekly_checklist_snapshots 403', { 'GET weekly_checklist_snapshots': 403 }],
     ['г) PATCH 204', { 'PATCH kasa_reports': 204 }],
     ['г) PATCH 200', { 'PATCH kasa_reports': 200 }],
     ['г) POST 201', { 'POST kasa_reports': 201 }],

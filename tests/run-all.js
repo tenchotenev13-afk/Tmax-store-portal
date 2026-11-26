@@ -594,7 +594,8 @@ const TESTS = [
   'reference-sectors.test.js',
   'storage-files-index-readonly.test.js',
   'mirror-reader-key.test.js',
-  'mirror-reader-audit-log.test.js'
+  'mirror-reader-audit-log.test.js',
+  'mirror-reader-all.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

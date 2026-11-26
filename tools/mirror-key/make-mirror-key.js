@@ -25,14 +25,30 @@ var PROJECT_REF = 'xiwkdiqqplgdcrkewgtv';
 var ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
 
 var ROLE = 'mirror_reader';
-var TABLES = [
-  'kasa_reports', 'kasa_glavna', 'kasa_zoborot', 'kasa_documents',
-  'kasa_storno', 'kasa_storno_items', 'daily_turnover', 'storage_files_index',
-  'audit_log' // mirror-reader-audit-log-schema.sql (26.11.2026)
-];
+// а) минава по ЦЕЛИЯ списък на огледалото (mirror-tables.txt, 93 таблици —
+// mirror-reader-all-schema.sql, 26.11.2026) + изгледа storage_files_index.
+var TABLES_FILE = path.join(__dirname, 'mirror-tables.txt');
+function readTables(file) {
+  return fs.readFileSync(file, 'utf8').replace(/^﻿/, '').split(/\r?\n/)
+    .map(function (s) { return s.trim(); }).filter(Boolean);
+}
+var TABLES = readTables(TABLES_FILE).concat(['storage_files_index']);
+// users и stores са с колонен SELECT — select=* там е отказ (42501) дори при
+// верни права. Колоните са същите като в mirror-reader-all-schema.sql.
+var COLS = {
+  users: 'id,email,store_name,role,display_name,active,created_at,assigned_stores,notify_groups,oborot_report,is_regional',
+  stores: 'id,name,city,phone,active,company_id,addr'
+};
 var BUCKET = 'kasa-docs';
 var OTHER_BUCKET = 'docs';
-var FORBIDDEN_TABLE = 'users';
+// в) какво НЕ бива да се чете: хешовете в users, pass в stores и таблица
+// извън списъка (grafik_* — само през едж функцията grafik-api).
+var FORBIDDEN = [
+  { table: 'users', select: 'password_hash' },
+  { table: 'users', select: 'history_pin_hash' },
+  { table: 'stores', select: 'pass' },
+  { table: 'grafik_staff', select: '*' }
+];
 var VALID_YEARS = 2;
 var OUT_NAME = 'mirror-key.txt';
 // Колона на kasa_reports (сверена в базата 25.11.2026) — виж г).
@@ -72,11 +88,11 @@ async function selfCheck(token, fetchFn) {
   }
   var H = headersFor(token);
 
-  // а) четене на деветте → 200/206 + брой
+  // а) четене на всички от списъка → 200/206 + брой
   for (var i = 0; i < TABLES.length; i++) {
     var t = TABLES[i];
     try {
-      var r = await fetchFn(SB_URL + '/rest/v1/' + t + '?select=*&limit=1', {
+      var r = await fetchFn(SB_URL + '/rest/v1/' + t + '?select=' + (COLS[t] || '*') + '&limit=1', {
         method: 'GET',
         headers: Object.assign({ Prefer: 'count=exact' }, H)
       });
@@ -110,12 +126,16 @@ async function selfCheck(token, fetchFn) {
     }
   }
 
-  // в) таблица извън списъка → отказ
-  try {
-    var u = await fetchFn(SB_URL + '/rest/v1/' + FORBIDDEN_TABLE + '?select=id&limit=1', { method: 'GET', headers: H });
-    line(u.status === 401 || u.status === 403, 'в) GET ' + FORBIDDEN_TABLE + ' → ' + u.status + ' (очаква се отказ 401/403)');
-  } catch (e) {
-    line(false, 'в) GET ' + FORBIDDEN_TABLE + ' → мрежова грешка');
+  // в) хешове, pass и таблица извън списъка → отказ
+  for (var fi = 0; fi < FORBIDDEN.length; fi++) {
+    var fb = FORBIDDEN[fi];
+    var what = fb.table + '?select=' + fb.select;
+    try {
+      var u = await fetchFn(SB_URL + '/rest/v1/' + what + '&limit=1', { method: 'GET', headers: H });
+      line(u.status === 401 || u.status === 403, 'в) GET ' + what + ' → ' + u.status + ' (очаква се отказ 401/403)');
+    } catch (e) {
+      line(false, 'в) GET ' + what + ' → мрежова грешка');
+    }
   }
 
   // г) запис в kasa_reports → отказ. PATCH с филтър, който не хваща ред;
@@ -210,7 +230,7 @@ async function main(opts) {
   return 0;
 }
 
-module.exports = { main: main, PATCH_BODY: PATCH_BODY, signToken: signToken, selfCheck: selfCheck, TABLES: TABLES, ROLE: ROLE, OUT_NAME: OUT_NAME };
+module.exports = { main: main, PATCH_BODY: PATCH_BODY, signToken: signToken, selfCheck: selfCheck, TABLES: TABLES, COLS: COLS, FORBIDDEN: FORBIDDEN, readTables: readTables, TABLES_FILE: TABLES_FILE, ROLE: ROLE, OUT_NAME: OUT_NAME };
 
 if (require.main === module) {
   main().then(function (code) { process.exitCode = code; }, function () {
