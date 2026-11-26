@@ -23,6 +23,9 @@
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
+
+/* „✅ Готово за обект" отваря прозорец с „Цените важат от" (25.11.2026) — потвърждението е „✅ Обработи". */
+async function doneOk(h) { const b = h.doc.getElementById('rv-done-ok'); if (b) { H.realClick(h.w, b); await H.ticks(10); } }
 const { boot, realClick, fire, btn, ok, guard, section, report, dayOffset, ticks } = H;
 
 const CAMP = { id: 'c-1', title: 'Тестова преоценка Кърджали 10.2026', kind: 'mandatory', starts_on: dayOffset(-3), ends_on: dayOffset(5), default_pct: 50, status: 'open' };
@@ -150,14 +153,14 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
   section('5. „Готово“ отказва при незаписан код/цена');
   {
     const h = env(); await openCo(h, 'Кърджали');
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(4);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(4); await doneOk(h);
     ok('„Готово“ отказва при незаписан код — без PATCH на бланката', !h.calls.patch.some(x => x.table === 'revaluation_submissions'));
     ok('4 реда маркирани', h.doc.querySelectorAll('#rv-rows .rv-bad').length === 4);
     ok('toast с указание', h.calls.toast.some(t => t.indexOf('Приеми предложените') >= 0));
     ok('без известия', h.push.length === 0 && h.mail.length === 0);
     const priced = clone(ITEMS).map(it => Object.assign(it, { sale_price: 5, co_qty: it.qty }));
     const g = env({ items: priced }); await openCo(g, 'Кърджали');
-    realClick(g.w, btn(mod(g), 'Готово за обект')); await ticks(4);
+    realClick(g.w, btn(mod(g), 'Готово за обект')); await ticks(4); await doneOk(g);
     ok('цената е записана, кодът не → пак отказ', !g.calls.patch.some(x => x.table === 'revaluation_submissions') && g.doc.querySelectorAll('#rv-rows .rv-bad').length === 4);
   }
 
@@ -168,7 +171,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     realClick(h.w, btn(mod(h), 'Приеми предложените')); await ticks(10);
     const ps = h.calls.patch.filter(x => x.table === 'revaluation_items');
     ok('4 PATCH-а с предложенията', ps.length === 4 && ps.every(x => x.body.new_sap_code && x.body.sale_price > 0));
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10); await doneOk(h);
     const sp = h.calls.patch.find(x => x.table === 'revaluation_submissions');
     ok('PATCH status processed + processed_at/by', sp && sp.body.status === 'processed' && !!sp.body.processed_at && sp.body.processed_by === 'Елица Гюрова');
     ok('push само до управителя на обекта (19.10.2026)', h.push.length === 1 && h.push[0].names.join(',') === 'Управител Кърджали', h.push[0] && h.push[0].names.join(','));
@@ -188,14 +191,14 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
   {
     const done = clone(ITEMS).map(it => Object.assign(it, { new_sap_code: '8' + ('000000' + it.sap_code).slice(-6), sale_price: 5, co_qty: it.qty }));
     let h = env({ items: done, settings: [], pushFail: true }); await openCo(h, 'Кърджали');
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10); await doneOk(h);
     ok('бланката е processed въпреки проблемите', h.w.rvSub.status === 'processed');
     const t = h.calls.toast.find(x => x.indexOf('Обработено, но') >= 0) || '';
     ok('жълт toast: без копие + push не тръгна', t.indexOf('без копие') >= 0 && t.indexOf('push не тръгна') >= 0, t);
     ok('имейлът пак тръгва (без cc)', h.mail.length === 1 && !h.mail[0].extra.cc);
     const noSub = Object.assign({}, SUB, { no_items: true });
     h = env({ subs: [noSub], items: [] }); await openCo(h, 'Кърджали');
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10); await doneOk(h);
     const m = h.mail[0];
     ok('бланка „нямат“ → „Готово“ без таблица и без прикачен файл', m && m.html.indexOf('<table') < 0 && !m.extra.attachments && m.html.indexOf('няма артикули') >= 0);
     ok('и без жълт toast за липсващ файл', !h.calls.toast.some(x => x.indexOf('без прикачен файл') >= 0));

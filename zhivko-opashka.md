@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията revaluation_valid_from, revaluation-valid-from-schema.sql, версия 20261126062108, приложена 26.11.2026)
+- 26.11 · revaluation_submissions.prices_valid_from — date, NULL, без default
+
 (в базата от миграцията mirror_reader, mirror-reader-schema.sql, версия 20261125122939, приложена 25.11.2026)
 - 25.11 · роля mirror_reader само за четене (седемте касови таблици, storage_files_index, файловете в kasa-docs) — ключ се дава лично; таблиците остават отворени за anon до твоето потвърждение
 

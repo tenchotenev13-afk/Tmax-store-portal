@@ -16,6 +16,9 @@
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
+
+/* „✅ Готово за обект" отваря прозорец с „Цените важат от" (25.11.2026) — потвърждението е „✅ Обработи". */
+async function doneOk(h) { const b = h.doc.getElementById('rv-done-ok'); if (b) { H.realClick(h.w, b); await H.ticks(10); } }
 const { boot, realClick, btn, ok, section, report, dayOffset, ticks } = H;
 
 const CAMP = { id: 'c-1', title: 'Ноември', kind: 'mandatory', starts_on: dayOffset(-1), ends_on: dayOffset(5), default_pct: 50, status: 'open', note: null };
@@ -140,7 +143,7 @@ const done = (o, extra) => Object.assign({ co_qty: 1 }, o, extra || {});
       IT('z', done({ sort_order: 3, sap_code: '77929', new_sap_code: '8077929', sale_price: 2 }))];
     let h = env({ items });
     await open(h);
-    realClick(h.w, doneBtn(h)); await ticks(8);
+    realClick(h.w, doneBtn(h)); await ticks(8); await doneOk(h);
     ok('„Готово" → без PATCH на бланката', subPatches(h).length === 0, JSON.stringify(subPatches(h).map(p => p.body)));
     ok('…без confirm', h.calls.confirm.length === 0);
     ok('…червен toast с 8014557 (и без 8077929)', h.colors[h.colors.length - 1] === '#dc2626' && /8014557/.test(lastToast(h)) && !/8077929/.test(lastToast(h)), lastToast(h));
@@ -166,7 +169,7 @@ const done = (o, extra) => Object.assign({ co_qty: 1 }, o, extra || {});
     ok('VK11 → 1 файл', h.files.length === 1, h.files.join(','));
     ok('…2 реда: 8014557 / 84 и 8914557 / 48', aoa.length === 3 && aoa[1][0] === '8014557' && aoa[1][2] === 84 && aoa[2][0] === '8914557' && aoa[2][2] === 48, JSON.stringify(aoa.slice(1).map(r => [r[0], r[2]])));
     ok('…без маркери', badOf(h, 'a') === '' && badOf(h, 'b') === '');
-    realClick(h.w, doneBtn(h)); await ticks(10);
+    realClick(h.w, doneBtn(h)); await ticks(10); await doneOk(h);
     ok('„Готово" → PATCH processed', subPatches(h).length === 1 && subPatches(h)[0].body.status === 'processed', JSON.stringify(subPatches(h).map(p => p.body)));
   }
   {
@@ -176,7 +179,7 @@ const done = (o, extra) => Object.assign({ co_qty: 1 }, o, extra || {});
     await open(h);
     realClick(h.w, vkBtn(h)); await ticks(8);
     ok('един код, 50 и „50.0" → VK11 минава', h.files.length === 1, lastToast(h));
-    realClick(h.w, doneBtn(h)); await ticks(10);
+    realClick(h.w, doneBtn(h)); await ticks(10); await doneOk(h);
     ok('…и „Готово" минава', subPatches(h).length === 1);
   }
 
@@ -187,7 +190,7 @@ const done = (o, extra) => Object.assign({ co_qty: 1 }, o, extra || {});
     const fresh = [{ id: 'a', new_sap_code: '8014557', sale_price: 84 }, { id: 'b', new_sap_code: '8014557', sale_price: 48 }];
     let h = env({ items: screen, fresh });
     await open(h);
-    realClick(h.w, doneBtn(h)); await ticks(8);
+    realClick(h.w, doneBtn(h)); await ticks(8); await doneOk(h);
     ok('базата: един код с две цени → „Готово" спира', subPatches(h).length === 0 && /8014557/.test(lastToast(h)), lastToast(h));
     h = env({ items: screen, fresh });
     await open(h);
@@ -199,7 +202,7 @@ const done = (o, extra) => Object.assign({ co_qty: 1 }, o, extra || {});
     const fail = { GET: /revaluation_items\?submission_id=eq\.s-1&select=id,new_sap_code/ };
     let h = env({ items, fail });
     await open(h);
-    realClick(h.w, doneBtn(h)); await ticks(8);
+    realClick(h.w, doneBtn(h)); await ticks(8); await doneOk(h);
     ok('паднал свеж прочит → „Готово" спира, червен toast', subPatches(h).length === 0 && h.colors[h.colors.length - 1] === '#dc2626' && /не се прочетоха/.test(lastToast(h)), lastToast(h));
     h = env({ items, fail });
     await open(h);
@@ -216,7 +219,7 @@ const done = (o, extra) => Object.assign({ co_qty: 1 }, o, extra || {});
     ok('b → без код, бележка с „повторна преоценка"', codeInp(h, 'b').value === '' && noteOf(h, 'b').indexOf(NOTE) === 0 && /повторна преоценка/.test(noteOf(h, 'b')), noteOf(h, 'b'));
     h = env({ items: [rep('a', { sort_order: 1, new_sap_code: '8025298', sale_price: 7 }), rep('b', { sort_order: 2, new_sap_code: '8025298', sale_price: 4 })] });
     await open(h);
-    realClick(h.w, doneBtn(h)); await ticks(8);
+    realClick(h.w, doneBtn(h)); await ticks(8); await doneOk(h);
     ok('един 8-код с 7 и 4 → „Готово" спира', subPatches(h).length === 0 && /8025298/.test(lastToast(h)), lastToast(h));
     h = env({ items: [rep('a', { sort_order: 1, new_sap_code: '8025298', sale_price: 7 }), rep('b', { sort_order: 2, new_sap_code: '8025298', sale_price: 4 })] });
     await open(h);
@@ -228,7 +231,7 @@ const done = (o, extra) => Object.assign({ co_qty: 1 }, o, extra || {});
   {
     const h = env({ sub: Object.assign(SUB('approved'), { no_items: true }), items: [] });
     await open(h);
-    realClick(h.w, doneBtn(h)); await ticks(10);
+    realClick(h.w, doneBtn(h)); await ticks(10); await doneOk(h);
     ok('„нямат" → PATCH processed', subPatches(h).length === 1 && subPatches(h)[0].body.status === 'processed');
     ok('…без GET с select=id,new_sap_code,sale_price', !h.calls.get.some(u => /select=id,new_sap_code,sale_price/.test(u)));
   }

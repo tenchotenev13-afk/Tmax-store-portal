@@ -30,6 +30,9 @@
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
+
+/* „✅ Готово за обект" отваря прозорец с „Цените важат от" (25.11.2026) — потвърждението е „✅ Обработи". */
+async function doneOk(h) { const b = h.doc.getElementById('rv-done-ok'); if (b) { H.realClick(h.w, b); await H.ticks(10); } }
 const { boot, realClick, ok, btn, section, report, dayOffset, ticks } = H;
 
 const OPEN = { id: 'c-1', title: 'Преоценка 10.2026', kind: 'mandatory', starts_on: dayOffset(-3), ends_on: dayOffset(5), default_pct: 50, status: 'open' };
@@ -177,7 +180,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
   section('5. „Прехвърлено“ е задължително за „Готово“');
   {
     let h = env({ items: [item('i-1'), item('i-2', { sap_code: '82216', new_sap_code: '8082216', co_qty: null })] }); await openCo(h, 'Кърджали');
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(5);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(5); await doneOk(h);
     ok('празно co_qty → „Готово“ отказва, без PATCH', !h.calls.patch.some(x => x.table === 'revaluation_submissions'));
     const bad = h.doc.querySelector('#rv-row-i-2 .rv-bad');
     ok('маркер на реда „няма прехвърлено количество“', !!bad && bad.textContent.indexOf('няма прехвърлено количество') >= 0, bad && bad.textContent);
@@ -187,7 +190,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     ok('без известия', !h.push.length && !h.mail.length);
 
     h = env({ items: [item('i-1', { co_qty: 0 })] }); await openCo(h, 'Кърджали');
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10); await doneOk(h);
     const sp = h.calls.patch.find(x => x.table === 'revaluation_submissions');
     ok('co_qty = 0 → минава (processed)', sp && sp.body.status === 'processed');
   }
@@ -241,7 +244,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
   section('7. Известие „Готово“ — само управителят; копието винаги');
   {
     let h = env(); await openCo(h, 'Кърджали');
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10); await doneOk(h);
     ok('push само до управителя (без каса, склад и неактивния)', h.push.length === 1 && h.push[0].names.join(',') === 'Управител Кърджали', h.push[0] && h.push[0].names.join(','));
     const m = h.mail[0];
     ok('имейл само до управителя', m && m.to.join(',') === 'managerkardjali@temax.bg', m && m.to.join(','));
@@ -250,7 +253,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
 
     const noMgr = USERS_K.filter(u => u.role !== 'manager' || !u.active);
     h = env({ users: noMgr }); await openCo(h, 'Кърджали');
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10); await doneOk(h);
     ok('бланката е processed', h.w.rvSub.status === 'processed');
     const m2 = h.mail[0];
     ok('без имейл на управител → копието е основен получател', h.mail.length === 1 && m2.to.join(',') === 't.tenev@temax.bg' && !m2.extra.cc, m2 && JSON.stringify({ to: m2.to, cc: m2.extra.cc }));
@@ -258,7 +261,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     ok('без push до каса/склад', !h.push.some(p => p.names.length));
 
     h = env({ users: noMgr, settings: [] }); await openCo(h, 'Кърджали');
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10); await doneOk(h);
     ok('без управител и без копие → нищо не тръгва, казва се', !h.mail.length && h.calls.toast.some(t => t.indexOf('обектът няма имейл на управител и няма копие') >= 0));
   }
 

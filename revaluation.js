@@ -243,6 +243,7 @@ function rvLoadSheet(){
   var seq = ++rvLoadSeq;
   rvBad = {}; rvErr = {}; rvImportFails = [];
   rvUnits = {}; rvUnitErr = {}; rvUnitsOk = true;
+  rvAddNote = ''; rvVkFromVal = '';
   var c = rvCampaign();
   if(!c || !rvStore){ rvSub = null; rvItems = []; rvRender(); return Promise.resolve(); }
   return sbGet('revaluation_submissions', 'campaign_id=eq.' + c.id + '&store_name=eq.' + encodeURIComponent(rvStore) + '&select=*')
@@ -362,6 +363,7 @@ function rvRender(){
   if(rvImportFails.length){
     h += '<div id="rv-import-fails" style="font-size:12px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-bottom:8px;">⚠ Не са записани: ' + esc(rvImportFails.join(', ')) + '</div>';
   }
+  h += rvValidFromHtml();
   if(rvSub && !rvUnitsOk){
     h += '<div id="rv-units-load-fail" style="font-size:12px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:6px 10px;margin-bottom:8px;">⚠ Номерата на бройките не се заредиха — презареди таба.</div>';
   }
@@ -387,6 +389,7 @@ function rvRender(){
   }
   h += '</div>';
   if(edit && rvShowAdd) h += rvAddRowHtml();
+  if(edit && rvAddNote) h += '<div id="rv-add-note" style="font-size:13px;color:#1e3a8a;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 10px;margin-bottom:8px;">✍ ' + esc(rvAddNote) + '</div>';
 
   var PINK_TH = 'background:#fce7f3;color:#9d174d;';
   /* tbl-rv-sheet — пренасяне на „Описание“ / „Коментар обект“ и скрол в кутията (index.html, 15.11.2026) */
@@ -775,6 +778,8 @@ function rvPhotoView(id, k){
 function rvPhotoClose(){ var d = document.getElementById('rv-photo-view'); if(d && d.parentNode) d.parentNode.removeChild(d); }
 
 /* ─── Ръчен ред + автодопълване ────────────────────────── */
+/* Бележката с номерата след „Добави" / импорта (25.11.2026); '' = няма. */
+var rvAddNote = '';
 function rvToggleAdd(){ rvShowAdd = !rvShowAdd; rvAcRes = []; rvRender(); }
 /* Сканиране (етап 1/3, 23.11.2026): полето за код приема и EAN. SAP кодовете
    в product_catalog са 5–7 цифри, EAN-ите — 8–14, тоест 8–14 цифри винаги
@@ -970,6 +975,8 @@ function rvAddRow(){
       rvAcRes = []; rvEanRes = [];
       return rvUnitsSync(res.row).then(function(ok){
         if(ok) toast('Редът е добавен');   /* иначе червеният toast от rvUnitsSync остава */
+        /* Бележката под формата (25.11.2026) — остава до следващото добавяне. */
+        rvAddNote = ok && (rvUnits[res.row.id] || []).length ? 'Запиши на стоката: № ' + rvUnitsLabel(rvUnits[res.row.id]) : '';
         rvRender();
         rvFocus('rv-a-code');
         return true;
@@ -985,6 +992,7 @@ function rvAddRow(){
    източникът. Един код два пъти във файла (няколко склада) → количествата се
    събират и след импорта се казва колко кода е засегнато (решение на сесията
    от 12.10.2026, не на спецификацията). */
+var RV_IMPORT_NOTE = 'Запиши номерата върху бройките — виж под кода на всеки ред';
 var RV_ZSTOCK_COLS = { code: 'материал', name: 'описание на материал', qty: 'неограничен', unit: 'базова мерна единица', price: 'продажна цена', plant: 'завод' };
 function rvWithXlsx(cb){
   if(window.XLSX){ cb(); return; }
@@ -1083,6 +1091,7 @@ function rvImportAoa(aoa){
       });
     });
     return chain.then(function(){
+      rvAddNote = out.added + out.updated > 0 ? RV_IMPORT_NOTE : '';
       var unitMsg = out.unitFails ? ' · ' + out.unitFails + (out.unitFails === 1 ? ' ред е без номера' : ' реда са без номера') + ' — „опитай пак" на реда' : '';
       if(out.failed || out.unitFails) toast((out.failed ? out.failed + ' реда не са записани — виж списъка над таблицата' : 'Импорт: нови ' + out.added + ', обновени ' + out.updated) + unitMsg + dupMsg, '#dc2626');
       else if(warnNoNo) toast('Обектът няма номер — заводът във файла не е проверен. Нови: ' + out.added + ', обновени: ' + out.updated + dupMsg, '#d97706');
@@ -1664,7 +1673,7 @@ function rvCoButtonsHtml(){
   var h = '';
   if(!rvIsCO()) return h;
   if(!rvSub.no_items && rvItems.length && rvCoReady()){
-    h += '<label style="font-size:12px;color:#64748b;margin-left:6px;">Валидна от</label><input id="rv-vk-from" type="date" value="' + today() + '">' +
+    h += '<label style="font-size:12px;color:#64748b;margin-left:6px;">Валидна от</label><input id="rv-vk-from" type="date" value="' + escAttr(rvVkFromDefault()) + '" onchange="rvVkFromSet(this.value)">' +
       '<button class="btn-sm" onclick="rvVk11()">📄 VK11 — ' + esc(rvStore) + '</button>';
     /* MM41 и прехвърлянето — по бланката на обекта (30.10.2026, Елица). */
     if(!rvRegionalAcc()){
@@ -1741,15 +1750,67 @@ function rvCoDone(){
   }
   return (rvSub.no_items ? Promise.resolve(true) : rvCoCodePriceCheck('Нищо не е обработено')).then(function(okCodes){
     if(!okCodes) return false;
-    if(!confirm('Готово за ' + rvStore + '? Обектът ще получи известие и бланката се заключва.')) return false;
-    var patch = { status: 'processed', processed_at: new Date().toISOString(), processed_by: currentUser.display_name || currentUser.email };
-    return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
-      if(!res.ok){ toast('Бланката не е обработена: ' + sbErrMsg(res), '#dc2626'); return false; }
-      Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
-      toast('Обработена: ' + rvStore);
-      rvRender();
-      return rvCoNotifyDone(rvStore, rvSub, rvItems.slice()).then(function(){ return true; });
-    });
+    /* Бланка „нямат" няма цени — без дата, с потвърждението както досега. */
+    if(rvSub.no_items){
+      if(!confirm('Готово за ' + rvStore + '? Обектът ще получи известие и бланката се заключва.')) return false;
+      return rvCoDoneWrite(null);
+    }
+    return rvDoneModalOpen();
+  });
+}
+/* „Цените важат от" (25.11.2026) — поле в потвърждението вместо confirm().
+   По подразбиране — „Валидна от" на VK11, ако е попълнена, иначе днес.
+   Без валидна дата — не се обработва. → Promise<bool>, разрешава се от
+   „✅ Обработи" (rvDoneModalOk) или „Отказ" (rvDoneModalClose). */
+var rvDoneResolve = null;
+function rvIsoOk(s){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(s || ''))) return false;
+  var p = s.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]);
+  return d.getFullYear() === +p[0] && d.getMonth() === +p[1] - 1 && d.getDate() === +p[2];
+}
+function rvDoneModalOpen(){
+  rvDoneModalClose(false);
+  var def = v('rv-vk-from') || rvVkFromVal || today();
+  if(!rvIsoOk(def)) def = today();
+  var d = document.createElement('div');
+  d.id = 'rv-done-modal';
+  d.className = 'modal-bg open';
+  d.innerHTML = '<div class="modal" style="width:440px;"><h3>✅ Готово за ' + esc(rvStore) + '</h3>' +
+    '<div style="font-size:13px;margin:8px 0;">Обектът ще получи известие и бланката се заключва.</div>' +
+    '<label style="font-size:13px;">Цените важат от <input id="rv-done-from" type="date" value="' + escAttr(def) + '"></label>' +
+    '<div style="font-size:12px;color:#64748b;margin-top:4px;">Обектът слага етикетите на стоката от тази дата.</div>' +
+    '<div style="display:flex;gap:8px;margin-top:14px;">' +
+      '<button class="btn-sm" id="rv-done-ok" onclick="rvDoneModalOk()" style="background:#16a34a;color:#fff;">✅ Обработи</button>' +
+      '<button class="btn-sm" id="rv-done-cancel" onclick="rvDoneModalClose(false)">Отказ</button>' +
+    '</div></div>';
+  document.body.appendChild(d);
+  return new Promise(function(resolve){ rvDoneResolve = resolve; });
+}
+function rvDoneModalClose(val){
+  var d = document.getElementById('rv-done-modal');
+  if(d && d.parentNode) d.parentNode.removeChild(d);
+  var r = rvDoneResolve; rvDoneResolve = null;
+  if(r) r(val === true);
+}
+function rvDoneModalOk(){
+  var from = v('rv-done-from');
+  if(!rvIsoOk(from)){ toast('Въведи от кога важат цените — нищо не е обработено', '#dc2626'); return Promise.resolve(false); }
+  if(!rvIsCO() || !rvSub || rvSub.status !== 'approved'){ rvDoneModalClose(false); return Promise.resolve(false); }
+  var r = rvDoneResolve; rvDoneResolve = null;
+  var d = document.getElementById('rv-done-modal');
+  if(d && d.parentNode) d.parentNode.removeChild(d);
+  return rvCoDoneWrite(from).then(function(ok){ if(r) r(ok); return ok; });
+}
+function rvCoDoneWrite(from){
+  var patch = { status: 'processed', processed_at: new Date().toISOString(), processed_by: currentUser.display_name || currentUser.email };
+  if(from) patch.prices_valid_from = from;
+  return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
+    if(!res.ok){ toast('Бланката не е обработена: ' + sbErrMsg(res), '#dc2626'); return false; }
+    Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
+    if(from) rvVkFromVal = '';   /* полето на VK11 вече взема записаната дата */
+    toast('Обработена: ' + rvStore);
+    rvRender();
+    return rvCoNotifyDone(rvStore, rvSub, rvItems.slice()).then(function(){ return true; });
   });
 }
 function rvCoUnlock(){
@@ -1759,7 +1820,7 @@ function rvCoUnlock(){
   /* no_items: false — бланка „нямат" става обикновена чернова (19.10.2026).
      approved_* се чистят — новото подаване пак минава през регионалния. */
   var patch = { status: 'draft', no_items: false, reopened_at: new Date().toISOString(), reopened_by: currentUser.display_name || currentUser.email, processed_at: null, processed_by: null,
-    approved_at: null, approved_by: null };
+    prices_valid_from: null, approved_at: null, approved_by: null };
   return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
     if(!res.ok){ toast('Бланката не е отключена: ' + sbErrMsg(res), '#dc2626'); return false; }
     Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
@@ -1799,6 +1860,9 @@ function rvXlsxBase64(store, items){
 function rvCoNotifyDone(store, sub, items){
   var c = rvCampaign();
   var text = 'Преоценка · ' + store + ' · ' + (c ? c.title : '') + ': обработена';
+  /* Датата и подсещането за етикетите (25.11.2026) — само при бланка с редове. */
+  var vf = sub.no_items ? '' : rvValidFromTxt(sub);
+  var tail = sub.no_items ? '' : (vf ? 'Цените важат от ' + vf + '. ' : '') + RV_PRINT_NOTE;
   var warns = [];
   return Promise.all([
     sbGetOk('users', 'active=eq.true&role=eq.manager&store_name=eq.' + encodeURIComponent(store) + '&select=display_name,email,role,active'),
@@ -1820,6 +1884,7 @@ function rvCoNotifyDone(store, sub, items){
         items.map(function(it){
           return '<tr><td>' + esc(it.sap_code) + '</td><td>' + esc(it.product_name) + '</td><td>' + esc(rvIsRepeat(it.sap_code) ? RV_PRICE_ONLY : rvFmtQty(it.co_qty)) + '</td><td>' + esc(it.new_sap_code) + '</td><td>' + esc(rvFmt(it.sale_price)) + '</td></tr>';
         }).join('') + '</table>';
+      html += (vf ? '<p><b>Цените важат от ' + esc(vf) + '.</b></p>' : '') + '<p>' + esc(RV_PRINT_NOTE) + '</p>';
       if(r[2]) html += '<p>Бланката е прикачена (14 колони).</p>';
       else { html += '<p>Файлът е в портала: Ревизии и преоценка → Преоценка.</p>'; warns.push('без прикачен файл'); }
     }
@@ -1831,7 +1896,7 @@ function rvCoNotifyDone(store, sub, items){
     else if(cc.length){ to = cc; warns.push('обектът няма имейл на управител — пратено само до копието'); }
     if(r[2]) extra.attachments = [{ filename: 'preocenka-' + (rvStoreNo(store) || 'obekt') + '-' + ((c && c.starts_on) || today()) + '.xlsx', content: r[2] }];
     var jobs = [
-      names.length && typeof pushToPeople === 'function' ? pushToPeople(names, 'Преоценка', text) : Promise.resolve({ ok: false, none: true }),
+      names.length && typeof pushToPeople === 'function' ? pushToPeople(names, 'Преоценка', text + (tail ? '\n' + tail : '')) : Promise.resolve({ ok: false, none: true }),
       to.length && typeof sendEmail === 'function' ? sendEmail(to, text, html, extra) : Promise.resolve({ ok: false, none: true })
     ];
     return Promise.all(jobs).then(function(res){
@@ -1843,6 +1908,32 @@ function rvCoNotifyDone(store, sub, items){
       if(warns.length) toast('Обработено, но: ' + warns.join('; '), '#d97706');
       return !warns.length;
     });
+}
+
+/* ─── „Цените важат от" (25.11.2026) ─────────────────────
+   revaluation_submissions.prices_valid_from — от „✅ Готово за обект".
+   NULL (бланките отпреди) → нищо не се показва, етикетът взима processed_at. */
+var RV_PRINT_NOTE = 'Отпечатайте етикетите: Ревизии и преоценка → Преоценка → „🏷 Етикети“';
+var rvVkFromVal = '';   /* ръчно избраната „Валидна от" за VK11 — пази се между рендерите */
+function rvVkFromSet(val){ rvVkFromVal = String(val || ''); }
+function rvVkFromDefault(){
+  if(rvVkFromVal) return rvVkFromVal;
+  if(rvSub && rvSub.status === 'processed' && rvSub.prices_valid_from) return String(rvSub.prices_valid_from).slice(0, 10);
+  return today();
+}
+function rvValidFromTxt(sub){ return sub && sub.prices_valid_from ? fmtDate(String(sub.prices_valid_from).slice(0, 10)) : ''; }
+function rvValidFromHtml(){
+  if(!rvSub || rvSub.status !== 'processed' || rvSub.no_items) return '';
+  var h = '';
+  var vf = rvValidFromTxt(rvSub);
+  if(vf) h += '<div id="rv-valid-from" style="font-size:13px;color:#1e40af;margin-bottom:8px;">📅 Цените важат от <b>' + esc(vf) + '</b></div>';
+  if(rvIsStoreUser()){
+    if(vf && String(rvSub.prices_valid_from).slice(0, 10) > today()){
+      h += '<div id="rv-valid-future" style="font-size:13px;color:#854d0e;background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:6px 10px;margin-bottom:8px;">⏳ Етикетите се слагат на стоката от ' + esc(vf) + '</div>';
+    }
+    if(rvItems.length) h += '<div id="rv-print-note" style="font-size:13px;color:#1e3a8a;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 10px;margin-bottom:8px;">🏷 ' + esc(RV_PRINT_NOTE) + '</div>';
+  }
+  return h;
 }
 
 /* ─── Пътят на обекта при обработена бланка ─────────────── */
@@ -1862,7 +1953,9 @@ function rvCopyCodes(){
      58 × 37 мм, текстът 3 мм навътре; „Започни от етикет №" — за начнат лист.
    · Голям A5 — два на A4 изправен, 210 × 148,5 мм, линия за рязане по средата.
    Етикет на всеки номер от revaluation_units; ред без номера (бланките
-   отпреди етап 2) → един етикет без номер. Ред без new_sap_code или без
+   отпреди етап 2) → един етикет без номер. От 25.11.2026 следват
+   „Прехвърлено" (rvLblRows): co_qty = 0 → нищо, БР с по-малко прехвърлени от
+   номерата → избор на бройките; датата е prices_valid_from (NULL → processed_at). Ред без new_sap_code или без
    sale_price не се печата. Видът и изместването (мм) се помнят в
    localStorage (try/catch — без него стойностите по подразбиране).
    Цените са в € — официалната валута от 01.01.2026, както Минуси / Каса.
@@ -1886,11 +1979,21 @@ function rvLblOffSaved(){
   return { dx: rvLblHalf(o && o.dx), dy: rvLblHalf(o && o.dy) };
 }
 function rvLblOk(it){ return !!String((it && it.new_sap_code) || '').trim() && Number(it.sale_price) > 0; }
-/* [{it, units: [unit_no | null]}] — само редовете, които се печатат. */
+/* [{it, units: [unit_no | null], pick, zero}] — редовете с код и цена.
+   Етикетите следват „Прехвърлено" (25.11.2026):
+   · zero — co_qty = 0 (не повторна преоценка) → нито един етикет;
+   · pick — БР, повече номера от прехвърленото (цяло co_qty) → печатат се
+     отметнатите бройки, по подразбиране първите pick по номер;
+   · повторна преоценка („само цена"), празно co_qty, стара бланка без
+     номера → както досега (всички номера / един етикет). */
 function rvLblRows(){
   return rvItems.filter(rvLblOk).map(function(it){
     var u = (rvUnits[it.id] || []).map(function(x){ return x.unit_no; }).filter(Boolean);
-    return { it: it, units: u.length ? u : [null] };
+    var hasCo = !rvIsRepeat(it.sap_code) && it.co_qty != null && it.co_qty !== '' && isFinite(Number(it.co_qty));
+    var co = hasCo ? Number(it.co_qty) : null;
+    var zero = hasCo && co <= 0;
+    var pick = hasCo && !zero && rvSapUnit(it.unit).unit === 'БР' && co === Math.floor(co) && co < u.length ? co : null;
+    return { it: it, units: u.length ? u : [null], pick: pick, zero: zero };
   });
 }
 function rvLblDate(ts){
@@ -1910,8 +2013,9 @@ function rvLblOpen(){
   return true;
 }
 function rvLblClose(){ var d = document.getElementById('rv-lbl-modal'); if(d && d.parentNode) d.parentNode.removeChild(d); }
-/* on — {item_id: true} от предишния рендер (смяна на вида пази отметките). */
-function rvLblModal(kind, on){
+/* on — {item_id: true}, onU — {item_id: [unit_no]} от предишния рендер
+   (смяна на вида пази отметките). */
+function rvLblModal(kind, on, onU){
   var rows = rvLblRows();
   var skipped = rvItems.filter(function(it){ return !rvLblOk(it); });
   var off = rvLblOffSaved();
@@ -1931,10 +2035,20 @@ function rvLblModal(kind, on){
   } else {
     h += '<div class="tbl-wrap tbl-compact" style="max-height:40vh;overflow:auto;"><table><thead><tr><th></th><th>Нов код</th><th>Артикул</th><th>Нова цена</th><th>Етикети</th></tr></thead><tbody>';
     rows.forEach(function(r){
-      var chk = !on || on[r.it.id];
-      h += '<tr><td><input type="checkbox" class="rv-lbl-chk" data-id="' + escAttr(r.it.id) + '"' + (chk ? ' checked' : '') + '></td>' +
+      var chk = !r.zero && (!on || on[r.it.id]);
+      var n;
+      if(r.zero) n = '0 <span class="rv-lbl-zero" style="color:#94a3b8;font-size:11px;">нищо не е прехвърлено</span>';
+      else if(r.pick != null){
+        var sel = onU && onU[r.it.id];
+        n = '<div class="rv-lbl-pick" data-id="' + escAttr(r.it.id) + '"><div style="font-size:11px;color:#92400e;">прехвърлени ' + r.pick + ' от ' + r.units.length + ' — отметни кои бройки</div>' +
+          r.units.map(function(u, k){
+            var on1 = sel ? sel.indexOf(u) >= 0 : k < r.pick;
+            return '<label style="display:inline-block;margin-right:8px;font-size:11px;white-space:nowrap;"><input type="checkbox" class="rv-lbl-u" data-id="' + escAttr(r.it.id) + '" data-u="' + escAttr(u) + '"' + (on1 ? ' checked' : '') + '> ' + esc(u) + '</label>';
+          }).join('') + '</div>';
+      } else n = r.units.length + (r.units[0] == null ? ' <span style="color:#94a3b8;font-size:11px;">без номер</span>' : '');
+      h += '<tr id="rv-lbl-row-' + escAttr(r.it.id) + '"' + (r.zero ? ' class="rv-lbl-row-zero" style="color:#94a3b8;background:#f8fafc;"' : '') + '><td><input type="checkbox" class="rv-lbl-chk" data-id="' + escAttr(r.it.id) + '"' + (chk ? ' checked' : '') + (r.zero ? ' disabled' : '') + '></td>' +
         '<td style="font-family:DM Mono,monospace;">' + esc(r.it.new_sap_code) + '</td><td>' + esc(r.it.product_name) + '</td>' +
-        '<td>' + esc(rvLblMoney(r.it.sale_price)) + '</td><td class="rv-lbl-n">' + r.units.length + (r.units[0] == null ? ' <span style="color:#94a3b8;font-size:11px;">без номер</span>' : '') + '</td></tr>';
+        '<td>' + esc(rvLblMoney(r.it.sale_price)) + '</td><td class="rv-lbl-n">' + n + '</td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -1966,22 +2080,34 @@ function rvLblChecked(){
   Array.prototype.forEach.call(document.querySelectorAll('#rv-lbl-modal .rv-lbl-chk'), function(c){ if(c.checked) on[c.dataset.id] = true; });
   return on;
 }
+/* Отметнатите бройки на редовете с избор: {item_id: [unit_no]}. */
+function rvLblUnitsChecked(){
+  var out = {};
+  Array.prototype.forEach.call(document.querySelectorAll('#rv-lbl-modal .rv-lbl-u'), function(c){
+    var a = out[c.dataset.id] = out[c.dataset.id] || [];
+    if(c.checked) a.push(c.dataset.u);
+  });
+  return out;
+}
 function rvLblKind(kind){
   kind = kind === 'big' ? 'big' : 'small';
   rvLblStoreSet(RV_LBL_KIND_KEY, kind);
-  rvLblModal(kind, rvLblChecked());
+  rvLblModal(kind, rvLblChecked(), rvLblUnitsChecked());
 }
 function rvLblSaveOff(){
   var dx = rvLblHalf(v('rv-lbl-dx')), dy = rvLblHalf(v('rv-lbl-dy'));
   rvLblStoreSet(RV_LBL_OFF_KEY, JSON.stringify({ dx: dx, dy: dy }));
   return { dx: dx, dy: dy };
 }
-/* Етикетите по ред на бланката: [{it, unit}] само за отметнатите редове. */
-function rvLblList(on){
+/* Етикетите по ред на бланката: [{it, unit}] само за отметнатите редове;
+   ред с избор — отметнатите бройки (onU), без onU — първите pick. */
+function rvLblList(on, onU){
   var out = [];
   rvLblRows().forEach(function(r){
-    if(!on[r.it.id]) return;
-    r.units.forEach(function(u){ out.push({ it: r.it, unit: u }); });
+    if(!on[r.it.id] || r.zero) return;
+    var units = r.units;
+    if(r.pick != null) units = onU && onU[r.it.id] ? r.units.filter(function(u){ return onU[r.it.id].indexOf(u) >= 0; }) : r.units.slice(0, r.pick);
+    units.forEach(function(u){ out.push({ it: r.it, unit: u }); });
   });
   return out;
 }
@@ -2026,7 +2152,8 @@ function rvLblCellHtml(kind, x, test){
     '<span class="rv-lbl-new">' + esc(rvLblMoney(it.sale_price)) + '</span></div>';
   var code = '<div class="rv-lbl-small rv-lbl-line rv-lbl-code">Код ' + esc(String(it.new_sap_code).trim()) + '</div>';
   var unit = x.unit ? '<div class="rv-lbl-small rv-lbl-line rv-lbl-unit">№ ' + esc(x.unit) + '</div>' : '';
-  var date = rvLblDate(rvSub && rvSub.processed_at);
+  /* prices_valid_from (25.11.2026); NULL — старите бланки → processed_at */
+  var date = rvSub && rvSub.prices_valid_from ? fmtDate(String(rvSub.prices_valid_from).slice(0, 10)) : rvLblDate(rvSub && rvSub.processed_at);
   var when = date ? '<div class="rv-lbl-small rv-lbl-line rv-lbl-date">Преоценка ' + esc(date) + '</div>' : '';
   var why = it.store_comment ? '<div class="rv-lbl-small rv-lbl-why' + (kind === 'small' ? ' rv-lbl-line' : '') + '">' + esc(it.store_comment) + '</div>' : '';
   return name + prices + code + unit + when + why;
@@ -2060,7 +2187,7 @@ function rvLblPrint(test){
   var kind = (document.getElementById('rv-lbl-kind-big') || {}).checked ? 'big' : 'small';
   var off = rvLblSaveOff();
   var start = Math.max(1, Math.min(21, parseInt(v('rv-lbl-start'), 10) || 1));
-  var list = test ? [] : rvLblList(rvLblChecked());
+  var list = test ? [] : rvLblList(rvLblChecked(), rvLblUnitsChecked());
   if(!test && !list.length){ toast('Не е отметнат нито един ред за етикети', '#dc2626'); return false; }
   var out = rvLblPagesHtml(kind, list, start, off.dx, off.dy, test);
   var title = test ? 'Пробен лист — ' + (kind === 'big' ? 'голям А5' : 'малък 5,8 × 3,9') :
@@ -2556,9 +2683,11 @@ function rvVk11(){
   var aoa = rvVk11Aoa(rvSub.no_items ? [] : rvItems, fromIso, rvStore);
   if(aoa.length < 2){ toast('Няма редове с преоценен код и цена — VK11 НЕ е направен', '#dc2626'); return Promise.resolve(false); }
   rvBad = {};
-  return rvCoCodePriceCheck('VK11 НЕ е направен').then(function(okCodes){ return okCodes ? rvVk11Write(aoa, fromIso) : false; });
+  var saved = rvSub.status === 'processed' && rvSub.prices_valid_from ? String(rvSub.prices_valid_from).slice(0, 10) : '';
+  var warn = saved && saved !== fromIso ? '„Валидна от" ' + fmtDate(fromIso) + ' се различава от записаната ' + fmtDate(saved) : '';
+  return rvCoCodePriceCheck('VK11 НЕ е направен').then(function(okCodes){ return okCodes ? rvVk11Write(aoa, fromIso, warn) : false; });
 }
-function rvVk11Write(aoa, fromIso){
+function rvVk11Write(aoa, fromIso, warn){
   var no = rvStoreNo(rvStore);
   /* МЕ не по SAP — предупреждение като при MM41, файлът пак се прави (20.10.2026).
      rvSapUnit е идемпотентна: SAP стойност остава ок, несведената — не. */
@@ -2569,7 +2698,7 @@ function rvVk11Write(aoa, fromIso){
        Точките са екранирани: SheetJS 0.18.5 отказва неекранирана точка („bad second format: .“). */
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa, { dateNF: 'dd"."mm"."yyyy' }), RV_VK11_SHEET);
     XLSX.writeFile(wb, 'VK11-' + (no || 'obekt') + '-' + fromIso + '.xlsx');
-    toast('VK11: ' + (aoa.length - 1) + ' реда' + (bad.length ? ' · МЕ не е по SAP: ' + bad.join(', ') : ''), bad.length ? '#d97706' : undefined);
+    toast('VK11: ' + (aoa.length - 1) + ' реда' + (bad.length ? ' · МЕ не е по SAP: ' + bad.join(', ') : '') + (warn ? ' · ' + warn : ''), bad.length || warn ? '#d97706' : undefined);
   });
   return true;
 }
@@ -2630,7 +2759,7 @@ function rvHistOpenView(){
   var seq = ++rvHistSeq;
   rvHistSubs = null;
   return Promise.all([
-    sbGetAll('revaluation_submissions', 'select=id,campaign_id,store_name,status,no_items,submitted_at,approved_at,approved_by,processed_at,processed_by&order=store_name.asc,id.asc'),
+    sbGetAll('revaluation_submissions', 'select=id,campaign_id,store_name,status,no_items,submitted_at,approved_at,approved_by,processed_at,processed_by,prices_valid_from&order=store_name.asc,id.asc'),
     sbGetAll('revaluation_items', 'select=id,submission_id&order=id.asc')
   ]).then(function(r){
     if(seq !== rvHistSeq) return false;
@@ -2695,7 +2824,8 @@ function rvHistHtml(){
         var n = rvHistCounts[sb.id] || 0;
         var tail = sb.no_items ? ' · нямаме за преоценка'
           : ' · ' + n + (n === 1 ? ' ред' : ' реда') + (sb.status === 'processed' && sb.processed_at
-            ? ' · обработена ' + esc(fmtDate(String(sb.processed_at).slice(0, 10))) + (sb.processed_by ? ' от ' + esc(sb.processed_by) : '') : '');
+            ? ' · обработена ' + esc(fmtDate(String(sb.processed_at).slice(0, 10))) + (sb.processed_by ? ' от ' + esc(sb.processed_by) : '') +
+              (sb.prices_valid_from ? ' · <span class="rv-hist-vf">цените от ' + esc(fmtDate(String(sb.prices_valid_from).slice(0, 10))) + '</span>' : '') : '');
         h += '<div class="rv-hist-s" id="rv-hist-s-' + escAttr(sb.id) + '" data-c="' + escAttr(c.id) + '" data-s="' + escAttr(sb.store_name) + '" onclick="rvHistOpenStore(this.dataset.c,this.dataset.s)" style="' + ROW + 'margin-left:40px;">' +
           '📄 <b>' + esc(sb.store_name) + '</b> · <span class="rv-hist-st" style="color:' + COL[st.key] + ';font-weight:600;">' + esc(st.key === 'draft' ? 'чернова' : st.txt) + '</span>' + tail + '</div>';
       });

@@ -33,6 +33,9 @@
 const fs = require('fs');
 const path = require('path');
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
+
+/* „✅ Готово за обект" отваря прозорец с „Цените важат от" (25.11.2026) — потвърждението е „✅ Обработи". */
+async function doneOk(h) { const b = h.doc.getElementById('rv-done-ok'); if (b) { H.realClick(h.w, b); await H.ticks(10); } }
 const { boot, realClick, btn, ok, section, report, dayOffset, ticks } = H;
 
 const ROOT = path.resolve(process.argv[2] || '.');
@@ -126,11 +129,11 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(8); a
   section('2. „✅ Готово за обект“');
   {
     const h = env(); await openCo(h, 'Кърджали');
-    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(8);
+    realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(8); await doneOk(h);
     ok('обикновен ред — „Готово“ пак иска „Прехвърлено“ (без PATCH)', subPatch(h).length === 0 && !!h.w.rvBad['k-norm'] && h.w.rvBad['k-norm'].join(' ').indexOf('прехвърлено') >= 0);
     ok('…повторният не е маркиран', !h.w.rvBad['k-rep']);
     const g = env({ items: [K_REP(), K_NORM({ co_qty: 2 })] }); await openCo(g, 'Кърджали');
-    realClick(g.w, btn(mod(g), 'Готово за обект')); await ticks(15);
+    realClick(g.w, btn(mod(g), 'Готово за обект')); await ticks(15); await doneOk(g);
     const p = subPatch(g)[0];
     ok('„Готово“ минава без „Прехвърлено“ на повторния', p && p.body.status === 'processed', JSON.stringify(g.w.rvBad));
     const m = g.mail[0];

@@ -184,9 +184,17 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     ok('тялото: item_id / submission_id / store_name на реда', unitPosts(h)[0].body.every(b => b.item_id === a.id && b.submission_id === a.submission_id && b.store_name === 'Кърджали'));
     ok('под кода: „№ Кърджали-П0001 … П0003"', unitsTxt(h, a.id) === '№ Кърджали-П0001 … П0003', unitsTxt(h, a.id));
     ok('toast „Редът е добавен"', /Редът е добавен/.test(lastToast(h)), lastToast(h));
+    /* Г. (25.11.2026) — видима бележка под формата, не само toast */
+    const note = () => { const e = $(h, 'rv-add-note'); return e ? e.textContent : ''; };
+    ok('бележка под формата: „Запиши на стоката: № Кърджали-П0001 … П0003"', /Запиши на стоката: № Кърджали-П0001 … П0003$/.test(note()) &&
+      !!$(h, 'rv-add') && ($(h, 'rv-add').compareDocumentPosition($(h, 'rv-add-note')) & 4) !== 0, note());
     const b = await addRow(h, '61000', 'M2', '9,33');
     ok('M2 9,33 → 1 номер', h.db.units.filter(u => u.item_id === b.id).length === 1);
     ok('под кода: „№ Кърджали-П0004"', unitsTxt(h, b.id) === '№ Кърджали-П0004', unitsTxt(h, b.id));
+    ok('бележката се сменя със следващото добавяне: „… № Кърджали-П0004"', /Запиши на стоката: № Кърджали-П0004$/.test(note()), note());
+    realClick(h.w, btn(mod(h), '＋ Ред')); await ticks(1);
+    ok('остава и при затворена форма (до следващото добавяне)', !$(h, 'rv-add') && /П0004$/.test(note()), note());
+    realClick(h.w, btn(mod(h), '＋ Ред')); await ticks(1);
     const c = await addRow(h, '61001', 'бр.', '2');
     ok('„бр." се нормализира като БР → 2 номера', h.db.units.filter(u => u.item_id === c.id).length === 2);
     ok('без маркер „без номер" на нито един ред', !mod(h).querySelector('.rv-unit-miss'));
@@ -236,6 +244,7 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     ok('редът е записан', h.db.items.some(x => x.id === a.id));
     ok('червен toast за номерата', /Номерата на бройките/.test(lastToast(h)) && h.colors[h.colors.length - 1] === '#dc2626', lastToast(h) + ' / ' + h.colors[h.colors.length - 1]);
     ok('НЕ пише „Редът е добавен" (грешката не се поглъща)', !/Редът е добавен/.test(lastToast(h)));
+    ok('без номера → без бележка „Запиши на стоката"', !$(h, 'rv-add-note'));
     const miss = row(h, a.id).querySelector('.rv-unit-miss');
     ok('маркер „без номер — опитай пак"', !!miss && /без номер — опитай пак/.test(miss.textContent), miss && miss.textContent);
     const retry = row(h, a.id).querySelector('.rv-unit-retry');
@@ -284,6 +293,8 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     const a = h.db.items.find(x => x.sap_code === '53531'), b = h.db.items.find(x => x.sap_code === '61000');
     ok('БР 2 → 2 номера', h.db.units.filter(u => u.item_id === a.id).length === 2);
     ok('M2 1,5 → 1 номер', h.db.units.filter(u => u.item_id === b.id).length === 1);
+    const n = $(h, 'rv-add-note');
+    ok('след импорта — една обща бележка „Запиши номерата върху бройките — виж под кода на всеки ред"', !!n && /Запиши номерата върху бройките — виж под кода на всеки ред/.test(n.textContent), n && n.textContent);
     await h.w.rvImportAoa([hdr, ['53531', 'Арка', 4, 'БР', 17.79, '1508']]); await ticks(10);
     ok('повторен импорт 2 → 4: още 2 номера', h.db.units.filter(u => u.item_id === a.id).length === 4);
   }
