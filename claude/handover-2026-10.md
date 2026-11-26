@@ -1367,8 +1367,9 @@ M − N; разминат ли се или провал → без дни + cons
 `kasa-etap2-schema.sql` (anon/authenticated: без SELECT на седемте таблици —
 само колонен по филтрите на записите; kasa_documents — само INSERT;
 kasa_storno_items — нищо; без TRUNCATE/REFERENCES/TRIGGER; три политики на
-kasa-docs) — **чака отделно „давай“ рано сутрин**, виж
-`claude/open/26-11-kasa-etap2-migraciya.md`. Етап 3 (записите) —
+kasa-docs) — **приложена 26.11 в 23:17, версия 20261126211702** (код `0eed2a8`,
+kasa-api v2; проверките — в schema файла). Първото реално качване и изтриване на
+сторно — `claude/open/26-11-kasa-etap2-parvo-polzvane.md`. Етап 3 (записите) —
 `claude/open/26-11-kasa-etap3-zapisi.md`. Лог — `claude/log/2026-11-26-kasa-etap2.md`.
 
 **UI редизайн (от 01.10)** — обектите се оплакват от скрол; решения: първо

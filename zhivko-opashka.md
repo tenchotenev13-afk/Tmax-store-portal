@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(права, без промяна на схемата: kasa-etap2-schema.sql; миграция kasa_etap2_revoke_reads — версия 20261126211702, приложена 26.11.2026)
+- 26.11 · касовите таблици и kasa-docs вече не се четат с публичния ключ — само с mirror_reader; моля пусни повторната проба
+
 (в базата от миграцията razliki_pallet_suppliers, razliki-pallet-suppliers-data.sql, версия 20261126103558, приложена 26.11.2026)
 - 26.11 · stock_differences.difference_category — нова стойност 'pallet_inbound'; app_settings — нов ред с ключ 'diff_pallet_suppliers'. Промяна само в данни, без промяна за огледалото
 

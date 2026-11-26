@@ -6,9 +6,27 @@
 -- запис (PATCH с WHERE изисква SELECT върху колоните във филтъра). Записите
 -- минават през kasa-api в етап 3. Проект: claude/kasa-api-dizajn.md.
 --
--- Миграция kasa_etap2_revoke_reads — НЕ Е ПРИЛОЖЕНА (прилага се отделно, рано
--- сутрин, след като живият kasa.js / kasa-docs.js е сверен с HEAD и kasa-api
--- със storno_items_save / storno_delete е деплойната).
+-- Миграция kasa_etap2_revoke_reads, версия 20261126211702, приложена
+-- 26.11.2026 в 23:17 София (решение на Тенчо — обектите не работят), след
+-- push на 0eed2a8 (Pages сверен) и kasa-api v2. Час преди нея в edge_logs:
+-- седемте таблици — само mirror_reader и kasa-api; нула anon, нула браузър.
+--
+-- Резултат след прилагане (26.11.2026):
+-- - ACL: anon/authenticated = awm (kasa_reports, kasa_glavna, kasa_zoborot,
+--   kasa_storno, daily_turnover), a (kasa_documents), нищо (kasa_storno_items);
+--   колонни r — точно колоните по-долу; mirror_reader=r непроменен.
+-- - set local role anon: razlika / total_turnover / returned_sum → 42501;
+--   kasa_documents, kasa_storno_items → 42501; select id → 4604; PATCH по
+--   id (PostgREST вид) → 1 ред, отменено; PATCH glavna по store_name+date+
+--   status → минава; DELETE kasa_storno → 42501; storage kasa-docs → 0 реда.
+-- - mirror_reader: 4604 / 2482 / 2469 / 4907 / 8152 / 30728 / 1693, файлове
+--   4758 — същите като преди и като postgres.
+-- - HTTP с anon: kasa_reports?select=id → 200; ?select=* → 401 (42501);
+--   kasa_storno returned_sum, daily_turnover *, kasa_documents id,
+--   kasa_storno_items id → 401; PATCH kasa_reports по id и kasa_glavna по
+--   store_name+date+status (0 реда) → 204; DELETE kasa_storno → 401;
+--   истински файл в kasa-docs: sign / authenticated / public / info →
+--   „Object not found“, list → [].
 --
 -- Колоните (фаза 0, 26.11.2026 — опис на W1–W23, kasaUpsert, confirmZoborot):
 --   kasa_reports    (id)                         — PATCH по id
