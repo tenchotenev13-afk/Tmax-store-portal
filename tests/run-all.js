@@ -46,7 +46,9 @@ const TEST_TIMEOUT_MS = 180000;
    натоварване, макар сам да минава), sr-diff-types-url 25 сек. */
 const TEST_TIMEOUTS = {
   'stock-diff-co-viewer.test.js': 240000,
-  'sr-diff-types-url.test.js': 240000
+  'sr-diff-types-url.test.js': 240000,
+  // 698 проверки, ~75 сек сам; при 4 паралелни и други сесии — над 180 (27.11.2026, пакет 1 на графика).
+  'grafik-ui.test.js': 300000
 };
 function timeoutFor(name) {
   return TEST_TIMEOUTS[name] || TEST_TIMEOUT_MS;
