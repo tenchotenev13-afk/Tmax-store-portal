@@ -94,7 +94,9 @@ function env(user, o) {
 async function open(h) { await h.w.loadMinusi(); for (let i = 0; i < 8; i++) await ticks(); }
 const row = (h, id) => h.doc.getElementById('mn-row-' + id);
 const cell = (h, id, cls) => { const r = row(h, id); const c = r && r.querySelector('.' + cls); return c ? c.textContent : null; };
-const priceGets = db => db.log.filter(x => x.m === 'GET' && x.tbl === 'product_catalog');
+/* Само цените (sale_price): от 27.11.2026 офисът пита каталога и за категорията — „само с преоценени“ (minusi-preoc-filter). */
+const priceGets = db => db.log.filter(x => x.m === 'GET' && x.tbl === 'product_catalog' && /sale_price/.test(x.q));
+const catalogGets = db => db.log.filter(x => x.m === 'GET' && x.tbl === 'product_catalog');
 
 (async function run() {
   section('1. Обектът — нищо ново');
@@ -102,7 +104,7 @@ const priceGets = db => db.log.filter(x => x.m === 'GET' && x.tbl === 'product_c
     const { h, db } = env(GD); await open(h);
     ok('таблицата е там (4 реда 955)', h.doc.querySelectorAll('#mn-daily tbody tr').length === 4);
     ok('няма колони за суми', h.doc.querySelectorAll('.mn-val-h, .mn-val-minus, .mn-cocmt, #mn-val-total').length === 0);
-    ok('нула заявки към product_catalog', priceGets(db).length === 0, priceGets(db).length);
+    ok('нула заявки към product_catalog', catalogGets(db).length === 0, catalogGets(db).length);
     const mq = db.log.filter(x => x.tbl === 'minus_movements' && x.m === 'GET').map(x => x.q).join(' ');
     ok('select-ът на обекта е без co_comment', mq.length > 0 && mq.indexOf('co_comment') < 0, mq);
     realClick(h.w, h.doc.getElementById('mn-excel'), 'Excel обект'); await ticks(3);

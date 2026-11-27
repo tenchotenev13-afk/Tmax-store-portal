@@ -140,6 +140,7 @@ var mnStore = '';
 var mnView = 'daily';    /* 'daily' | 'bymat' */
 var mnOnlyUnfilled = false;
 var mnOnlyOpen = false;  /* „само незакрити" в Дневен — за обекта и контролинга */
+var mnOnlyPreoc = false; /* „само с преоценени" в Дневен — само офисът (Миглена, 27.11.2026) */
 var mnSearch = '';       /* „🔍 Код" — материал или заметнат код */
 var MN_ALL = '__all__';  /* mnStore за „Всички обекти" — само контролингът */
 var MN_REPEAT_DEFAULT = 10;
@@ -543,7 +544,7 @@ function loadMinusi(){
       mnLastUpload = r2[1] && r2[1].ok ? (r2[1].rows[0] || null) : null;
       if(mnIsCO()) mnPriceState = 'loading';
       mnRender();
-      return Promise.all([mnLoadCo(seq), mnLoadUr(seq), mnLoadPrices(seq), mnLoadPa(seq)]);
+      return Promise.all([mnLoadCo(seq), mnLoadUr(seq), mnLoadPrices(seq), mnLoadPa(seq), mnLoadPreocCat(seq)]);
     });
   });
 }
@@ -926,6 +927,7 @@ function mnRender(){
     if(mnIsCO()){
       var nUnf = (mnOnlyOpen ? calc.open : calc.all).filter(mnUnfilled).length;
       h += '<label><input type="checkbox" id="mn-unfilled"' + (mnOnlyUnfilled ? ' checked' : '') + ' onchange="mnSetUnfilled(this.checked)"> само непопълнени (' + nUnf + ')</label>';
+      h += '<label><input type="checkbox" id="mn-preoc"' + (mnOnlyPreoc ? ' checked' : '') + ' onchange="mnSetPreoc(this.checked)"> само с преоценени (<span id="mn-preoc-n">' + mnPreocCount(calc) + '</span>)</label>';
     }
   }
   h += '<input id="mn-search" type="search" placeholder="🔍 Код" value="' + escAttrVal(mnSearch) + '" oninput="mnSetSearch(this.value)" style="width:140px;">';
@@ -996,7 +998,43 @@ function mnViewRows(calc){
   if(mnOnlyOpen) rows = rows.filter(function(r){ return r._state === 'open'; });
   /* „Непопълнен" е и повторение с причина, но без действие. */
   if(mnIsCO() && mnOnlyUnfilled) rows = rows.filter(mnUnfilled);
+  if(mnIsCO() && mnOnlyPreoc){ var dOf = mnRevDescOf(); rows = rows.filter(function(r){ return mnPreocRow(r, dOf); }); }
   return rows.filter(function(r){ return mnMatchSearch(r, true); });
+}
+/* „Само с преоценени" (Миглена, 27.11.2026): незакрит минус, при който
+   материалът ИЛИ някой от заметнатите кодове (mnRevRealCodes) е преоценен.
+   Разпознаването — само mnRevIsPreoc (описание / категория / име в каталога).
+   descOf = mnRevDescOf() — строи се веднъж на списък, не на ред. */
+function mnPreocRow(r, descOf){
+  if(r._state !== 'open') return false;
+  var mat = mnCoKey(r.material);
+  var is = function(c){ return !!c && mnRevIsPreoc({ code: c, desc: descOf[c] || '' }); };
+  if(is(mat)) return true;
+  return mnRevRealCodes(mnCoKey(r.real_code)).some(is);
+}
+/* Броят в етикета — с „само непопълнени", без търсенето (като брояча му). */
+function mnPreocCount(calc){
+  var rows = calc.all;
+  if(mnOnlyUnfilled) rows = rows.filter(mnUnfilled);
+  var dOf = mnRevDescOf();
+  return rows.filter(function(r){ return mnPreocRow(r, dOf); }).length;
+}
+/* Каталогът за кодовете на незакритите редове — СЛЕД mnRender, само офисът;
+   таблицата не чака. Гърми → само по описание + сивият ред. */
+function mnLoadPreocCat(seq){
+  if(!mnIsCO()) return Promise.resolve();
+  var e = [];
+  mnCompute(mnMovs, mnThresholds).open.forEach(function(r){
+    var mat = mnCoKey(r.material);
+    if(mat) e.push({ code: mat });
+    mnRevRealCodes(mnCoKey(r.real_code)).forEach(function(c){ e.push({ code: c }); });
+  });
+  return mnRevLoadCat(e).then(function(){
+    if(seq !== mnLoadSeq || !document.getElementById('mn-body')) return;
+    mnRenderBody();
+    var n = document.getElementById('mn-preoc-n');
+    if(n) n.textContent = String(mnPreocCount(mnCompute(mnMovs, mnThresholds)));
+  });
 }
 function mnBodyHtml(calc){
   var rows = mnViewRows(calc);
@@ -1004,6 +1042,7 @@ function mnBodyHtml(calc){
   if(mnOdErr) h = '<div id="mn-od-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Разликите не се заредиха</div>' + h;
   if(mnView === 'daily' && mnUrErr) h = '<div id="mn-ur-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Стоката на път / разликите не се заредиха</div>' + h;
   if(mnView === 'daily' && mnIsCO() && mnPriceState === 'err') h = '<div id="mn-price-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Цените не се заредиха</div>' + h;
+  if(mnView === 'daily' && mnIsCO() && mnOnlyPreoc && mnRevCatFail) h = '<div id="mn-preoc-catfail" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Каталогът не се зареди — преоценените се разпознават само по описание</div>' + h;
   if(mnView === 'daily' && mnCoErr) h = '<div id="mn-co-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Клиентските заявки не се заредиха</div>' + h;
   /* Свръхсторното е грешка на магазина — вижда го и обектът (Миглена, 21.10.2026). */
   if(calc.over.length || calc.early.length) h += mnOverHtml(calc.over, calc.early);
@@ -1412,14 +1451,19 @@ function mnRevDesc(e){ return e.desc || (mnRevCat[e.code] && mnRevCat[e.code].na
 function mnRevLoadCat(entries){
   var miss = entries.map(function(e){ return e.code; }).filter(function(c, i, a){ return !mnRevCatAsked[c] && a.indexOf(c) === i; });
   if(!miss.length) return Promise.resolve(true);
-  var q = 'select=sap_code,product_name,category&sap_code=in.(' + miss.map(function(c){ return '"' + c + '"'; }).join(',') + ')';
+  /* На порции по MN_PRICE_BATCH: при „Всички обекти" незакритите са стотици
+     кодове и един in.(…) надхвърля дължината на адреса (27.11.2026). */
+  var parts = [];
+  for(var i = 0; i < miss.length; i += MN_PRICE_BATCH) parts.push(miss.slice(i, i + MN_PRICE_BATCH));
   var fail = function(){ mnRevCatFail = true; return false; };
   try {
-    return sbGetOk('product_catalog', encodeURI(q)).then(function(res){
-      if(!res || !res.ok) return fail();
+    return Promise.all(parts.map(function(p){
+      return sbGetOk('product_catalog', encodeURI('select=sap_code,product_name,category&sap_code=in.(' + p.map(function(c){ return '"' + c + '"'; }).join(',') + ')'));
+    })).then(function(rs){
+      if(rs.some(function(res){ return !res || !res.ok; })) return fail();
       mnRevCatFail = false;
       miss.forEach(function(c){ mnRevCatAsked[c] = 1; });
-      res.rows.forEach(function(p){ if(p && p.sap_code) mnRevCat[String(p.sap_code)] = { name: p.product_name ? String(p.product_name) : '', cat: p.category ? String(p.category) : '' }; });
+      rs.forEach(function(res){ res.rows.forEach(function(p){ if(p && p.sap_code) mnRevCat[String(p.sap_code)] = { name: p.product_name ? String(p.product_name) : '', cat: p.category ? String(p.category) : '' }; }); });
       return true;
     }).catch(fail);
   } catch(err){ return Promise.resolve(fail()); }
@@ -1561,6 +1605,7 @@ function mnRevWrite(calc){
 function mnSetView(v){ mnView = v === 'bymat' ? 'bymat' : 'daily'; mnRender(); }
 function mnSetUnfilled(on){ mnOnlyUnfilled = !!on; mnRender(); }
 function mnSetOnlyOpen(on){ mnOnlyOpen = !!on; mnRender(); }
+function mnSetPreoc(on){ mnOnlyPreoc = !!on; mnRender(); }
 function mnSetSearch(v){ mnSearch = String(v == null ? '' : v); mnRenderBody(); }
 
 /* ─── Excel и печат на текущия изглед ──────────────────── */
@@ -1569,6 +1614,7 @@ function mnFilterText(){
   var f = [];
   if(mnView === 'daily' && mnOnlyOpen) f.push('само незакрити');
   if(mnView === 'daily' && mnIsCO() && mnOnlyUnfilled) f.push('само непопълнени');
+  if(mnView === 'daily' && mnIsCO() && mnOnlyPreoc) f.push('само с преоценени');
   if(String(mnSearch || '').trim()) f.push('търсене „' + String(mnSearch).trim() + '“');
   return f.length ? 'Филтри: ' + f.join(' · ') : 'Без филтри';
 }

@@ -119,6 +119,7 @@ const TESTS = [
   'minusi-revision-preoc.test.js',
   'minusi-revision-qty.test.js',
   'minusi-revision-preoc-real.test.js',
+  'minusi-preoc-filter.test.js',
   'pilot-tabs.test.js',
   'picking.test.js',
   'transport-subnav-calendar.test.js',

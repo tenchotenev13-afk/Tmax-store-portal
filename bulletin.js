@@ -1733,8 +1733,8 @@ function bulOpenPending(key){
   } else if(key==='stock-returns-diff'||key==='stock-returns-complaint'){
     if(typeof srFilter!=='undefined'){ srTab=(key==='stock-returns-diff')?'diff':'complaint'; srFilter='needs'; }
   } else if(key==='minusi'){
-    /* Таб „Дневен" + „само непопълнени", без търсене — иначе би скрило чакащото. */
-    if(typeof mnOnlyUnfilled!=='undefined'){ mnView='daily'; mnOnlyUnfilled=true; mnSearch=''; }
+    /* Таб „Дневен" + „само непопълнени", без търсене и без „само с преоценени" — иначе би скрило чакащото. */
+    if(typeof mnOnlyUnfilled!=='undefined'){ mnView='daily'; mnOnlyUnfilled=true; mnSearch=''; if(typeof mnOnlyPreoc!=='undefined') mnOnlyPreoc=false; }
   }
   /* 'transit-auto' е ключ на задача (bulTaskLinkKey), не име на таб. */
   showModule(key==='transit-auto' ? 'transit' : linkedModuleTab(key));
