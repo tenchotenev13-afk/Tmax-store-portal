@@ -1,0 +1,8 @@
+# 27.11 — preocenka-teodor-1
+
+- Преоценка, предложенията на Теодор т.3 и т.4 (`revaluation.js`): пълен SAP код + Enter или излизане от полето зарежда артикула по точен `sap_code` (`rvSapLookup` → `rvFillFromCat`, с цената; 8xxxxxx — празна). Непознат код → жълт toast, кодът остава. Автодопълването взима `sale_price`, изборът минава през `rvFillFromCat`. EAN — без промяна.
+- т.7 (решение на Тенчо 27.11): номер на бройката `GB7` — `stores.unit_prefix` (19 обекта) + тригерът `assign_revaluation_unit_no()`; заварените 16 номера преименувани, броячите не са пипани. В клиента `rvUnitsLabel` пише номера цял, `rvLblUnitShort` е махната.
+- Миграция `revaluation_unit_prefix` (`revaluation-unit-prefix-schema.sql`), версия 20261127084126, приложена 27.11: колоната text NULL без default, UNIQUE + CHECK, 19 кода (складовете, ЦО, сервизът — NULL), select за mirror_reader; проба в DO блок с отменяне — нов ред Габрово → GB3, обект без код → ясната грешка; след нея 16 номера и броячи 10/6/2 непокътнати. Rollback — `20261127084126_revaluation_unit_prefix_down.sql`.
+- Миграция `revaluation_unit_prefix_data`, версия 20261127084628, приложена 27.11: 16 номера → SH1…SH10, KJ1, KJ2, KJ4, KJ5, GB1, GB2; 0 в стария вид, 0 дубликата, броячи 10/6/2 непроменени. Rollback — `20261127084628_revaluation_unit_prefix_data_down.sql` (преди rollback-а на схемата).
+- Тест: `tests/revaluation-teodor-2711.test.js` (38 проверки, нов) + раздел А1г в `revaluation-etiketi-proces.test.js`; 5 стари теста на Преоценка обновени към новия вид на номера (scan — само бележка). Мутанти 5/5 убити. Пълен `npm test` (27.11, некомитнатото дърво) — 542 теста, exit 0.
+- SHA: чака комит.

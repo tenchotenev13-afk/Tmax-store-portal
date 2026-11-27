@@ -14,6 +14,12 @@
 
 ## Чака изпращане
 
+(в базата от миграцията revaluation_unit_prefix, revaluation-unit-prefix-schema.sql — версия 20261127084126, приложена 27.11.2026)
+- 27.11 · stores.unit_prefix — text, NULL, без default (две латински букви, напр. GB; mirror_reader има select на колоната — добави я в COLS за stores)
+
+(от миграцията revaluation_unit_prefix_data — версия 20261127084628, приложена 27.11.2026)
+- 27.11 · revaluation_units.unit_no — сменя вида си: 'GB7' вместо 'Габрово-П0007' (заварените 16 реда са преименувани; типът е същият). Новите номера идват в новия вид още от 20261127084126.
+
 (права, без промяна на схемата: mirror-reader-all-schema.sql; миграция mirror_reader_all — версия 20261126222936, приложена 27.11.2026)
 - 27.11 · mirror_reader чете всичките 93 таблици от tables-93.txt (users и stores — само изброените колони) — смени скрипта да чете всичко с нейния ключ; users и stores с изричен select на колоните (с select=* ключът получава отказ — няма права за password_hash, history_pin_hash, stores.pass; колоните са в COLS на tools/mirror-key/make-mirror-key.js)
 

@@ -28,7 +28,7 @@ const IT = (id, o) => Object.assign({ id: id, submission_id: 's-1', campaign_id:
   product_name: 'Артикул ' + id, unit: 'БР', qty: 1, std_price: 12.98, discount_pct: 50, proposed_price: 6.49,
   store_comment: 'дефект', new_sap_code: '80' + id, sale_price: 3 }, o || {});
 const UNITS = (item, n, from) => Array.from({ length: n }, (_, k) => ({ id: 'u-' + item + '-' + k, item_id: item, submission_id: 's-1', store_name: 'Кърджали',
-  unit_no: 'Кърджали-П' + String((from || 1) + k).padStart(4, '0'), created_at: '2026-11-10T10:00:0' + (k % 10) + 'Z' }));
+  unit_no: 'KJ' + ((from || 1) + k), created_at: '2026-11-10T10:00:0' + (k % 10) + 'Z' }));
 const USERS = [{ display_name: 'Управител Кърджали', email: 'managerkardjali@temax.bg', role: 'manager', store_name: 'Кърджали', active: true }];
 
 function env(o) {
@@ -72,7 +72,7 @@ const $ = (h, id) => h.doc.getElementById(id);
 const lblBtn = h => Array.prototype.find.call(mod(h).querySelectorAll('button'), b => /🏷 Етикети/.test(b.textContent));
 const lastToast = h => { const t = h.calls.toast[h.calls.toast.length - 1]; return t ? [].concat(t).join(' ') : ''; };
 const labels = h => Array.prototype.slice.call(h.doc.querySelectorAll('#rv-lbl-sheets .rv-lbl'));
-const unitsOf = h => labels(h).map(l => { const u = l.querySelector('.rv-lbl-unit'); return u ? u.textContent.replace('№ Кърджали-', '') : '—'; });
+const unitsOf = h => labels(h).map(l => { const u = l.querySelector('.rv-lbl-unit'); return u ? u.textContent.replace('№ ', '') : '—'; });
 const subPatch = h => h.calls.patch.filter(p => /revaluation_submissions/.test(p.url));
 async function open(h, user) {
   await h.w.loadRevaluation(); await ticks(6);
@@ -94,38 +94,38 @@ const DONE_ITEMS = () => [IT('1', { qty: 2, co_qty: 2, new_sap_code: '8061540', 
     const pick = h.doc.querySelector('#rv-lbl-modal .rv-lbl-pick');
     ok('бележка „прехвърлени 2 от 3 — отметни кои бройки"', !!pick && /прехвърлени 2 от 3 — отметни кои бройки/.test(pick.textContent), pick && pick.textContent);
     const u = uChk(h, '1');
-    ok('3 отметки за бройките, отметнати П0001 и П0002', u.length === 3 && u[0].checked && u[1].checked && !u[2].checked, u.map(c => c.dataset.u + ':' + c.checked).join(' '));
+    ok('3 отметки за бройките, отметнати KJ1 и KJ2', u.length === 3 && u[0].checked && u[1].checked && !u[2].checked, u.map(c => c.dataset.u + ':' + c.checked).join(' '));
     await printIt(h);
-    ok('печат: 2 етикета — П0001, П0002', JSON.stringify(unitsOf(h)) === '["П0001","П0002"]', JSON.stringify(unitsOf(h)));
+    ok('печат: 2 етикета — KJ1, KJ2', JSON.stringify(unitsOf(h)) === '["KJ1","KJ2"]', JSON.stringify(unitsOf(h)));
     realClick(h.w, btn($(h, 'mod-print'), '← Назад')); await ticks(6);
     await openModal(h);
     let c = uChk(h, '1');
-    c[0].click(); c[2].click();   /* махам П0001, слагам П0003 — клик на отметката (без onclick — realClick иска атрибут) */
+    c[0].click(); c[2].click();   /* махам KJ1, слагам KJ3 — клик на отметката (без onclick — realClick иска атрибут) */
     ok('кликът сменя отметките', !c[0].checked && c[1].checked && c[2].checked);
     /* смяна на вида пази избора на бройките */
     $(h, 'rv-lbl-kind-big').checked = true; fire(h.w, $(h, 'rv-lbl-kind-big'), 'change'); await ticks(1);
     c = uChk(h, '1');
-    ok('смяна на вида пази избраните бройки (П0002, П0003)', !c[0].checked && c[1].checked && c[2].checked);
+    ok('смяна на вида пази избраните бройки (KJ2, KJ3)', !c[0].checked && c[1].checked && c[2].checked);
     await printIt(h);
-    ok('печат: избраните — П0002, П0003', JSON.stringify(unitsOf(h)) === '["П0002","П0003"]', JSON.stringify(unitsOf(h)));
+    ok('печат: избраните — KJ2, KJ3', JSON.stringify(unitsOf(h)) === '["KJ2","KJ3"]', JSON.stringify(unitsOf(h)));
   }
 
-  section('А1в. Отметките на бройките: кратък номер „П0123" (пълният — в title), колоната „Етикети" е по-широка (26.11.2026)');
+  section('А1в. Отметките на бройките: целият номер „GD121" (къс от 27.11.2026), колоната „Етикети" е по-широка (26.11.2026)');
   {
     /* jsdom не смята лейаут — „побира ли се" е мерено в браузър (1280 / 375 px,
        лога 2026-11-26-preocenka-etiketi-nomer-otryazan). Тук се заковава текстът
        и стиловете, от които зависи измерването. */
     const GD = 'Гоце Делчев';
     const units = [121, 122, 123].map((n, k) => ({ id: 'u-gd-' + k, item_id: '1', submission_id: 's-1', store_name: GD,
-      unit_no: GD + '-П' + String(n).padStart(4, '0'), created_at: '2026-11-10T10:00:0' + k + 'Z' }));
+      unit_no: 'GD' + n, created_at: '2026-11-10T10:00:0' + k + 'Z' }));
     const GD_USER = Object.assign({}, STORE_USER, { email: 'gd@temax.bg', store_name: GD });
     const h = env({ user: GD_USER, subs: [SUB('processed', { store_name: GD })], items: [IT('1', { store_name: GD, qty: 3, co_qty: 2 })], units });
     h.w.rvStoresList = [GD];
     await open(h, GD_USER);
     await openModal(h);
     const lbl = uChk(h, '1').map(c => c.parentNode);
-    ok('текстът на отметките е „П0121", „П0122", „П0123" — 4 цифри, без името на обекта',
-      JSON.stringify(lbl.map(l => l.textContent.trim())) === '["П0121","П0122","П0123"]', JSON.stringify(lbl.map(l => l.textContent.trim())));
+    ok('текстът на отметките е целият номер „GD121", „GD122", „GD123" (т.7 на Теодор — без съкращаване)',
+      JSON.stringify(lbl.map(l => l.textContent.trim())) === '["GD121","GD122","GD123"]', JSON.stringify(lbl.map(l => l.textContent.trim())));
     ok('пълният номер е в title на отметката', JSON.stringify(lbl.map(l => l.title)) === JSON.stringify(units.map(u => u.unit_no)), JSON.stringify(lbl.map(l => l.title)));
     ok('data-u носи пълния номер (печатът го ползва)', uChk(h, '1').every((c, k) => c.dataset.u === units[k].unit_no));
     const ths = Array.prototype.slice.call(h.doc.querySelectorAll('#rv-lbl-modal thead th'));
@@ -134,10 +134,32 @@ const DONE_ITEMS = () => [IT('1', { qty: 2, co_qty: 2, new_sap_code: '8061540', 
     const note = h.doc.querySelector('#rv-lbl-modal .rv-lbl-pick > div');
     ok('бележката „прехвърлени…" се пренася и посред дума (телефон)', !!note && /overflow-wrap:\s*anywhere/.test(note.getAttribute('style') || ''), note && note.getAttribute('style'));
     await printIt(h);
-    ok('печатът — пак пълният номер „№ Гоце Делчев-П0121"', labels(h).length === 2 && labels(h)[0].querySelector('.rv-lbl-unit').textContent === '№ Гоце Делчев-П0121',
+    ok('печатът — пълният номер „№ GD121"', labels(h).length === 2 && labels(h)[0].querySelector('.rv-lbl-unit').textContent === '№ GD121',
       labels(h)[0] && labels(h)[0].querySelector('.rv-lbl-unit') && labels(h)[0].querySelector('.rv-lbl-unit').textContent);
-    ok('rvLblUnitShort: без „-П" → без промяна; null → празно', h.w.rvLblUnitShort('стар-номер') === 'стар-номер' && h.w.rvLblUnitShort(null) === '' &&
-      h.w.rvLblUnitShort('Гоце Делчев-П12345') === 'П12345');
+    ok('rvLblUnitShort вече я няма — номерът не се съкращава', typeof h.w.rvLblUnitShort === 'undefined');
+  }
+
+  section('А1г. Кратък номер (т.7 на Теодор, 27.11.2026): подредба по ЧИСЛО — GB2 < GB10; етикетът е „№ GB5"');
+  {
+    const GB = 'Габрово';
+    /* базата ги връща в разбъркан ред; като низ 'GB10' < 'GB2' */
+    const mk = (id, item, n, k) => ({ id: id, item_id: item, submission_id: 's-1', store_name: GB, unit_no: 'GB' + n, created_at: '2026-11-10T10:00:0' + k + 'Z' });
+    const units = [mk('u-a', '1', 10, 0), mk('u-b', '1', 2, 1), mk('u-c', '1', 9, 2), mk('u-d', '2', 5, 3)];
+    const GB_USER = Object.assign({}, STORE_USER, { email: 'gb@temax.bg', store_name: GB });
+    const items = [IT('1', { store_name: GB, qty: 3, co_qty: 2, sort_order: 1 }), IT('2', { store_name: GB, qty: 1, co_qty: 1, sort_order: 2 })];
+    const h = env({ user: GB_USER, subs: [SUB('processed', { store_name: GB })], items, units });
+    h.w.rvStoresList = [GB];
+    await open(h, GB_USER);
+    const rowUnits = id => { const r = $(h, 'rv-row-' + id); const e = r && r.querySelector('.rv-units'); return e ? e.textContent : ''; };
+    ok('под кода: „№ GB2, GB9 … GB10" — по число, не като низ', rowUnits('1') === '№ GB2, GB9 … GB10', rowUnits('1'));
+    ok('rvUnitsSort: GB2 < GB10 < GB11', JSON.stringify(h.w.rvUnitsSort([{ unit_no: 'GB11' }, { unit_no: 'GB10' }, { unit_no: 'GB2' }]).map(u => u.unit_no)) === '["GB2","GB10","GB11"]');
+    await openModal(h);
+    const lbl = uChk(h, '1').map(c => c.parentNode.textContent.trim());
+    ok('отметките в прозореца: GB2, GB9, GB10 — целият номер, по число', JSON.stringify(lbl) === '["GB2","GB9","GB10"]', JSON.stringify(lbl));
+    ok('отметнати първите две (co_qty 2): GB2 и GB9', uChk(h, '1')[0].checked && uChk(h, '1')[1].checked && !uChk(h, '1')[2].checked);
+    await printIt(h);
+    const txt = labels(h).map(l => { const u = l.querySelector('.rv-lbl-unit'); return u ? u.textContent : '—'; });
+    ok('етикетите: „№ GB2", „№ GB9", „№ GB5"', JSON.stringify(txt) === '["№ GB2","№ GB9","№ GB5"]', JSON.stringify(txt));
   }
 
   section('А1б. co_qty = 0 → нито един етикет, редът е сив; co_qty ≥ номерата → всички');
@@ -151,7 +173,7 @@ const DONE_ITEMS = () => [IT('1', { qty: 2, co_qty: 2, new_sap_code: '8061540', 
       r1.querySelector('.rv-lbl-chk').disabled && !r1.querySelector('.rv-lbl-chk').checked, r1 && r1.textContent);
     ok('ред с co_qty 2 = 2 номера → без избор на бройки', uChk(h, '2').length === 0);
     await printIt(h);
-    ok('печат: само ред 2 — П0003, П0004', JSON.stringify(unitsOf(h)) === '["П0003","П0004"]', JSON.stringify(unitsOf(h)));
+    ok('печат: само ред 2 — KJ3, KJ4', JSON.stringify(unitsOf(h)) === '["KJ3","KJ4"]', JSON.stringify(unitsOf(h)));
     /* само нулев ред → нищо */
     const g = env({ subs: [SUB('processed')], items: [IT('1', { qty: 1, co_qty: 0 })], units: UNITS('1', 1) });
     await open(g); await openModal(g); await printIt(g);
@@ -164,7 +186,7 @@ const DONE_ITEMS = () => [IT('1', { qty: 2, co_qty: 2, new_sap_code: '8061540', 
       IT('3', { sap_code: '8061540', qty: 2, co_qty: null, sort_order: 3 }), IT('4', { qty: 1, co_qty: 1, sort_order: 4 })];
     const h = env({ subs: [SUB('processed')], items, units: UNITS('1', 1, 1).concat(UNITS('2', 1, 2)).concat(UNITS('3', 2, 3)) });
     await open(h); await openModal(h); await printIt(h);
-    ok('M2 co 6,48 → 1 (П0001); M2 co 0 → 0; повторна 2 → П0003, П0004; стар ред без номер → 1', JSON.stringify(unitsOf(h)) === '["П0001","П0003","П0004","—"]', JSON.stringify(unitsOf(h)));
+    ok('M2 co 6,48 → 1 (KJ1); M2 co 0 → 0; повторна 2 → KJ3, KJ4; стар ред без номер → 1', JSON.stringify(unitsOf(h)) === '["KJ1","KJ3","KJ4","—"]', JSON.stringify(unitsOf(h)));
     /* стара бланка без номера и co_qty 0 → нищо */
     const g = env({ subs: [SUB('processed')], items: [IT('1', { co_qty: 0, sort_order: 1 }), IT('2', { co_qty: 3, qty: 3, sort_order: 2 })], units: [] });
     await open(g); await openModal(g); await printIt(g);

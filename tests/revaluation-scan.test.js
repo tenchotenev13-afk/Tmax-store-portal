@@ -308,6 +308,8 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
     $(h, 'rv-a-std').value = '3,19'; h.w.rvAcRender();
     realClick(h.w, h.doc.querySelector('#rv-ac div[data-k="0"]')); await ticks(1);
     ok('избор от автодопълването → % остава 50', $(h, 'rv-a-pct').value === '50');
+    /* От 27.11.2026 (т.4 на Теодор) изборът носи sale_price; този ред е без
+       цена в каталога → полето пак е празно, предишната 3,19 не остава. */
     ok('…и цената от предишния артикул (3,19) е изчистена', $(h, 'rv-a-std').value === '', $(h, 'rv-a-std').value);
     $(h, 'rv-a-std').value = '17,79';
     $(h, 'rv-a-pct').value = '60';

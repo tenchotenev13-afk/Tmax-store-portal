@@ -114,7 +114,7 @@ function env(o) {
       if (!r.ok) return r;
       /* Номерата на бройките (етап 2, 23.11.2026): масив редове, unit_no от „тригера". */
       if (/revaluation_units/.test(url)) {
-        const rows = [].concat(JSON.parse(init.body)).map(b => Object.assign({ id: 'u-' + (++idSeq), unit_no: b.store_name + '-П' + idSeq }, b));
+        const rows = [].concat(JSON.parse(init.body)).map(b => Object.assign({ id: 'u-' + (++idSeq), unit_no: 'KJ' + idSeq }, b));
         return { ok: true, status: 201, json: () => Promise.resolve(rows), text: () => Promise.resolve(JSON.stringify(rows)) };
       }
       /* подразбиращите се от базата (PostgREST ги връща с return=representation) */

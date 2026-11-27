@@ -28,7 +28,7 @@ const IT = (id, o) => Object.assign({ id: id, submission_id: 's-1', campaign_id:
   product_name: 'Артикул ' + id, unit: 'БР', qty: 1, std_price: 12.98, discount_pct: 50, proposed_price: 6.49,
   store_comment: 'дефект', new_sap_code: '80' + id, sale_price: 3 }, o || {});
 const UNITS = (item, n, from) => Array.from({ length: n }, (_, k) => ({ id: 'u-' + item + '-' + k, item_id: item, submission_id: 's-1', store_name: 'Кърджали',
-  unit_no: 'Кърджали-П' + String((from || 1) + k).padStart(4, '0'), created_at: '2026-11-10T10:00:0' + (k % 10) + 'Z' }));
+  unit_no: 'KJ' + ((from || 1) + k), created_at: '2026-11-10T10:00:0' + (k % 10) + 'Z' }));
 
 function env(o) {
   o = o || {};
@@ -114,7 +114,7 @@ function setNum(h, id, val) { const el = $(h, id); el.value = String(val); fire(
     await printIt(h);
     ok('4 етикета (3 + 1), 1 лист', labels(h).length === 4 && pages(h).length === 1, labels(h).length + ' / ' + pages(h).length);
     const units = labels(h).map(l => { const u = l.querySelector('.rv-lbl-unit'); return u ? u.textContent : '—'; });
-    ok('номерата П0001–П0003 и „без номер" за стария ред', JSON.stringify(units) === JSON.stringify(['№ Кърджали-П0001', '№ Кърджали-П0002', '№ Кърджали-П0003', '—']), JSON.stringify(units));
+    ok('номерата KJ1–KJ3 и „без номер" за стария ред', JSON.stringify(units) === JSON.stringify(['№ KJ1', '№ KJ2', '№ KJ3', '—']), JSON.stringify(units));
     ok('нищо с кодовете 8011111 / 8022222 / 803 / 804', !labels(h).some(l => /Артикул [34]/.test(l.textContent)));
     ok('модулът е print, прозорецът е затворен', $(h, 'mod-print').style.display === 'block' && !$(h, 'rv-lbl-modal'));
     /* махната отметка → редът не се печата */
@@ -214,7 +214,7 @@ function setNum(h, id, val) { const el = $(h, id); el.value = String(val); fire(
     ok('стара цена „12,98 €" (зачертана)', t('.rv-lbl-old') === '12,98 €' && /\.rv-lbl-old\{text-decoration:line-through/.test($(h, 'mod-print').innerHTML), t('.rv-lbl-old'));
     ok('нова цена „3,00 €"', t('.rv-lbl-new') === '3,00 €', t('.rv-lbl-new'));
     ok('нов SAP код', t('.rv-lbl-code') === 'Код 8061540', t('.rv-lbl-code'));
-    ok('номер на бройката', t('.rv-lbl-unit') === '№ Кърджали-П0001', t('.rv-lbl-unit'));
+    ok('номер на бройката', t('.rv-lbl-unit') === '№ KJ1', t('.rv-lbl-unit'));
     ok('дата 13.11.2026', t('.rv-lbl-date') === 'Преоценка 13.11.2026', t('.rv-lbl-date'));
     ok('причина', t('.rv-lbl-why') === 'липсва рамо от тръбата към душ пита', t('.rv-lbl-why'));
     ok('малък: причината на 1 ред, името до 2 (CSS)', l.querySelector('.rv-lbl-why').classList.contains('rv-lbl-line') &&
@@ -269,7 +269,7 @@ function setNum(h, id, val) { const el = $(h, id); el.value = String(val); fire(
     for (const u of [STORE_USER, ADMIN, REG_ACC]) {
       const h = env({ user: u, subs: [SUB('processed')], items, units: UNITS('1', 3) });
       await open(h, u);
-      ok('processed с номера → „№ Кърджали-П0001 … П0003" (' + u.role + (u.is_regional ? ', регионален' : '') + ')', unitsTxt(h) === '№ Кърджали-П0001 … П0003', unitsTxt(h));
+      ok('processed с номера → „№ KJ1 … KJ3" (' + u.role + (u.is_regional ? ', регионален' : '') + ')', unitsTxt(h) === '№ KJ1 … KJ3', unitsTxt(h));
       ok('ред 2 без номера → без ред с номера, без маркер (' + u.role + ')', !$(h, 'rv-row-2').querySelector('.rv-units') && !mod(h).querySelector('.rv-unit-miss'));
       const retry = Array.prototype.filter.call(mod(h).querySelectorAll('button'), b => /Опитай пак/.test(b.textContent));
       ok('без <button> „🔁 Опитай пак" (' + u.role + ')', retry.length === 0);
@@ -280,7 +280,7 @@ function setNum(h, id, val) { const el = $(h, id); el.value = String(val); fire(
     await h.w.loadRevaluation(); await ticks(6);
     await h.w.rvHistOpenView(); await ticks(6);
     await h.w.rvHistOpenStore('c-1', 'Кърджали'); await ticks(8);
-    ok('„📁 История" → бланката показва номерата', unitsTxt(h) === '№ Кърджали-П0001 … П0003', unitsTxt(h));
+    ok('„📁 История" → бланката показва номерата', unitsTxt(h) === '№ KJ1 … KJ3', unitsTxt(h));
     /* processed БЕЗ нито един номер (стара бланка) */
     const h2 = env({ subs: [SUB('processed')], items, units: [] });
     await open(h2);

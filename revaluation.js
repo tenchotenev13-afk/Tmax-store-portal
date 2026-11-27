@@ -565,8 +565,9 @@ function rvApplyPctAll(){
 /* ─── Номера на бройките (етап 2 от 3, 23.11.2026) ─────────
    revaluation_units (revaluation-units-schema.sql): МЕ БР (бр., бр, БР —
    rvSapUnit) → по един номер на бройка (ceil(qty)); друга МЕ → един номер на
-   реда. Номерът '<обект>-П0042' дава тригерът в базата — клиентът праща само
-   item_id и чете номера от отговора. rvUnitsSync сверява реда с базата и
+   реда. Номерът (сега 'GB42', до 27.11 '<обект>-П0042') дава тригерът в базата — клиентът праща само
+   item_id и чете номера от отговора. От 27.11.2026 (т.7 на Теодор) номерът е
+   къс: stores.unit_prefix + число без нули — 'GB7' (revaluation-unit-prefix-schema.sql). rvUnitsSync сверява реда с базата и
    добавя липсващите / трие НАЙ-ГОЛЕМИТЕ излишни (номерата не се
    преизползват, дупки са допустими). Вика се при нов ред (ръчно, скенер,
    ZSTOCK) и при промяна на qty (rvEdit, повторен ZSTOCK) — тоест само докато
@@ -654,16 +655,16 @@ function rvUnitsRetry(id){
   });
 }
 function rvUnitsCanRetry(){ return rvUnitsApply() && (rvCanEdit() || rvCoCanEdit()); }
-/* „Кърджали-П0042 … П0044, П0047" — поредиците се свиват, обектът се пише веднъж. */
+/* „GB42 … GB44, GB47" — поредиците се свиват. Номерът е къс (т.7 на Теодор,
+   27.11.2026: префикс на обекта + число), затова се пише цял навсякъде. */
 function rvUnitsLabel(list){
   if(!list || !list.length) return '';
-  var short = function(u){ var s = String(u.unit_no), k = s.lastIndexOf('-П'); return k >= 0 ? s.slice(k + 1) : s; };
   var parts = [], i = 0;
   while(i < list.length){
     var j = i;
     while(j + 1 < list.length && rvUnitNum(list[j + 1]) === rvUnitNum(list[j]) + 1) j++;
-    var a = i === 0 ? String(list[i].unit_no) : short(list[i]);
-    parts.push(j > i ? a + ' … ' + short(list[j]) : a);
+    var a = String(list[i].unit_no);
+    parts.push(j > i ? a + ' … ' + String(list[j].unit_no) : a);
     i = j + 1;
   }
   return parts.join(', ');
@@ -792,7 +793,7 @@ function rvAddRowHtml(){
   var f = function(id, ph, w, extra){ return '<input id="' + id + '" type="text" placeholder="' + ph + '" style="width:' + w + ';"' + (extra || '') + '>'; };
   var pct = rvPct();
   return '<div id="rv-add" style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:8px;">' +
-    '<div style="position:relative;">' + f('rv-a-code', 'SAP код или EAN', '130px', ' inputmode="numeric" oninput="rvAcSchedule(this.value)" onkeydown="rvCodeKey(event)" autocomplete="off"') +
+    '<div style="position:relative;">' + f('rv-a-code', 'SAP код или EAN', '130px', ' inputmode="numeric" oninput="rvAcSchedule(this.value)" onkeydown="rvCodeKey(event)" onblur="rvCodeBlur()" autocomplete="off"') +
     '<div id="rv-ac" style="display:none;position:absolute;z-index:20;background:#fff;border:1px solid #cbd5e1;border-radius:6px;min-width:320px;"></div></div>' +
     '<button class="btn-sm" onclick="rvScanOpen()" title="Сканирай баркода с камерата">📷 Сканирай</button>' +
     f('rv-a-name', 'Описание', '220px') + f('rv-a-unit', 'МЕ', '50px') +
@@ -804,11 +805,50 @@ function rvAddRowHtml(){
     '<button class="btn-sm" onclick="rvAddRow()" style="background:#2563eb;color:#fff;">Добави</button></div>';
 }
 function rvIsEan(code){ return /^\d{8,14}$/.test(String(code == null ? '' : code).trim()); }
+/* Предложение на Теодор т.3 (27.11.2026): SAP код + Enter (или излизане от
+   полето) зарежда артикула от каталога — по ТОЧЕН sap_code, през
+   rvFillFromCat (код, описание, МЕ, цена). EAN минава както досега само през
+   Enter / „Добави" / камерата. rvCodeAsked — последният поискан код:
+   излизането от полето не пита втори път за същия (Enter → попълване →
+   фокусът мръдва → blur). rvCodePending — заявката в ход: „Добави", натиснат
+   преди отговора, чака я и НЕ добавя реда — човекът първо вижда артикула. */
+var rvCodeAsked = '';
+var rvCodePending = null;   /* {code, p} */
 function rvCodeKey(ev){
   if(!ev || (ev.key !== 'Enter' && ev.keyCode !== 13)) return;
   if(ev.preventDefault) ev.preventDefault();
   var code = v('rv-a-code');
   if(rvIsEan(code)) rvEanLookup(code);
+  else if(code) rvSapLookup(code);
+}
+function rvCodeBlur(){
+  var code = v('rv-a-code');
+  if(!code || rvIsEan(code) || code === rvCodeAsked) return Promise.resolve(0);
+  return rvSapLookup(code);
+}
+function rvSapLookup(code){
+  if(rvAcTimer){ clearTimeout(rvAcTimer); rvAcTimer = null; }
+  rvAcSeq++; rvAcRes = []; rvEanRes = []; rvAcRender();
+  rvCodeAsked = code;
+  var pend = { code: code, p: null };
+  pend.p = sbGetOk('product_catalog', 'sap_code=eq.' + encodeURIComponent(code) +
+    '&select=sap_code,product_name,default_unit,sale_price&limit=1').then(function(res){
+    if(rvCodePending === pend) rvCodePending = null;
+    /* Полето вече е друго (нов ред, друг код) — отговорът е остарял. */
+    if(v('rv-a-code') !== code) return 0;
+    if(!res.ok){ rvCodeAsked = ''; toast('Каталогът не се прочете — ' + res.error, '#dc2626'); return 0; }
+    if(!res.rows.length){
+      /* Описанието / цената от предишен артикул не бива да останат до чужд код. */
+      rvSetVal('rv-a-name', ''); rvSetVal('rv-a-unit', ''); rvSetVal('rv-a-std', '');
+      var hint = document.getElementById('rv-a-std-hint'); if(hint) hint.style.display = 'none';
+      toast('Кодът не е в каталога — попълни описанието на ръка', '#d97706');
+      return 0;
+    }
+    rvFillFromCat(res.rows[0]);
+    return 1;
+  });
+  rvCodePending = pend;
+  return pend.p;
 }
 function rvSetVal(id, val){ var el = document.getElementById(id); if(el) el.value = val == null ? '' : val; }
 function rvFocus(id){ var el = document.getElementById(id); if(el && el.focus) el.focus(); }
@@ -818,6 +858,7 @@ function rvFocus(id){ var el = document.getElementById(id); if(el && el.focus) e
    съвпадат със std_price). */
 function rvFillFromCat(p){
   var rep = rvIsRepeat(p.sap_code);
+  rvCodeAsked = String(p.sap_code == null ? '' : p.sap_code).trim();
   rvSetVal('rv-a-code', p.sap_code);
   rvSetVal('rv-a-name', p.product_name);
   rvSetVal('rv-a-unit', p.default_unit);
@@ -905,7 +946,7 @@ function rvAcFetch(term){
   var t = encodeURIComponent(term);
   return sbGet('product_catalog',
     'or=(sap_code.ilike.' + t + '*,product_name.ilike.*' + t + '*)' +
-    '&select=sap_code,product_name,default_unit&order=sap_code.asc&limit=8'
+    '&select=sap_code,product_name,default_unit,sale_price&order=sap_code.asc&limit=8'
   ).then(function(rows){
     if(seq !== rvAcSeq) return;
     rvAcRes = Array.isArray(rows) ? rows : [];
@@ -926,13 +967,10 @@ function rvAcRender(){
 function rvAcPick(k){
   var p = rvAcRes[k];
   if(!p) return;
-  var set = function(id, val){ var el = document.getElementById(id); if(el) el.value = val || ''; };
-  set('rv-a-code', p.sap_code); set('rv-a-name', p.product_name); set('rv-a-unit', p.default_unit);
-  /* Автодопълването не носи цена — изчисти останалата от предишно сканиране. */
-  set('rv-a-std', '');
-  var hint = document.getElementById('rv-a-std-hint'); if(hint) hint.style.display = 'none';
+  /* Т.4 на Теодор (27.11.2026): изборът носи и цената от каталога — същият
+     път като EAN / SAP код (при 8xxxxxx — празна, с подсказката). */
   rvAcRes = []; rvAcRender();
-  var q = document.getElementById('rv-a-qty'); if(q) q.focus();
+  rvFillFromCat(p);
 }
 function rvNextSort(){
   var m = 0;
@@ -958,6 +996,9 @@ function rvAddRow(){
      след като човекът види попълнения артикул. Код, който вече е в бланката,
      НЕ се отказва — нов ред (решение 23.11.2026). */
   if(rvIsEan(code)) return rvEanLookup(code).then(function(){ return false; });
+  /* Кодът още се търси в каталога (blur от натискането на „Добави") —
+     изчакай го; редът се добавя със следващото „Добави". */
+  if(rvCodePending && rvCodePending.code === code) return rvCodePending.p.then(function(){ return false; });
   var qty = v('rv-a-qty') === '' ? 0 : rvNum(v('rv-a-qty'));
   var std = v('rv-a-std') === '' ? null : rvNum(v('rv-a-std'));
   var pct = v('rv-a-pct') === '' ? null : rvNum(v('rv-a-pct'));
@@ -972,7 +1013,7 @@ function rvAddRow(){
       rvItems.push(res.row);
       /* Формата остава отворена и празна, фокусът — в полето за код:
          следващото сканиране (ръчен скенер) влиза направо. */
-      rvAcRes = []; rvEanRes = [];
+      rvAcRes = []; rvEanRes = []; rvCodeAsked = '';
       return rvUnitsSync(res.row).then(function(ok){
         if(ok) toast('Редът е добавен');   /* иначе червеният toast от rvUnitsSync остава */
         /* Бележката под формата (25.11.2026) — остава до следващото добавяне. */
@@ -2005,10 +2046,6 @@ function rvLblDate(ts){
 }
 function rvLblMoney(n){ return rvFmt(n) + ' €'; }
 function rvLblMm(x){ return String(Math.round(x * 100) / 100) + 'mm'; }
-/* „Гоце Делчев-П0123" → „П0123" за отметките на бройките — обектът е в
-   заглавието на прозореца, а целият номер не се побира в колоната на 640 px
-   (26.11.2026). Пълният номер — в title на отметката. */
-function rvLblUnitShort(u){ var s = String(u == null ? '' : u), k = s.lastIndexOf('-П'); return k >= 0 ? s.slice(k + 1) : s; }
 
 /* ─── Прозорецът преди печат ─── */
 function rvLblOpen(){
@@ -2047,7 +2084,7 @@ function rvLblModal(kind, on, onU){
         n = '<div class="rv-lbl-pick" data-id="' + escAttr(r.it.id) + '"><div style="font-size:11px;color:#92400e;overflow-wrap:anywhere;">прехвърлени ' + r.pick + ' от ' + r.units.length + ' — отметни кои бройки</div>' +
           r.units.map(function(u, k){
             var on1 = sel ? sel.indexOf(u) >= 0 : k < r.pick;
-            return '<label title="' + escAttr(u) + '" style="display:inline-block;margin-right:8px;font-size:11px;white-space:nowrap;"><input type="checkbox" class="rv-lbl-u" data-id="' + escAttr(r.it.id) + '" data-u="' + escAttr(u) + '"' + (on1 ? ' checked' : '') + '> ' + esc(rvLblUnitShort(u)) + '</label>';
+            return '<label title="' + escAttr(u) + '" style="display:inline-block;margin-right:8px;font-size:11px;white-space:nowrap;"><input type="checkbox" class="rv-lbl-u" data-id="' + escAttr(r.it.id) + '" data-u="' + escAttr(u) + '"' + (on1 ? ' checked' : '') + '> ' + esc(u) + '</label>';
           }).join('') + '</div>';
       } else n = r.units.length + (r.units[0] == null ? ' <span style="color:#94a3b8;font-size:11px;">без номер</span>' : '');
       h += '<tr id="rv-lbl-row-' + escAttr(r.it.id) + '"' + (r.zero ? ' class="rv-lbl-row-zero" style="color:#94a3b8;background:#f8fafc;"' : '') + '><td><input type="checkbox" class="rv-lbl-chk" data-id="' + escAttr(r.it.id) + '"' + (chk ? ' checked' : '') + (r.zero ? ' disabled' : '') + '></td>' +

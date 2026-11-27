@@ -1,5 +1,6 @@
 /* Преоценка — етап 2 от 3 (23.11.2026): пореден номер на бройка
-   (revaluation_units, тригер '<обект>-П0042') и снимки на реда
+   (revaluation_units, тригер '<обект>-П0042'; от 27.11.2026 — 'KJ42',
+   stores.unit_prefix + число, revaluation-unit-prefix-schema.sql) и снимки на реда
    (revaluation_items.photos, bucket-ът bulletin-files, префикс revaluation/).
 
    Интеграционно: shared.js + admin.js + stock-returns.js + push.js +
@@ -17,7 +18,7 @@
      M1 rvUnitsWant връща 1 и за БР (без qty)
         → „POST … с 3 реда", „„бр." се нормализира като БР", импортът 2 → 4;
      M2 при намаление трие НАЙ-МАЛКИТЕ номера
-        → „5 → 2: остават П0001 и П0002";
+        → „5 → 2: остават KJ1 и KJ2";
      M3 провалът без червен toast (грешката се поглъща)
         → „червен toast за номерата";
      M4 rvUnitsHtml без маркера „без номер — опитай пак"
@@ -25,7 +26,7 @@
      M5 rvCanPhoto без проверката за чернова
         → „без 📷 и без ✕ (бланката е подадена)";
      M6 rvUnitsLabel без свиване на поредиците
-        → „под кода: „№ Кърджали-П0001 … П0003"" и още 3;
+        → „под кода: „№ KJ1 … KJ3"" и още 3;
      M7 rvLoadSheet не пълни rvUnits от четенето
         → „регионалният вижда номера".
    Добавка (cross-file преглед, 23.11) — секция 9, чистият код: exit 0, 52
@@ -48,6 +49,8 @@ const STORE_USER = { email: 'kardzhali@temax.bg', display_name: 'Управит�
 const REG_USER = { email: 'reg@temax.bg', display_name: 'Регионален', role: 'accounting', store_name: 'Централен офис', is_regional: true, assigned_stores: ['Кърджали'] };
 
 let idSeq = 0;
+/* stores.unit_prefix (27.11.2026) — „тригерът" дава префикс + число без нули. */
+const PFX = { 'Кърджали': 'KJ', 'Шумен': 'SH', 'Габрово': 'GB' };
 function env(o) {
   o = o || {};
   const db = {
@@ -110,7 +113,7 @@ function env(o) {
             const st = item.store_name;
             db.counters[st] = (db.counters[st] || 0) + 1;
             const u = { id: 'u-' + (++idSeq), item_id: b.item_id, submission_id: item.submission_id, store_name: st,
-              unit_no: st + '-П' + String(db.counters[st]).padStart(4, '0'), created_at: new Date(Date.now() + idSeq).toISOString() };
+              unit_no: PFX[st] + db.counters[st], created_at: new Date(Date.now() + idSeq).toISOString() };
             db.units.push(u); return u;
           });
           return res(201, rows);
@@ -182,18 +185,18 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     ok('POST към revaluation_units с 3 реда', unitPosts(h).length === 1 && unitPosts(h)[0].body.length === 3, JSON.stringify(unitPosts(h).map(x => x.body)));
     ok('клиентът НЕ праща unit_no (дава го тригерът)', unitPosts(h)[0].body.every(b => !('unit_no' in b)));
     ok('тялото: item_id / submission_id / store_name на реда', unitPosts(h)[0].body.every(b => b.item_id === a.id && b.submission_id === a.submission_id && b.store_name === 'Кърджали'));
-    ok('под кода: „№ Кърджали-П0001 … П0003"', unitsTxt(h, a.id) === '№ Кърджали-П0001 … П0003', unitsTxt(h, a.id));
+    ok('под кода: „№ KJ1 … KJ3"', unitsTxt(h, a.id) === '№ KJ1 … KJ3', unitsTxt(h, a.id));
     ok('toast „Редът е добавен"', /Редът е добавен/.test(lastToast(h)), lastToast(h));
     /* Г. (25.11.2026) — видима бележка под формата, не само toast */
     const note = () => { const e = $(h, 'rv-add-note'); return e ? e.textContent : ''; };
-    ok('бележка под формата: „Запиши на стоката: № Кърджали-П0001 … П0003"', /Запиши на стоката: № Кърджали-П0001 … П0003$/.test(note()) &&
+    ok('бележка под формата: „Запиши на стоката: № KJ1 … KJ3"', /Запиши на стоката: № KJ1 … KJ3$/.test(note()) &&
       !!$(h, 'rv-add') && ($(h, 'rv-add').compareDocumentPosition($(h, 'rv-add-note')) & 4) !== 0, note());
     const b = await addRow(h, '61000', 'M2', '9,33');
     ok('M2 9,33 → 1 номер', h.db.units.filter(u => u.item_id === b.id).length === 1);
-    ok('под кода: „№ Кърджали-П0004"', unitsTxt(h, b.id) === '№ Кърджали-П0004', unitsTxt(h, b.id));
-    ok('бележката се сменя със следващото добавяне: „… № Кърджали-П0004"', /Запиши на стоката: № Кърджали-П0004$/.test(note()), note());
+    ok('под кода: „№ KJ4"', unitsTxt(h, b.id) === '№ KJ4', unitsTxt(h, b.id));
+    ok('бележката се сменя със следващото добавяне: „… № KJ4"', /Запиши на стоката: № KJ4$/.test(note()), note());
     realClick(h.w, btn(mod(h), '＋ Ред')); await ticks(1);
-    ok('остава и при затворена форма (до следващото добавяне)', !$(h, 'rv-add') && /П0004$/.test(note()), note());
+    ok('остава и при затворена форма (до следващото добавяне)', !$(h, 'rv-add') && /KJ4$/.test(note()), note());
     realClick(h.w, btn(mod(h), '＋ Ред')); await ticks(1);
     const c = await addRow(h, '61001', 'бр.', '2');
     ok('„бр." се нормализира като БР → 2 номера', h.db.units.filter(u => u.item_id === c.id).length === 2);
@@ -208,19 +211,19 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     const b = await addRow(h, '61000', 'M2', '2');
     await editQty(h, a.id, '5');
     ok('3 → 5: два нови номера', h.db.units.filter(u => u.item_id === a.id).length === 5);
-    ok('номерата не се преизползват — дупка за реда на M2', unitsTxt(h, a.id) === '№ Кърджали-П0001 … П0003, П0005 … П0006', unitsTxt(h, a.id));
+    ok('номерата не се преизползват — дупка за реда на M2', unitsTxt(h, a.id) === '№ KJ1 … KJ3, KJ5 … KJ6', unitsTxt(h, a.id));
     await editQty(h, a.id, '2');
     const left = h.db.units.filter(u => u.item_id === a.id).map(u => u.unit_no).sort();
-    ok('5 → 2: остават П0001 и П0002', JSON.stringify(left) === JSON.stringify(['Кърджали-П0001', 'Кърджали-П0002']), JSON.stringify(left));
+    ok('5 → 2: остават KJ1 и KJ2', JSON.stringify(left) === JSON.stringify(['KJ1', 'KJ2']), JSON.stringify(left));
     const del = h.calls.del.filter(u => /revaluation_units/.test(u));
     ok('един DELETE с трите най-големи id-та', del.length === 1 && (del[0].match(/u-/g) || []).length === 3, del.join(' | '));
-    ok('екранът: „№ Кърджали-П0001 … П0002"', unitsTxt(h, a.id) === '№ Кърджали-П0001 … П0002', unitsTxt(h, a.id));
+    ok('екранът: „№ KJ1 … KJ2"', unitsTxt(h, a.id) === '№ KJ1 … KJ2', unitsTxt(h, a.id));
     await editQty(h, b.id, '7');
     ok('M2: промяна на qty не дава нов номер', h.db.units.filter(u => u.item_id === b.id).length === 1);
     await editQty(h, a.id, '0');
     ok('БР qty 0 → 0 номера, без маркер', h.db.units.filter(u => u.item_id === a.id).length === 0 && !row(h, a.id).querySelector('.rv-unit-miss'));
     const nextNo = await (async () => { await editQty(h, a.id, '1'); return h.db.units.filter(u => u.item_id === a.id).map(u => u.unit_no)[0]; })();
-    ok('след триене следващият номер е нов (П0007), не П0003', nextNo === 'Кърджали-П0007', nextNo);
+    ok('след триене следващият номер е нов (KJ7), не KJ3', nextNo === 'KJ7', nextNo);
   }
 
   section('3. Изтрит ред → номерата му падат (cascade), без отделен DELETE');
@@ -233,7 +236,7 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     ok('редът е изтрит', !row(h, a.id) && !h.db.items.some(x => x.id === a.id));
     ok('номерата му ги няма в базата', !h.db.units.some(u => u.item_id === a.id));
     ok('клиентът не праща DELETE към revaluation_units', !h.calls.del.some(u => /revaluation_units/.test(u)));
-    ok('другият ред си пази номера', unitsTxt(h, b.id) === '№ Кърджали-П0003', unitsTxt(h, b.id));
+    ok('другият ред си пази номера', unitsTxt(h, b.id) === '№ KJ3', unitsTxt(h, b.id));
   }
 
   section('4. Провалено създаване на номерата → червен toast, маркер и бутон; „Опитай пак" ги създава');
@@ -256,7 +259,7 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
         const item = h.db.items.find(x => x.id === JSON.parse(init.body)[0].item_id);
         const rows = JSON.parse(init.body).map(() => {
           h.db.counters['Кърджали'] = (h.db.counters['Кърджали'] || 0) + 1;
-          const u = { id: 'u-r' + h.db.counters['Кърджали'], item_id: item.id, submission_id: item.submission_id, store_name: 'Кърджали', unit_no: 'Кърджали-П' + String(h.db.counters['Кърджали']).padStart(4, '0'), created_at: new Date().toISOString() };
+          const u = { id: 'u-r' + h.db.counters['Кърджали'], item_id: item.id, submission_id: item.submission_id, store_name: 'Кърджали', unit_no: 'KJ' + h.db.counters['Кърджали'], created_at: new Date().toISOString() };
           h.db.units.push(u); return u;
         });
         return Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve(rows), text: () => Promise.resolve('') });
@@ -266,7 +269,7 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     realClick(h.w, retry); await ticks(8);
     ok('след „Опитай пак": 2 номера', h.db.units.filter(u => u.item_id === a.id).length === 2);
     ok('маркерът изчезва', !row(h, a.id).querySelector('.rv-unit-miss'));
-    ok('номерата са под кода', unitsTxt(h, a.id) === '№ Кърджали-П0001 … П0002', unitsTxt(h, a.id));
+    ok('номерата са под кода', unitsTxt(h, a.id) === '№ KJ1 … KJ2', unitsTxt(h, a.id));
   }
 
   section('5. Заварени: processed без номера → без маркер; паднало четене → банер, не маркери');
@@ -352,11 +355,11 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
   {
     const items = [{ id: 'i-1', submission_id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', sap_code: '53531', unit: 'БР', qty: 1, sort_order: 1,
       store_comment: 'дефект', std_price: 10, discount_pct: 50, proposed_price: 5, photos: ['https://x/storage/v1/object/public/bulletin-files/revaluation/1_a.jpg'] }];
-    const units = [{ id: 'u-1', item_id: 'i-1', submission_id: 's-1', store_name: 'Кърджали', unit_no: 'Кърджали-П0042', created_at: '2026-11-23T08:00:00Z' }];
+    const units = [{ id: 'u-1', item_id: 'i-1', submission_id: 's-1', store_name: 'Кърджали', unit_no: 'KJ42', created_at: '2026-11-23T08:00:00Z' }];
     const h = env({ user: REG_USER, subs: [Object.assign({}, SUB_DRAFT, { status: 'submitted' })], items, units });
     await h.w.loadRevaluation(); await ticks(6);
     await h.w.rvCoOpenStore('Кърджали'); await ticks(6);
-    ok('регионалният вижда номера', unitsTxt(h, 'i-1') === '№ Кърджали-П0042', unitsTxt(h, 'i-1'));
+    ok('регионалният вижда номера', unitsTxt(h, 'i-1') === '№ KJ42', unitsTxt(h, 'i-1'));
     const th = row(h, 'i-1') && row(h, 'i-1').querySelector('.rv-thumb');
     ok('регионалният вижда миниатюрата', !!th);
     ok('без 📷 и без ✕ (бланката е подадена)', !row(h, 'i-1').querySelector('.rv-photo-btn') && !row(h, 'i-1').querySelector('.rv-photo-rm'));
