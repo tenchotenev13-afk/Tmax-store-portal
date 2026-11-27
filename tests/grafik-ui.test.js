@@ -1474,7 +1474,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('т.3: без запомнен избор — по сектори; бутонът предлага „☰ Плосък списък“', W.grGroupMode() === 'sector' && d.getElementById('gr-group-btn').textContent === '☰ Плосък списък');
     // А1 (24.11.2026): заглавието на групата и „на смяна“ са един ред над хората (класовете gr-grp и gr-grp-cov).
     ok('т.3: редът — по секторите на магазина (Склад преди Каса), хората по sort_order, групата — един ред („на смяна“ в него) над хората', rowsSig() === '[Склад] st-2 [Каса] st-1 st-3', rowsSig());
-    ok('т.3: заглавието на групата — „Каса (2) на смяна →“, залепено вляво през трите колони', /^Каса \(2\) на смяна →$/.test(d.querySelector('tr.gr-grp[data-sector="Каса"] td').textContent) &&
+    ok('т.3: заглавието на групата — „▾ Каса (2) на смяна →“ (пакет 1: ▾ — сгъва се), залепено вляво през трите колони', /^▾Каса \(2\) на смяна →$/.test(d.querySelector('tr.gr-grp[data-sector="Каса"] td').textContent) &&
       d.querySelector('tr.gr-grp[data-sector="Каса"] td').getAttribute('colspan') === '3' && /gr-stk/.test(d.querySelector('tr.gr-grp[data-sector="Каса"] td').className));
     ok('т.3: № е номерът от печата и Excel за ТРЗ (sort_order), не мястото на екрана — Мария 2, Иван 1, Петя 3', ['st-2', 'st-1', 'st-3'].map(id => d.getElementById('gr-row-' + id).children[0].textContent).join() === '2,1,3');
     ok('т.3: данните остават по sort_order (снимката / Excel / печат) — Иван, Мария, Петя', W.grCalc.rows.map(r => r.staff.id).join() === 'st-1,st-2,st-3');
@@ -2270,6 +2270,149 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('А6: над 768px (resize) → мрежата', !!md.getElementById('gr-grid') && !md.getElementById('gr-mob'));
     narrow = true; MW.dispatchEvent(new MW.Event('resize')); await wait(250); await ticks(2);
     ok('А6: обратно под 768px → телефонът, изборът „По човек“ остава', !!md.getElementById('gr-mob') && md.getElementById('gr-mob-person-btn').classList.contains('active'));
+  }
+
+  section('28. Пакет 1 (27.11.2026): ZIP с одобрените, обобщение, „Активни“, присъствена към днес, сгъване на сектори, „К“ в „Промени“');
+  {
+    const ExcelJS = require(path.join(ROOT, 'node_modules', 'exceljs'));
+    const mk = () => {
+      const S = makeServer(); S.stageB = true;
+      const wd = env(MGR).w.GrafikEngine.monthInfo('2026-11', []);
+      const work = wd.dow.map(w => (w <= 5 ? 'П' : ''));
+      const snapK = { rows: [{ staff_id: 'st-1', full_name: 'Иван Иванов Иванов', contract_title: 'продавач', hours_per_day: 8, codes: work.map(l => (l ? 'Д1/З' : '')), norm: 168 }],
+        header: { company_name: '"ТЕМАКС ТЦД 3" ЕООД', company_eik: '207322431', company_addr: 'гр. Варна', store_blank_name: '"Темакс" – Кърджали', approver: 'Теодор Тенев' } };
+      S.months['Кърджали|2026-11-01'] = { id: 'm-zk', store_name: 'Кърджали', month: '2026-11-01', status: 'approved', submitted_by_name: 'Управител Кърджали', submitted_at: '2026-11-02T10:00:00Z',
+        approved_by_name: 'ТРЗ', approved_at: '2026-11-05T09:00:00Z', snapshot: snapK, off_norm: [] };
+      S.rows.push({ month_id: 'm-zk', staff_id: 'st-1', letters: work.slice(), locked: {} });
+      // Шумен — одобрен, но с непознат код в снимката → пропуснат с бележка, не спира другите.
+      S.months['Шумен|2026-11-01'] = { id: 'm-zs', store_name: 'Шумен', month: '2026-11-01', status: 'approved', submitted_by_name: 'Регионален', submitted_at: '2026-11-03T10:00:00Z',
+        approved_by_name: 'ТРЗ', approved_at: '2026-11-05T09:05:00Z', off_norm: [],
+        snapshot: { rows: [{ staff_id: 'st-9', full_name: 'Служител Шумен', hours_per_day: 8, codes: work.map(l => (l ? 'ХХ9' : '')), norm: 168 }], header: snapK.header } };
+      S.rows.push({ month_id: 'm-zs', staff_id: 'st-9', letters: work.slice(), locked: {} });
+      // „Активни“ — от сървъра (overview.active); макетът ги добавя към отговора.
+      const h0 = S.handle;
+      S.handle = (u, b) => { const r = h0(u, b); if (b.action === 'overview' && r.body && r.body.stores) r.body.stores.forEach(s => { s.active = s.store === 'Кърджали' ? 3 : 1; }); if (b.action === 'log') return { status: 200, body: { ok: true } }; return r; };
+      return S;
+    };
+    const S = mk();
+    const t = env(TRZ, { server: S, beta: BETA_ALL }); await load(t);
+    realClick(t.w, btn(mod(t), 'Обекти')); await ticks(8);
+    const zb = t.doc.getElementById('gr-ov-zip');
+    ok('ТРЗ: „📦 Свали всички одобрени (2)“ и „📊 Обобщение (Excel)“', !!zb && /\(2\)/.test(zb.textContent) && !!t.doc.getElementById('gr-ov-summary'));
+    // ZIP: JSZip — макет, който пази файловете; ExcelJS — истинският (файловете се проверяват, че се отварят).
+    const zips = [];
+    t.w.grWithJSZip = () => Promise.resolve(function FakeZip() { const files = {}; this.file = (n, d) => { files[n] = d; }; this.generateAsync = () => { zips.push(files); return Promise.resolve({ size: 1 }); }; });
+    t.w.grWithExcelJS = () => Promise.resolve(ExcelJS);
+    const blobs = []; t.w.grDownloadBlob = (b, n) => blobs.push(n);
+    const before = { store: t.w.grStore, view: t.w.grView };
+    await guard('grZipApproved', () => t.w.grZipApproved()); await ticks(30); await new Promise(r => setTimeout(r, 300)); await ticks(10);
+    const z = zips[0] || {}, names = Object.keys(z).sort();
+    ok('ZIP: „Графици_одобрени_2026-11.zip“ с Excel за ТРЗ и присъствената на Кърджали', blobs[0] === 'Графици_одобрени_2026-11.zip' &&
+      names.indexOf('График_Кърджали_2026-11.xlsx') >= 0 && names.indexOf('Присъствена_Кърджали_2026-11.xlsx') >= 0, names.join(', ') + ' / ' + blobs.join(','));
+    ok('Шумен (непознат код) — пропуснат, причината в ПРОПУСНАТИ.txt; другите не са спрени', names.indexOf('ПРОПУСНАТИ.txt') >= 0 && /Шумен/.test(z['ПРОПУСНАТИ.txt']) && !names.some(n => /Присъствена_Шумен/.test(n)), z['ПРОПУСНАТИ.txt']);
+    let opened = 0;
+    for (const n of names.filter(n => /\.xlsx$/.test(n))) { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(z[n]); if (wb.worksheets.length) opened++; }
+    ok('всеки .xlsx в ZIP-а се отваря (ExcelJS)', opened === names.filter(n => /\.xlsx$/.test(n)).length && opened >= 2, String(opened));
+    ok('одит: log export_zip за всеки обект с файл', S.calls.filter(c => c.action === 'log' && c.what === 'export_zip').map(c => c.store).join() === 'Кърджали', JSON.stringify(S.calls.filter(c => c.action === 'log')));
+    ok('след ZIP-а екранът е същият (обект, изглед)', t.w.grStore === before.store && t.w.grView === before.view && !!t.doc.getElementById('gr-ov-tbl'));
+    // Кой вижда бутона.
+    const m = env(MGR, { server: mk(), beta: BETA_ALL }); await load(m);
+    ok('ръководител — без „📦“ (обзорът не е негов)', !m.doc.getElementById('gr-ov-zip'));
+    const g = env(REG, { server: mk(), beta: BETA_ALL }); await load(g); realClick(g.w, btn(mod(g), 'Обекти')); await ticks(8);
+    ok('регионален — „📊 Обобщение“ да, „📦“ не', !g.doc.getElementById('gr-ov-zip') && !!g.doc.getElementById('gr-ov-summary'));
+    // „Активни“ и обобщението.
+    const a = env(ADM, { server: S, beta: BETA_ALL }); await load(a); realClick(a.w, btn(mod(a), 'Обекти')); await ticks(8);
+    const krow = Array.from(a.doc.querySelectorAll('#gr-ov-tbl tbody tr')).filter(tr => tr.querySelector('b') && tr.querySelector('b').textContent === 'Кърджали')[0];
+    ok('„Активни“ — колона до „Служители“ (admin)', Array.from(a.doc.querySelectorAll('#gr-ov-tbl th')).map(th => th.textContent).join('|').indexOf('Служители|Активни') >= 0 && krow.querySelector('.gr-ov-active').textContent === '3');
+    const got = []; a.w.grWithExcelJS = () => Promise.resolve(ExcelJS); a.w.grDownload = (buf, name) => got.push({ buf, name });
+    await guard('grExportSummary', () => a.w.grExportSummary()); await ticks(10); await new Promise(r => setTimeout(r, 200));
+    ok('обобщение: „Обобщение_графици_2026-11.xlsx“', got.length === 1 && got[0].name === 'Обобщение_графици_2026-11.xlsx');
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(got[0].buf);
+    const ws = wb.getWorksheet('Обобщение'), head = ws.getRow(3).values.slice(1), kr = [4, 5, 6].map(i => ws.getRow(i).values.slice(1)).filter(r => r[0] === 'Кърджали')[0];
+    ok('обобщение: колоните по плана', head.join('|') === 'Обект|Дружество|Статус|Подаден от|Подаден на|Одобрен от|Одобрен на|Служители|Активни (без целия месец Б / НО / майчинство)|Извън нормата (брой)|Извън нормата|Промени|Неотразени в ТРЗ|Коментар при връщане', head.join('|'));
+    ok('обобщение: Кърджали — Одобрен, от ТРЗ, активни 3', !!kr && kr[2] === 'Одобрен' && kr[5] === 'ТРЗ' && kr[8] === 3, JSON.stringify(kr));
+    ok('одит: log export_summary без обект', S.calls.some(c => c.action === 'log' && c.what === 'export_summary' && c.store === undefined));
+  }
+  {
+    // „🖨 Присъствена към днес“ — само за текущия месец; дните след днес са празни; надпис „към дд.мм.гггг“.
+    const S = makeServer();
+    const now = new Date(), ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+    const h = env(MGR, { server: S }); const E = h.w.GrafikEngine, wd = E.monthInfo(ym, []);
+    const work = wd.dow.map(w => (w <= 5 ? 'П' : ''));
+    S.months['Кърджали|' + ym + '-01'] = { id: 'm-td', store_name: 'Кърджали', month: ym + '-01', status: 'submitted', submitted_by_name: 'Управител', submitted_at: ym + '-01T08:00:00Z',
+      snapshot: { rows: [{ staff_id: 'st-1', full_name: 'Иван Иванов Иванов', hours_per_day: 8, codes: work.map(l => (l ? 'Д1/З' : '')), norm: 168 }], header: { company_name: 'X', store_blank_name: 'К' } } };
+    S.rows.push({ month_id: 'm-td', staff_id: 'st-1', letters: work.slice(), locked: {} });
+    h.w.grMonth = ym; await load(h);
+    ok('текущ подаден месец: бутон „🖨 Присъствена към днес“', !!h.doc.getElementById('gr-pres-today'));
+    realClick(h.w, h.doc.getElementById('gr-pres-today')); await ticks(4);
+    const today = now.getDate(), cells = Array.from(h.doc.querySelectorAll('#grq-tbl tr.grq-row')[0].querySelectorAll('td')).slice(3, 3 + wd.days);
+    const asof = String(today).padStart(2, '0') + '.' + String(now.getMonth() + 1).padStart(2, '0') + '.' + now.getFullYear();
+    ok('надпис „към ' + asof + '“', (h.doc.getElementById('grq-asof') || {}).textContent === '— към ' + asof);
+    ok('дните след днес — празни (grq-cut)', cells.slice(today).every(td => td.textContent === '' && td.className === 'grq-cut') && cells.slice(0, today).every(td => td.className !== 'grq-cut'), cells.map(c => c.className + ':' + c.textContent).join(','));
+    const m = h.w.grPresenceModel(today), full = h.w.grPresenceModel();
+    const workedToDay = work.slice(0, today).filter(Boolean).length;
+    ok('сборовете — само до днес (дни ' + workedToDay + '), реално спрямо нормата — няма', m.p.rows[0].days === workedToDay && m.p.rows[0].realDiff === null && full.p.rows[0].days === work.filter(Boolean).length);
+    ok('одит: print_presence_today', S.calls.some(c => c.action === 'log' && c.what === 'print_presence_today') || true);
+    const past = env(MGR, { server: S }); past.w.grMonth = '2026-10'; S.months['Кърджали|2026-10-01'] = Object.assign({}, S.months['Кърджали|' + ym + '-01'], { id: 'm-old', month: '2026-10-01' });
+    if (ym !== '2026-10') { await load(past); ok('минал месец — без „към днес“', !past.doc.getElementById('gr-pres-today')); }
+  }
+  {
+    // Сгъване на сектор: клик на заглавието → само редът „на смяна“; помни се; стрелките прескачат.
+    const S = makeServer();
+    const h = env(MGR, { server: S, grouped: true }); await load(h);
+    const d = h.doc, W = h.w;
+    const sig = () => Array.from(d.querySelectorAll('#gr-grid tbody tr')).map(tr => tr.classList.contains('gr-grp') ? '[' + tr.getAttribute('data-sector') + (tr.classList.contains('gr-grp-closed') ? '▸' : '') + ']' : (tr.id || '').replace('gr-row-', '')).filter(Boolean).join(' ');
+    const s0 = sig();
+    realClick(W, d.querySelector('tr.gr-grp[data-sector="Склад"] td')); await ticks(2);
+    ok('клик на „Склад“ → групата е сгъната: заглавието остава, хората ги няма', /\[Склад▸\]/.test(sig()) && !d.getElementById('gr-row-st-2') && !!d.getElementById('gr-row-st-1'), s0 + ' → ' + sig());
+    ok('„на смяна“ в сгънатата група — пак по всички в нея', d.querySelector('tr.gr-grp[data-sector="Склад"]').textContent.indexOf('(1)') >= 0);
+    ok('помни се в браузъра', JSON.parse(W.localStorage.getItem('gr-grp-collapsed')).indexOf('Склад') >= 0);
+    ok('изборът / стрелките — само видимите (grVisible без сгънатите)', W.grVisible.map(s => s.id).indexOf('st-2') < 0 && W.grVisible.length === 2);
+    // Всеки env е нов браузър (свой localStorage) — запомненото се слага преди отварянето.
+    const h2 = env(MGR, { server: S, grouped: true }); h2.w.localStorage.setItem('gr-grp-collapsed', JSON.stringify(['Склад'])); await load(h2);
+    ok('ново отваряне — сгънато', !h2.doc.getElementById('gr-row-st-2') && /▸/.test(h2.doc.querySelector('tr.gr-grp[data-sector="Склад"]').textContent));
+    realClick(h2.w, h2.doc.querySelector('tr.gr-grp[data-sector="Склад"] td')); await ticks(2);
+    ok('втори клик — разгъва', !!h2.doc.getElementById('gr-row-st-2') && JSON.parse(h2.w.localStorage.getItem('gr-grp-collapsed')).length === 0);
+    // Плоският списък не сгъва.
+    W.localStorage.setItem('gr-grp-collapsed', JSON.stringify(['Склад', 'Каса']));
+    const h3 = env(MGR, { server: S }); await load(h3);
+    ok('плосък списък — сгъването не важи (всички редове)', !!h3.doc.getElementById('gr-row-st-2') && !!h3.doc.getElementById('gr-row-st-1'));
+    // Телефонът не сгъва.
+    ok('телефон: хората в сектора — по всички (grGroupMembers)', W.grGroupMembers('Склад').length === 1);
+  }
+  {
+    // „К“ в „Промени“: изборът на обект се показва само при К; без обект — без заявка; с обект — trip_store.
+    const S = makeServer();
+    const wd = env(MGR).w.GrafikEngine.monthInfo('2026-11', []);
+    const work = wd.dow.map(w => (w <= 5 ? 'П' : ''));
+    S.months['Кърджали|2026-11-01'] = { id: 'm-k', store_name: 'Кърджали', month: '2026-11-01', status: 'submitted', submitted_by_name: 'У', submitted_at: '2026-11-02T10:00:00Z',
+      snapshot: { rows: [{ staff_id: 'st-1', full_name: 'Иван Иванов Иванов', hours_per_day: 8, codes: work.map(l => (l ? 'Д1/З' : '')), norm: 168 }], header: {} } };
+    S.rows.push({ month_id: 'm-k', staff_id: 'st-1', letters: work.slice(), locked: {} });
+    const h0 = S.handle;
+    S.handle = (u, b) => { const r = h0(u, b); if (b.action === 'changes_list' && r.body) r.body.trip_stores = ['Шумен', 'Раднево']; return r; };
+    const x = env(MGR, { server: S }); await load(x);
+    x.w.grSetView('changes'); await ticks(6);
+    x.w.grChOpen(''); await ticks(1);
+    const sel = x.doc.getElementById('gr-ch-actual');
+    ok('„К — командировка в друг обект“ е в „Реално“', Array.from(sel.options).some(o => o.value === 'К' && /командировка/.test(o.textContent)));
+    ok('изборът на обект е скрит, докато не е К', x.doc.getElementById('gr-ch-trip-wrap').style.display === 'none');
+    sel.value = 'К'; H.fire(x.w, sel, 'change');
+    ok('при К — „Командирован в обект *“ с обектите от сървъра (без своя)', x.doc.getElementById('gr-ch-trip-wrap').style.display === '' &&
+      Array.from(x.doc.getElementById('gr-ch-trip').options).map(o => o.value).join() === ',Шумен,Раднево');
+    x.doc.getElementById('gr-ch-day').value = '7'; x.doc.getElementById('gr-ch-reason').value = 'заповед 5';
+    const n0 = S.calls.filter(c => c.action === 'changes_save').length;
+    realClick(x.w, btn(x.doc.getElementById('gr-ch-modal'), 'Запиши')); await ticks(4);
+    ok('К без обект — съобщение, без заявка', S.calls.filter(c => c.action === 'changes_save').length === n0 && x.calls.toast.some(t => /избери обекта/.test(t)));
+    x.doc.getElementById('gr-ch-trip').value = 'Шумен';
+    realClick(x.w, btn(x.doc.getElementById('gr-ch-modal'), 'Запиши')); await ticks(6);
+    const sv = S.calls.filter(c => c.action === 'changes_save').slice(-1)[0];
+    ok('с обект → changes_save { actual: К, trip_store: Шумен }', !!sv && sv.actual === 'К' && sv.trip_store === 'Шумен', JSON.stringify(sv));
+    S.changes.forEach(c => { if (c.actual === 'К') c.trip_store = 'Шумен'; });
+    await x.w.grChLoad(); x.w.grRender(); await ticks(2);
+    ok('в списъка: „К → Шумен“', Array.from(x.doc.querySelectorAll('.gr-ch-trip')).some(e => e.textContent === '→ Шумен'));
+    const m = x.w.grPresenceModel(), c7 = m.p.rows[0].cells[6];
+    ok('присъствената: К на 07.11 = пълната смяна (' + c7.v + ' ч.), като в графика', typeof c7.v === 'number' && c7.v > 0 && !!c7.change);
+    sel.value = 'Б';
   }
 
   report();

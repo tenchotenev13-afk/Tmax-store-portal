@@ -590,7 +590,9 @@
   E.PRESENCE_LETTERS = ['О', 'М', 'Б', 'Д', 'А', 'С', 'Н'];
   // snapRows: снимката на подадения месец [{staff_id, full_name, contract_title, hours_per_day, codes, norm}];
   // changes: [{staff_id, day, actual, reason}].
-  E.presence = function (setup, ym, snapRows, changes) {
+  /* upTo (пакет 1, т.3, 27.11.2026) — „към днес“: само дните 1..upTo; след тях клетките са празни
+     (cut) и не влизат в сборовете; „реално спрямо нормата“ няма смисъл за част от месеца → null. */
+  E.presence = function (setup, ym, snapRows, changes, upTo) {
     var P = E.prepare(setup), M = E.monthInfo(ym, setup.extra_days);
     var byKey = {};
     (changes || []).forEach(function (c) { byKey[c.staff_id + '|' + c.day] = c; });
@@ -600,6 +602,7 @@
       var hpd = +sr.hours_per_day || 8, cells = [], days = [], issues = [];
       var dd = function (d) { return ('0' + (d + 1)).slice(-2) + '.' + ('0' + M.month).slice(-2); };
       for (var d = 0; d < M.days; d++) {
+        if (upTo && d >= upTo) { cells.push({ v: '', code: '', change: null, cut: true }); continue; }
         var ch = byKey[sr.staff_id + '|' + (d + 1)], code = ((sr.codes || [])[d]) || '', v;
         if (ch) {
           if (ch.actual in E.PRESENCE_ABSENCE) { v = E.PRESENCE_ABSENCE[ch.actual]; code = ch.actual === 'О' || ch.actual === 'Б' || ch.actual === 'Н' ? ch.actual : ''; }
@@ -623,7 +626,7 @@
       E.PRESENCE_LETTERS.forEach(function (l) { r[l] = cells.filter(function (c) { return c.v === l; }).length; });
       r.total = r.hours + hpd * (r['О'] + r['Б'] + r['Н']);
       var norm = typeof sr.norm === 'number' ? sr.norm : M.workDays * hpd;
-      r.realDiff = r.days ? Math.round((r.hours - (norm - hpd * (r['О'] + r['Б'] + r['Н']))) * 2) / 2 : 0;
+      r.realDiff = upTo ? null : r.days ? Math.round((r.hours - (norm - hpd * (r['О'] + r['Б'] + r['Н']))) * 2) / 2 : 0;
       var mx = 0;
       for (var w = 0; w + 7 <= M.days; w++) { var n7 = 0; for (var k = w; k < w + 7; k++) if (typeof cells[k].v === 'number') n7++; if (n7 > mx) mx = n7; }
       r.maxIn7 = mx;
@@ -632,7 +635,7 @@
       E.PRESENCE_LETTERS.forEach(function (l) { tot[l] += r[l]; });
       return r;
     });
-    return { month: M, rows: rows, totals: tot };
+    return { month: M, rows: rows, totals: tot, upTo: upTo || 0 };
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = E;

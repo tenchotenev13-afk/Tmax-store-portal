@@ -4,7 +4,7 @@
 // свой/чужд обект, пропуска, beta/ТРЗ списъците, клетките, снимката и валидността по дати.
 import {
   handleGrafik, HttpError, accessEmails, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
-  snapshotOffNorm, sameAsPlanned, staleChanges, roleOf,
+  snapshotOffNorm, sameAsPlanned, staleChanges, roleOf, activeInMonth, returnMail, PORTAL_URL,
   type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector, type RowStat, type AccessRow, type ChangeRow,
   type GAuditEntry, type PinState,
 } from "./handler.ts";
@@ -117,7 +117,13 @@ class MemRepo implements Repo {
     }
   }
   async listStaff(store: string) { return this.staff.filter((s) => s.store_name === store); }
-  async staffDates(stores: string[] | null) { return this.staff.filter((s) => !stores || stores.indexOf(s.store_name) >= 0).map((s) => ({ store_name: s.store_name, hired_on: (s.hired_on as string) || null, left_on: (s.left_on as string) || null })); }
+  async staffDates(stores: string[] | null) { return this.staff.filter((s) => !stores || stores.indexOf(s.store_name) >= 0).map((s) => ({ id: s.id, store_name: s.store_name, hired_on: (s.hired_on as string) || null, left_on: (s.left_on as string) || null })); }
+  async monthLetters(ids: string[]) { return this.rows.filter((x) => ids.indexOf(x.month_id) >= 0).map((x) => ({ month_id: x.month_id, staff_id: x.staff_id, letters: x.letters })); }
+  async monthChanges(ids: string[]) { return this.changes.filter((c) => ids.indexOf(c.month_id) >= 0).map((c) => ({ month_id: c.month_id, staff_id: c.staff_id, day: c.day, actual: c.actual })); }
+  // Пакет 1, т.7 — писмата (вместо resend-email); mailOk = false — пада.
+  mails: { to: string[]; subject: string; html: string }[] = []; mailOk = true;
+  async storeUsers(store: string) { return this.users.filter((u) => u.store_name === store).map((u) => ({ email: u.email, display_name: u.display_name, active: u.active })); }
+  async sendMail(to: string[], subject: string, html: string) { if (!this.mailOk) return false; this.mails.push({ to, subject, html }); return true; }
   async getStaff(ids: string[]) { return this.staff.filter((s) => ids.indexOf(s.id) >= 0); }
   async insertStaff(f: Record<string, unknown>) { const s = { id: nid(), ...f } as Staff; this.staff.push(s); return s; }
   async updateStaff(id: string, f: Record<string, unknown>) { const s = this.staff.filter((x) => x.id === id)[0]; if (!s) return null; Object.assign(s, f); return s; }
@@ -1411,4 +1417,113 @@ Deno.test("audit_list: само admin (edit); филтри; дни 1–90", asyn
   eq(byS.map((e: GAuditEntry) => e.user_email), ["tencho.tenev13@gmail.com"], "по обект");
   eq((await call(r, U.admin, { action: "audit_list", days: 500 })).body.days, 30, "извън 1–90 → 30");
   eq((await call(r, U.admin, { action: "audit_list", days: 7 })).body.days, 7, "7 дни");
+});
+
+// ── Пакет 1 (27.11.2026) ──────────────────────────────────────────────────────
+Deno.test("т.6 „К“ в „Промени“: обектът е задължителен, от списъка, не своят; записва се и в одита", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const k = (f: Record<string, unknown>) => chg(r, U.mgrK, { staff_id: ids[0], day: 5, actual: "К", reason: "заповед 12", ...f });
+  const k0 = (await k({})).body, k1 = (await k({ trip_store: "  " })).body;
+  eq([k0.reason, /избери обекта/.test(k0.message)], ["trip_store", true], "без обект — 400, „избери обекта“");
+  eq([k1.reason, /избери обекта/.test(k1.message)], ["trip_store", true], "празен — 400, „избери обекта“");
+  eq((await k({ trip_store: "Нямаго" })).body.reason, "trip_store", "непознат обект — 400");
+  eq((await k({ trip_store: "Кърджали" })).body.reason, "trip_store", "своят обект — 400");
+  eq(r.changes.length, 0, "нищо не е записано");
+  const ok = await k({ trip_store: " Шумен " });
+  eq([ok.status, ok.body.row.actual, ok.body.row.trip_store], [200, "К", "Шумен"], "К с обект — записан (без интервали)");
+  const a = r.gaudits.filter((e) => e.event === "grafik_change_create").slice(-1)[0];
+  eq((a.details as { trip_store: string }).trip_store, "Шумен", "обектът — в одита");
+  // Смяна от К на Б — обектът пада (иначе ограничението в базата отказва).
+  const upd = await chg(r, U.mgrK, { id: ok.body.row.id, staff_id: ids[0], day: 5, actual: "Б", reason: "болничен", trip_store: "Шумен" });
+  eq([upd.status, upd.body.row.actual, upd.body.row.trip_store], [200, "Б", null], "Б с подаден обект → обектът е null");
+});
+
+Deno.test("т.6 „К“ — изисква код за договора, както работните букви", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  r.admin.grafik_letter_map = r.admin.grafik_letter_map.filter((l) => l.letter !== "К");
+  eq((await chg(r, U.mgrK, { staff_id: ids[0], day: 5, actual: "К", reason: "x", trip_store: "Шумен" })).body.reason, "letter_contract", "без К в настройката — 400");
+});
+
+Deno.test("т.4 activeInMonth: целият месец Б / НО / майчинство → не; частично, отпуск, празен → да", () => {
+  const S = "2026-11-01", D = 30, none = {};
+  const fill = (v: string, n = 30) => new Array(n).fill(v);
+  eq(activeInMonth({}, fill("Б"), none, S, D), false, "целият месец Б");
+  eq(activeInMonth({}, fill("НО"), none, S, D), false, "целият месец НО");
+  const bWithRest = fill("Б"); bWithRest[6] = ""; bWithRest[13] = "";
+  eq(activeInMonth({}, bWithRest, none, S, D), false, "Б с почивки между тях");
+  const part = fill("Б"); part[2] = "П"; part[3] = "ЛД";
+  eq(activeInMonth({}, part, none, S, D), true, "Б 28 дни + 2 смени → активен");
+  eq(activeInMonth({}, fill("О"), none, S, D), true, "целият месец платен отпуск → активен");
+  eq(activeInMonth({}, fill("О4"), none, S, D), true, "О4 → активен");
+  eq(activeInMonth({}, fill(""), none, S, D), true, "празен ред → активен (той е „извън нормата“)");
+  eq(activeInMonth({}, fill("4"), none, S, D), true, "свободни часове → активен");
+  eq(activeInMonth({}, fill("К"), none, S, D), true, "командировка → активен");
+  const maj: Record<number, string> = {}; for (let d = 1; d <= 30; d++) maj[d] = "Майч";
+  eq(activeInMonth({}, fill("П"), maj, S, D), false, "промени „Майч“ за всеки ден бият графика");
+  eq(activeInMonth({}, fill("Б"), { 10: "ЛД" }, S, D), true, "промяна ЛД в един ден → активен");
+  eq(activeInMonth({}, fill("Б"), { 10: "Н" }, S, D), false, "промяна Н (неплатен) → пак не");
+  // Дните извън назначаването не се броят.
+  const late = fill("П"); for (let i = 15; i < 30; i++) late[i] = "Б";
+  eq(activeInMonth({ hired_on: "2026-11-16" }, late, none, S, D), false, "назначен на 16-и, оттогава само Б");
+  eq(activeInMonth({ left_on: "2026-11-15" }, late, none, S, D), true, "напуснал на 15-и, дотогава П");
+});
+
+Deno.test("т.4 overview: „Активни“ до „Служители“; ТРЗ — null; без график — всички", async () => {
+  const r = new MemRepo();
+  const ids = kStaff(r);
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30(new Array(30).fill("Б")) }, { staff_id: ids[1], letters: L30(["П"]) }] });
+  const k = ((await call(r, U.admin, { action: "overview", month: "2026-11" })).body.stores as { store: string; staff: number; active: number | null }[]);
+  const ks = k.filter((s) => s.store === "Кърджали")[0], sh = k.filter((s) => s.store === "Шумен")[0];
+  eq([ks.staff, ks.active], [2, 1], "Кърджали: 2 служители, 1 активен (другият — целия месец Б)");
+  eq([sh.staff, sh.active], [1, 1], "Шумен без график — всички активни");
+  const t = ((await call(r, U.trz, { action: "overview", month: "2026-11" })).body.stores as { active: number | null }[]);
+  assert(t.every((s) => s.active === null), "ТРЗ — active null (както staff)");
+});
+
+Deno.test("т.7 „↩ Върни с коментар“ → писмо до потребителите на обекта с роля; без текста на коментара", async () => {
+  const r = new MemRepo();
+  await submittedK(r);
+  // Кърджали: mgrK (beta) и sklK (beta) — получават; outside (Кърджали, без роля) и off (неактивен) — не.
+  const ret = await call(r, U.trz, { action: "return", store: "Кърджали", month: "2026-11", comment: "Иван Иванов е с 8 ч. в повече" });
+  eq([ret.status, ret.body.mail], [200, { to: 2, ok: true }], "върнат; писмо до двама");
+  const m = r.mails[0];
+  eq(m.to.slice().sort(), ["sklad.k@temax.bg", "tencho.tenev13@gmail.com"], "само активните на обекта с роля");
+  assert(/Кърджали/.test(m.subject) && /ноември 2026/.test(m.subject), "темата — обект и месец: " + m.subject);
+  assert(m.html.indexOf(PORTAL_URL) >= 0 && /върнат с коментар — виж го в портала/.test(m.html), "линк и текстът по решението");
+  assert(!/Иван|8 ч/.test(m.subject + m.html), "текстът на коментара (имена) НЕ е в писмото");
+  const a = r.gaudits.filter((e) => e.event === "grafik_return_mail")[0];
+  eq([a.success, (a.details as { to: number }).to], [true, 2], "одит — брой получатели, без адресите");
+});
+
+Deno.test("т.7 писмото: без получатели — нищо; паднало — връщането остава, одит неуспешен; reopen — без писмо", async () => {
+  const r = new MemRepo();
+  await submittedK(r);
+  r.access = r.access.filter((a) => a.email !== "tencho.tenev13@gmail.com" && a.email !== "sklad.k@temax.bg");
+  const ret = await call(r, U.trz, { action: "return", store: "Кърджали", month: "2026-11", comment: "поправи" });
+  eq([ret.status, ret.body.mail, r.mails.length], [200, { to: 0, ok: true }, 0], "никой с роля → без писмо");
+  const r2 = new MemRepo();
+  await submittedK(r2);
+  r2.mailOk = false;
+  const ret2 = await call(r2, U.trz, { action: "return", store: "Кърджали", month: "2026-11", comment: "поправи" });
+  eq([ret2.status, ret2.body.status, ret2.body.mail.ok, r2.months[0].status], [200, "draft", false, "draft"], "resend-email пада → графикът пак е върнат");
+  eq(r2.gaudits.filter((e) => e.event === "grafik_return_mail")[0].success, false, "одит — неуспешно");
+  const r3 = new MemRepo();
+  await submittedK(r3);
+  await call(r3, U.admin, { action: "reopen", store: "Кърджали", month: "2026-11" });
+  eq(r3.mails.length, 0, "„↩ Върни в чернова“ (без коментар) — без писмо");
+});
+
+Deno.test("returnMail: екранира обекта; само обект, месец, линк", () => {
+  const x = returnMail("<Обект & \"1\">", "2026-12-01");
+  assert(x.html.indexOf("&lt;Обект &amp; &quot;1&quot;&gt;") >= 0 && x.html.indexOf("<Обект") < 0, "екраниран обект");
+  assert(/декември 2026/.test(x.subject), "месецът с думи");
+});
+
+Deno.test("log: новите видове — ZIP, обобщение, присъствена към днес", async () => {
+  const r = new MemRepo();
+  for (const w of ["export_zip", "export_summary", "print_presence_today"]) eq((await call(r, U.admin, { action: "log", what: w, store: "Кърджали", month: "2026-11" })).status, 200, w);
+  const ev = r.gaudits.map((e) => e.event);
+  assert(["grafik_export_zip", "grafik_export_summary", "grafik_print_presence_today"].every((e) => ev.indexOf(e) >= 0), ev.join(","));
 });

@@ -472,14 +472,19 @@ function grOverviewHtml(){
     '<span id="gr-ov-count" style="color:#64748b;font-size:12px;">' + (trz ? sub + ' подадени' : sub + ' подадени от ' + list.length) + '</span>' +
     '<span id="gr-ov-sum" style="color:#64748b;font-size:12px;">· ' + [cnt.approved + ' одобрени', cnt.submitted + ' чакат одобрение', cnt.returned + ' върнати'].concat(trz ? [] : [cnt.draft + ' чернови', cnt.none + ' не са започнати']).join(' · ') + '</span>' +
     (trz ? '<span style="color:#64748b;font-size:12px;">· ТРЗ: само подадените графици, без редакция</span>' : '') +
-    (canBulk ? '<span style="flex:1"></span><button class="btn btn-green" id="gr-ov-approve-sel" onclick="grApproveSelected()">✔ Одобри избраните (<span id="gr-ov-sel-n">0</span>)</button>' : '') + '</div>';
+    '<span style="flex:1"></span>' +
+    /* Пакет 1, т.1–2: ZIP с одобрените (ТРЗ, admin, преглед) и обобщението (всеки, който вижда обзора). */
+    (grCanZip() && cnt.approved ? '<button class="btn-sm" id="gr-ov-zip" onclick="grZipApproved()" title="Excel за ТРЗ + присъствената на всеки одобрен обект — един ZIP">📦 Свали всички одобрени (' + cnt.approved + ')</button>' : '') +
+    (list.length ? '<button class="btn-sm" id="gr-ov-summary" onclick="grExportSummary()" title="Всички обекти за месеца — Excel">📊 Обобщение (Excel)</button>' : '') +
+    (canBulk ? '<button class="btn btn-green" id="gr-ov-approve-sel" onclick="grApproveSelected()">✔ Одобри избраните (<span id="gr-ov-sel-n">0</span>)</button>' : '') + '</div>' +
+    '<div id="gr-ov-progress" style="display:none;font-size:12px;color:#475569;margin-bottom:6px;"></div>';
   if(!list.length){
     h += '<div id="gr-ov-empty" style="color:#64748b;padding:8px 0;">' + (trz ? 'Няма подадени графици за ' + escVal(grMonthLabel(grMonth)) : 'Няма обекти за показване.')   /* grMonthLabel завършва на „г.“ */ + '</div>';
   } else {
     h += '<div class="tbl-wrap"><table id="gr-ov-tbl"><thead><tr>' +
       (canBulk ? '<th><input type="checkbox" id="gr-ov-all" title="Всички подадени" onchange="grOvSelectAll(this.checked)"></th>' : '') +
       '<th>Обект</th><th>Статус</th><th>' + (trz ? 'Подаден' : 'Подаден / последна промяна') + '</th>' +
-      (trz ? '' : '<th>Служители</th>') + '<th>Извън нормата</th><th>Промени</th><th>Коментар</th><th></th></tr></thead><tbody>';
+      (trz ? '' : '<th>Служители</th><th title="Без целия месец болничен, неплатен или майчинство">Активни</th>') + '<th>Извън нормата</th><th>Промени</th><th>Коментар</th><th></th></tr></thead><tbody>';
     list.forEach(function(s, i){
       var st = returned(s) ? '<span class="gr-ov-st gr-ov-returned" style="background:#ffedd5;color:#9a3412;border-radius:10px;padding:1px 8px;font-weight:600;">↩ Върнат</span>'
         : s.status === 'approved' ? '<span class="gr-ov-st gr-ov-approved" style="background:#166534;color:#fff;border-radius:10px;padding:1px 8px;font-weight:600;">✔✔ Одобрен</span>' +
@@ -498,7 +503,7 @@ function grOverviewHtml(){
         (s.can_return ? '<button class="btn-sm gr-ov-return" onclick="grReturnAt(' + i + ')">↩ Върни…</button> ' : '');
       h += '<tr id="gr-ov-' + i + '">' + (canBulk ? '<td>' + (s.can_approve ? '<input type="checkbox" class="gr-ov-sel" data-i="' + i + '" onchange="grOvSelCount()">' : '') + '</td>' : '') +
         '<td><b>' + escVal(s.store) + '</b><div style="color:#94a3b8;font-size:11px;">' + escVal(s.company || '') + '</div></td><td>' + st + '</td>' +
-        '<td class="gr-ov-when" style="font-size:12px;">' + when + '</td>' + (trz ? '' : '<td>' + (+s.staff || 0) + '</td>') + '<td>' + off + '</td>' +
+        '<td class="gr-ov-when" style="font-size:12px;">' + when + '</td>' + (trz ? '' : '<td>' + (+s.staff || 0) + '</td><td class="gr-ov-active">' + (typeof s.active === 'number' ? s.active : '<span style="color:#94a3b8;">—</span>') + '</td>') + '<td>' + off + '</td>' +
         '<td class="gr-ov-ch" style="font-size:12px;">' + (filed(s) && typeof s.changes === 'number' ? s.changes + (s.changes ? ' · <span style="color:' + (s.changes_open ? '#dc2626' : '#16a34a') + ';">неотразени ' + (s.changes_open || 0) + '</span>' : '') : '<span style="color:#94a3b8;">—</span>') + '</td>' +
         '<td class="gr-ov-comment" style="font-size:12px;max-width:260px;white-space:pre-wrap;">' + (returned(s) ? escVal(s.reopened.comment) : '') + '</td>' +
         '<td style="white-space:nowrap;">' + acts + '<button class="btn-sm" onclick="grOpenStoreAt(' + i + ')">Отвори →</button></td></tr>';
@@ -509,6 +514,122 @@ function grOverviewHtml(){
     h += '<div id="gr-ov-nocomp" style="color:#94a3b8;font-size:12px;margin-top:8px;">Без дружество (не са в обзора): ' + escVal(grOverview.no_company.join(', ')) + ' — Администрация.</div>';
   }
   return h + '</div>';
+}
+
+/* ─── Пакет 1, т.1: „📦 Свали всички одобрени“ (ТРЗ, admin, преглед) ─────────────────
+   За всеки одобрен обект: графикът и промените му, Excel за ТРЗ и присъствената със СЪЩИТЕ функции
+   като бутоните на обекта (grExportModel / grPresenceModel → grBuild*Workbook). Обектите се теглят
+   един по един; състоянието на екрана се пази и се връща накрая. Обект с грешка в данните не спира
+   другите — изброява се. JSZip — от cdnjs, само при натискане. Всеки обект — ред в одита. */
+var GR_JSZIP_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+function grCanZip(){ return !!grMe && (grMe.kind === 'trz' || grMe.kind === 'admin' || grMe.kind === 'view'); }
+function grWithJSZip(){
+  if(window.JSZip) return Promise.resolve(window.JSZip);
+  return new Promise(function(res, rej){
+    var sc = document.createElement('script');
+    sc.src = GR_JSZIP_SRC;
+    sc.onload = function(){ window.JSZip ? res(window.JSZip) : rej(new Error('JSZip не се зареди')); };
+    sc.onerror = function(){ rej(new Error('JSZip не се зареди')); };
+    document.head.appendChild(sc);
+  });
+}
+function grFileSafe(s){ return String(s || '').replace(/[\\/:*?"<>|\s]+/g, '_'); }
+var GR_CTX_KEYS = ['grStore', 'grData', 'grRows', 'grCalc', 'grPrev', 'grChanges', 'grChNames', 'grChTripStores', 'grSaved', 'grDirty', 'grVisible', 'grOrder', 'grOrderAll'];
+function grCtxSave(){ var o = {}; GR_CTX_KEYS.forEach(function(k){ o[k] = window[k]; }); return o; }
+function grCtxRestore(o){ GR_CTX_KEYS.forEach(function(k){ window[k] = o[k]; }); }
+/* Един обект в текущия контекст (без рисуване): load_month → предишният месец → промените → сметките. */
+function grCtxLoad(store){
+  grStore = store; grData = null; grRows = {}; grChanges = null; grPrev = null;
+  return grApi('load_month', { store: store, month: grMonth, prev: true }).then(function(res){
+    if(!res.ok) throw new Error(grErrText(res));
+    grData = res.data; grRows = {}; grSaved = {}; grDirty = {};
+    (grData.rows || []).forEach(function(r){ grRows[r.staff_id] = { letters: (r.letters || []).slice(), locked: r.locked || {} }; grSaved[r.staff_id] = 1; });
+    return grLoadPrev(grLoadSeq, res.data);
+  }).then(function(){ return grChLoad(); }).then(function(){ grRecalc(); });
+}
+function grZipApproved(){
+  if(!grOverview || !grCanZip()) return;
+  var list = (grOverview.stores || []).filter(function(s){ return s.status === 'approved'; });
+  if(!list.length){ toast('Няма одобрени графици за ' + grMonthLabel(grMonth) + '.', '#dc2626'); return; }
+  var prog = document.getElementById('gr-ov-progress'), btnZ = document.getElementById('gr-ov-zip');
+  var say = function(t){ if(prog){ prog.style.display = t ? '' : 'none'; prog.textContent = t; } };
+  if(btnZ) btnZ.disabled = true;
+  var saved = grCtxSave(), ym = grMonth, skipped = [], files = 0;
+  return Promise.all([grWithJSZip(), grWithExcelJS()]).then(function(L){
+    var zip = new L[0](), X = L[1];
+    var chain = Promise.resolve();
+    list.forEach(function(s, i){
+      chain = chain.then(function(){
+        say('📦 ' + (i + 1) + ' от ' + list.length + ': ' + s.store + '…');
+        return grCtxLoad(s.store).then(function(){
+          var m = grExportModel(), pm = grPresenceModel(), bad = [];
+          if(!m) throw new Error('няма данни');
+          if(m.blocking.length) bad.push('Excel за ТРЗ: ' + m.blocking.slice(0, 2).join('; '));
+          var pIss = pm ? [].concat.apply([], pm.p.rows.map(function(r){ return r.issues.map(function(t){ return r.name + ' — ' + t; }); })) : ['няма снимка'];
+          if(pIss.length) bad.push('присъствена: ' + pIss.slice(0, 2).join('; '));
+          var jobs = [];
+          if(!m.blocking.length) jobs.push(grBuildTrzWorkbook(m, X).xlsx.writeBuffer().then(function(b){ zip.file('График_' + grFileSafe(s.store) + '_' + ym + '.xlsx', b); files++; }));
+          if(pm && !pIss.length) jobs.push(grBuildPresenceWorkbook(pm, X).xlsx.writeBuffer().then(function(b){ zip.file('Присъствена_' + grFileSafe(s.store) + '_' + ym + '.xlsx', b); files++; }));
+          if(bad.length) skipped.push(s.store + ' — ' + bad.join(' · '));
+          return Promise.all(jobs).then(function(){ if(jobs.length) grApi('log', { what: 'export_zip', store: s.store, month: ym }); });
+        }).catch(function(e){ skipped.push(s.store + ' — ' + (e && e.message ? e.message : e)); });
+      });
+    });
+    return chain.then(function(){
+      grCtxRestore(saved);
+      if(!files){ say(''); toast('Нито един файл: ' + skipped.join(' | '), '#dc2626'); return; }
+      if(skipped.length) zip.file('ПРОПУСНАТИ.txt', 'Пропуснати / непълни обекти:\r\n' + skipped.join('\r\n') + '\r\n');
+      return zip.generateAsync({ type: 'blob' }).then(function(blob){
+        var name = 'Графици_одобрени_' + ym + '.zip';
+        grDownloadBlob(blob, name);
+        say(skipped.length ? '⚠ Пропуснати / непълни: ' + skipped.join(' | ') : '');
+        toast('📦 ' + name + ' — ' + files + ' файла' + (skipped.length ? ', ' + skipped.length + ' с бележка' : ''), skipped.length ? '#f59e0b' : undefined);
+      });
+    });
+  }).catch(function(e){ grCtxRestore(saved); say(''); toast('ZIP не се направи: ' + (e && e.message ? e.message : e), '#dc2626'); })
+    .then(function(){ var b = document.getElementById('gr-ov-zip'); if(b) b.disabled = false; });
+}
+function grDownloadBlob(blob, name){
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.parentNode && a.parentNode.removeChild(a); }, 1000);
+}
+
+/* ─── Пакет 1, т.2: „📊 Обобщение (Excel)“ — от данните на „Обекти“ за месеца ─────── */
+var GR_ST_TXT = { approved: 'Одобрен', submitted: 'Подаден', draft: 'Чернова' };
+function grSummaryRows(){
+  return ((grOverview && grOverview.stores) || []).map(function(s){
+    var filed = s.status === 'submitted' || s.status === 'approved', ret = !!(s.reopened && s.reopened.comment);
+    return [s.store, s.company || '', ret ? 'Върнат' : (GR_ST_TXT[s.status] || 'Не е започнат'),
+      filed ? s.submitted_by_name || '' : '', filed ? grFmtAt(s.submitted_at) : '',
+      s.status === 'approved' ? s.approved_by_name || '' : '', s.status === 'approved' ? grFmtAt(s.approved_at) : '',
+      typeof s.staff === 'number' ? s.staff : '', typeof s.active === 'number' ? s.active : '',
+      filed && Array.isArray(s.off_norm) ? s.off_norm.length : '', filed && Array.isArray(s.off_norm) ? s.off_norm.join('\n') : '',
+      filed && typeof s.changes === 'number' ? s.changes : '', filed && typeof s.changes_open === 'number' ? s.changes_open : '',
+      ret ? s.reopened.comment : ''];
+  });
+}
+var GR_SUMMARY_HEAD = ['Обект', 'Дружество', 'Статус', 'Подаден от', 'Подаден на', 'Одобрен от', 'Одобрен на', 'Служители', 'Активни (без целия месец Б / НО / майчинство)', 'Извън нормата (брой)', 'Извън нормата', 'Промени', 'Неотразени в ТРЗ', 'Коментар при връщане'];
+function grExportSummary(){
+  if(!grOverview) return;
+  var ym = grMonth, rows = grSummaryRows();
+  return grWithExcelJS().then(function(X){
+    var wb = new X.Workbook(), ws = wb.addWorksheet('Обобщение');
+    /* Клетка по клетка (не addRow(масив)) — ExcelJS разпознава масива с instanceof, а това е крехко. */
+    var put = function(n, vals, style){ var row = ws.getRow(n); vals.forEach(function(v, i){ row.getCell(i + 1).value = v; }); if(style) style(row); row.commit(); };
+    put(1, ['Работен график — обобщение за ' + grMonthLabel(ym)], function(r){ r.font = { bold: true, size: 13 }; });
+    put(3, GR_SUMMARY_HEAD, function(r){ r.font = { bold: true }; r.alignment = { wrapText: true, vertical: 'middle' }; });
+    rows.forEach(function(v, i){ put(4 + i, v, function(r){ r.alignment = { wrapText: true, vertical: 'top' }; }); });
+    [18, 30, 12, 20, 16, 20, 16, 11, 14, 12, 50, 9, 12, 40].forEach(function(w, i){ ws.getColumn(i + 1).width = w; });
+    ws.views = [{ state: 'frozen', ySplit: 3 }];
+    return wb.xlsx.writeBuffer().then(function(buf){
+      var name = 'Обобщение_графици_' + ym + '.xlsx';
+      grDownload(buf, name);
+      grApi('log', { what: 'export_summary', month: ym });
+      toast('📥 ' + name);
+    });
+  }).catch(function(e){ toast('Обобщението не се направи: ' + (e && e.message ? e.message : e), '#dc2626'); });
 }
 
 /* Предходният месец — само ако първата седмица (пон–нед) почва в него и месецът го има в
@@ -602,7 +723,33 @@ function grGroupMode(){
 }
 /* По реда на секторите на магазина; непознат сектор — след тях по име; „Без сектор“ — последен.
    Вътре в групата — както в данните (sort_order, после името). */
+/* Пакет 1, т.5: сгънатите сектори (клик на заглавието на групата) — помнят се в браузъра по име на
+   сектора (grToggleSector; grToggleGroup е бутонът „☰ Плосък списък“). Хората в сгъната група излизат от реда на екрана (grOrder / grVisible) — стрелките и изборът
+   ги прескачат; заглавието на групата и „на смяна“ остават (grOrderAll, grGroupMembers — по всички). */
+var grCollapsed = null;
+var grOrderAll = [];
+function grCollapsedSet(){
+  if(grCollapsed === null){
+    grCollapsed = {};
+    try { (JSON.parse(localStorage.getItem('gr-grp-collapsed') || '[]') || []).forEach(function(n){ if(typeof n === 'string') grCollapsed[n] = 1; }); } catch(e){}
+  }
+  return grCollapsed;
+}
+function grIsCollapsed(sk){ return grGroupMode() === 'sector' && !!grCollapsedSet()[sk]; }
+function grToggleSector(sk){
+  var c = grCollapsedSet();
+  if(c[sk]) delete c[sk]; else c[sk] = 1;
+  try { localStorage.setItem('gr-grp-collapsed', JSON.stringify(Object.keys(c))); } catch(e){}
+  grDrop = false; grEdit = ''; grAnc = null;
+  grRecalc(); grRender();
+}
 function grViewOrder(){
+  var all = grViewOrderAll();
+  grOrderAll = all;
+  if(grGroupMode() !== 'sector') return all;
+  return all.filter(function(i){ return !grIsCollapsed(grSector(grCalc.rows[i].staff)); });
+}
+function grViewOrderAll(){
   var idx = grCalc.rows.map(function(x, i){ return i; });
   if(grGroupMode() !== 'sector') return idx;
   var pos = {};
@@ -626,7 +773,7 @@ function grToggleGroup(){
   if(r >= 0) grSel.r = r;                     // избраният човек остава избран
   grRender();
 }
-function grGroupMembers(sk){ return grOrder.filter(function(i){ return grSector(grCalc.rows[i].staff) === sk; }); }
+function grGroupMembers(sk){ return (grOrderAll.length ? grOrderAll : grOrder).filter(function(i){ return grSector(grCalc.rows[i].staff) === sk; }); }
 /* Етап А1 (24.11.2026, измерено на 1920×1080: 14 сектора = 28 служебни реда, 20 от 40 души на екрана):
    заглавието на групата и „на смяна“ са ЕДИН ред над хората — името (броят) вляво, хората на смяна по дни.
    Класовете остават и двата (gr-grp и gr-grp-cov): бързото обновяване подменя реда през grGroupCovHtml. */
@@ -638,8 +785,9 @@ function grGroupCovHtml(sk){
     var L = (grRows[grCalc.rows[i].staff.id] || { letters: [] }).letters || [];
     for(var d = 0; d < M.days; d++) if(GR_WORK_LETTERS.indexOf(L[d]) >= 0) c[d]++;
   });
-  var h = '<tr class="gr-grp gr-grp-cov" data-sector="' + escAttrVal(sk) + '"><td colspan="3" class="gr-stk gr-stk0 gr-stk-last" style="text-align:left;font-weight:700;background:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + escAttrVal(sk + ' — на смяна по дни') + '">' +
-    escVal(sk) + ' <span style="font-weight:400;color:#64748b;">(' + grGroupMembers(sk).length + ')</span>' +
+  var col = grIsCollapsed(sk);
+  var h = '<tr class="gr-grp gr-grp-cov' + (col ? ' gr-grp-closed' : '') + '" data-sector="' + escAttrVal(sk) + '"><td colspan="3" class="gr-stk gr-stk0 gr-stk-last" onclick="grToggleSector(this.parentNode.getAttribute(\'data-sector\'))" style="cursor:pointer;text-align:left;font-weight:700;background:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + escAttrVal(sk + ' — на смяна по дни · клик: ' + (col ? 'разгъни' : 'сгъни')) + '">' +
+    '<span class="gr-grp-tw" style="display:inline-block;width:12px;color:#475569;">' + (col ? '▸' : '▾') + '</span>' + escVal(sk) + ' <span style="font-weight:400;color:#64748b;">(' + grGroupMembers(sk).length + ')</span>' +
     (sk !== GR_NO_SECTOR && !grSectorTracked(sk) ? ' <span class="gr-notrack" style="font-weight:400;color:#94a3b8;font-size:10px;" title="Покритието не се следи — сменя се в 👥 Персонал">· не се следи</span>' : '') +
     ' <span class="gr-onshift-lbl" style="font-weight:400;color:#64748b;font-size:10px;">на смяна →</span></td>';
   /* „Без сектор“ — червено без рамката на колоната (не е сектор). Сектор, чието покритие не се следи
@@ -797,7 +945,7 @@ function grMobDayHtml(P, M){
   if(hol) h += '<div class="card" style="background:#fee2e2;color:#991b1b;">🎌 ' + escVal(hol) + '</div>';
   var c = grCoverage();
   c.order.forEach(function(sk){
-    var mem = grOrder.filter(function(i){ return grSector(grCalc.rows[i].staff) === sk; });
+    var mem = grGroupMembers(sk);   // телефонът не сгъва — всички в сектора
     var on = c.sec[sk][d], bad = gaps.indexOf(sk) >= 0;
     h += '<div class="card gr-mob-sec" data-sector="' + escAttrVal(sk) + '" style="padding:8px 10px;' + (bad ? 'border-left:4px solid #dc2626;background:#fef2f2;' : '') + '">' +
       '<div style="display:flex;justify-content:space-between;font-weight:700;margin-bottom:4px;"><span>' + escVal(sk) + '</span>' +
@@ -813,7 +961,7 @@ function grMobDayHtml(P, M){
   return h;
 }
 function grMobPersonHtml(P, M){
-  var list = grOrder.map(function(i){ return grCalc.rows[i]; });
+  var list = (grOrderAll.length ? grOrderAll : grOrder).map(function(i){ return grCalc.rows[i]; });   // телефонът не сгъва
   if(!grMob.staff || !list.some(function(x){ return x.staff.id === grMob.staff; })) grMob.staff = list[0].staff.id;
   var x = list.filter(function(r){ return r.staff.id === grMob.staff; })[0], L = (grRows[x.staff.id] || {}).letters || [];
   var opts = list.map(function(r){ return '<option value="' + escAttrVal(r.staff.id) + '"' + (r.staff.id === grMob.staff ? ' selected' : '') + '>' + escVal((r.staff.short_name || r.staff.full_name) + ' · ' + grSector(r.staff)) + '</option>'; }).join('');
@@ -1045,13 +1193,15 @@ function grGridHtml(){
   for(var i = 0; i < M.days; i++) h += grDayHead(i, ctx.gaps);
   h += grTailHead() + '</tr></thead><tbody>';
   grPainted = { r0: ctx.rg.r0, r1: ctx.rg.r1 };
-  grOrder.forEach(function(ci, r){
+  /* Пакет 1, т.5: по всички (grOrderAll) — заглавието и на сгънатата група; хората — само видимите (r = мястото в grOrder). */
+  var rOf = {}; grOrder.forEach(function(ci, r){ rOf[ci] = r; });
+  (grp ? grOrderAll : grOrder).forEach(function(ci){
     var x = grCalc.rows[ci];
     if(grp){
       var sk = grSector(x.staff);
       if(sk !== prevSec){ h += grGroupHeadHtml(sk); prevSec = sk; }   // А1: един ред на група — над хората
     }
-    h += grRowHtml(ci, r, ctx);
+    if(rOf[ci] !== undefined) h += grRowHtml(ci, rOf[ci], ctx);
   });
   if(!grCalc.rows.length) h += '<tr><td colspan="' + (M.days + 3 + grTailCols()) + '" style="padding:14px;color:#64748b;">Няма служители в графика за месеца — добави ги от „👥 Персонал“.</td></tr>';
   h += '</tbody>' + grFootHtml() + '</table></div>';
@@ -1787,12 +1937,14 @@ function grReopen(){
    ВТР чл. 19, ал. 4: всяка промяна е актуализация на графика с подпис — „🖨 Промени за подпис“. */
 var GR_CH_ACTUALS = [
   ['ЛД', 'ЛД — работена смяна'], ['ЗД', 'ЗД — работена смяна'], ['П', 'П — работена смяна'], ['В', 'В — работена смяна'], ['М', 'М — работена смяна'],
+  ['К', 'К — командировка в друг обект'],
   ['почивка', 'почивка — не е дошъл / почивен по размяна'], ['О', 'О — платен отпуск'], ['Б', 'Б — болничен'], ['Н', 'Н — неплатен отпуск'],
   ['Д', 'Д — държавни задължения'], ['А', 'А — с разрешение на администрацията'], ['С', 'С — самоотлъчка'], ['Майч', 'Майч — майчинство']
 ];
 var GR_CH_FILL = '#F8CBAD';   // „ден с отклонение“ — оранжевото от бланката (ПРИСЪСТВЕНА ФОРМА)
 var grChanges = null;         // changes_list за подадения месец; null — чернова или не е зареден
 var grChNames = {};           // имейл (малки букви) → име (changes_list → names, 20.11.2026)
+var grChTripStores = [];      // обектите за „К“ (changes_list → trip_stores, пакет 1, т.6) — без своя
 /* „Въведено от“ / „отметнато от“ — името на човека; имейлът — само ако няма име. */
 function grChWho(email){ return email ? (grChNames[String(email).toLowerCase()] || email) : ''; }
 function grChCanEdit(){ return grCanEditStaff(); }
@@ -1805,6 +1957,7 @@ function grChLoad(){
     if(store !== grStore || month !== grMonth) return;
     grChanges = res.ok ? (res.data.rows || []) : [];
     grChNames = res.ok && res.data.names ? res.data.names : {};
+    grChTripStores = res.ok && Array.isArray(res.data.trip_stores) ? res.data.trip_stores : [];
     if(!res.ok) toast('Промените не се заредиха: ' + grErrText(res), '#dc2626');
   });
 }
@@ -1836,7 +1989,7 @@ function grChPlanned(staffId, day){
 }
 // Работната буква трябва да има код за договора (часовете — от снимката) и вида ден (сезон / неделя) — както на сървъра.
 function grChLetterOk(staffId, day, actual){
-  if(['ЛД','ЗД','П','В','М'].indexOf(actual) < 0) return true;
+  if(['ЛД','ЗД','П','В','М','К'].indexOf(actual) < 0) return true;
   var r = grChSnapRows().filter(function(x){ return x.staff_id === staffId; })[0];
   var hpd = r && +r.hours_per_day ? +r.hours_per_day : 8;
   var E = GrafikEngine, setup = grData.setup || {}, M = E.monthInfo(grMonth, setup.extra_days);
@@ -1867,7 +2020,7 @@ function grChangesHtml(){
         : (c.trz_done ? '<span style="color:#16a34a;font-weight:600;" title="' + escAttrVal(grChWho(c.trz_done_by) + ' · ' + grFmtAt(c.trz_done_at)) + '">✔ да</span>' : '<span style="color:#94a3b8;">не</span>');
       var can = (edit && !c.trz_done) || adm;
       h += '<tr id="gr-ch-' + escAttrVal(c.id) + '"><td style="white-space:nowrap;">' + escVal(grChDayLabel(c.day)) + '</td><td style="text-align:left;">' + escVal(grChName(c.staff_id)) + '</td>' +
-        '<td>' + escVal((c.planned_letter || 'почивка') + (c.planned_code ? ' / ' + c.planned_code : '')) + '</td><td style="font-weight:700;">' + escVal(c.actual) + '</td>' +
+        '<td>' + escVal((c.planned_letter || 'почивка') + (c.planned_code ? ' / ' + c.planned_code : '')) + '</td><td style="font-weight:700;">' + escVal(c.actual) + (c.trip_store ? '<div class="gr-ch-trip" style="font-weight:400;font-size:11px;color:#475569;">→ ' + escVal(c.trip_store) + '</div>' : '') + '</td>' +
         '<td style="text-align:left;">' + escVal(c.reason) + '</td><td style="font-size:11px;color:#64748b;">' + escVal(who) + '</td><td style="text-align:center;">' + tz + '</td>' +
         (edit || adm ? '<td style="white-space:nowrap;">' + (can ? '<button class="btn-sm" onclick="grChOpen(\'' + escAttrVal(c.id) + '\')">✏️</button> <button class="btn-sm" onclick="grChDelete(\'' + escAttrVal(c.id) + '\')">✕</button>'
           : '<span style="font-size:11px;color:#94a3b8;" title="Отразена в ТРЗ — само admin">🔒</span>') + '</td>' : '') + '</tr>';
@@ -1893,24 +2046,33 @@ function grChOpen(id){
     f('Дата', '<select id="gr-ch-day" style="width:100%;" onchange="grChPlannedShow()">' + days + '</select>') +
     f('Служител', '<select id="gr-ch-staff" style="width:100%;" onchange="grChPlannedShow()">' + ppl + '</select>') +
     f('По график', '<b id="gr-ch-planned"></b>') +
-    f('Реално *', '<select id="gr-ch-actual" style="width:100%;">' + (c ? '' : '<option value="">— избери —</option>') + act + '</select>') +
+    f('Реално *', '<select id="gr-ch-actual" style="width:100%;" onchange="grChTripShow()">' + (c ? '' : '<option value="">— избери —</option>') + act + '</select>') +
+    /* „К“ — обектът, където е командирован човекът (пакет 1, т.6); часовете при него — пакет 4. */
+    '<div id="gr-ch-trip-wrap" style="display:none;">' + f('Командирован в обект *', '<select id="gr-ch-trip" style="width:100%;"><option value="">— избери обект —</option>' +
+      grChTripStores.map(function(n){ return '<option value="' + escAttrVal(n) + '"' + (c && c.trip_store === n ? ' selected' : '') + '>' + escVal(n) + '</option>'; }).join('') + '</select>') + '</div>' +
     f('Основание / документ № *', '<input id="gr-ch-reason" style="width:100%;" maxlength="300" value="' + escAttrVal(c ? c.reason : '') + '">') +
     '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-ch-modal\')">Откажи</button><button class="btn btn-green" onclick="grChSave(\'' + escAttrVal(id || '') + '\')">Запиши</button></div></div></div>');
-  grChPlannedShow();
+  grChPlannedShow(); grChTripShow();
+}
+function grChTripShow(){
+  var w = document.getElementById('gr-ch-trip-wrap');
+  if(w) w.style.display = v('gr-ch-actual') === 'К' ? '' : 'none';
 }
 function grChPlannedShow(){
   var el = document.getElementById('gr-ch-planned');
   if(el) el.textContent = grChPlanned(v('gr-ch-staff'), +v('gr-ch-day')).text;
 }
 function grChSave(id){
-  var staffId = v('gr-ch-staff'), day = +v('gr-ch-day'), actual = v('gr-ch-actual'), reason = v('gr-ch-reason');
+  var staffId = v('gr-ch-staff'), day = +v('gr-ch-day'), actual = v('gr-ch-actual'), reason = v('gr-ch-reason'), trip = actual === 'К' ? v('gr-ch-trip') : '';
   if(!staffId || !day){ toast('Избери дата и служител.', '#dc2626'); return; }
   if(!actual){ toast('Избери какво е станало реално.', '#dc2626'); return; }
+  if(actual === 'К' && !trip){ toast('При „К“ избери обекта, където е командирован човекът.', '#dc2626'); return; }
   if(!reason){ toast('Основанието / документът е задължително.', '#dc2626'); return; }
   var p = grChPlanned(staffId, day);
   if(grChSame(actual, p.letter)){ toast('Няма отклонение — по график е същото (' + (p.letter || 'почивка') + ').', '#dc2626'); return; }
   if(!grChLetterOk(staffId, day, actual)){ toast('Буквата „' + actual + '“ няма код за договора на служителя в този ден — избери друга.', '#dc2626'); return; }
   var payload = { store: grStore, month: grMonth, staff_id: staffId, day: day, actual: actual, reason: reason };
+  if(trip) payload.trip_store = trip;
   if(id) payload.id = id;
   return grApi('changes_save', payload).then(function(res){
     if(!res.ok){ toast('Не е записана: ' + grErrText(res), '#dc2626'); return; }
@@ -1955,7 +2117,7 @@ function grPrintChanges(){
   var cols = '<col style="width:7mm;"><col style="width:20mm;"><col style="width:48mm;"><col style="width:24mm;"><col style="width:20mm;"><col style="width:66mm;"><col style="width:42mm;"><col style="width:50mm;">';
   var rows = list.map(function(c, i){
     return '<tr><td style="text-align:center;">' + (i + 1) + '</td><td style="text-align:center;">' + escVal(grChDayLabel(c.day)) + '</td><td>' + escVal(grChName(c.staff_id)) + '</td>' +
-      '<td style="text-align:center;">' + escVal((c.planned_letter || 'почивка') + (c.planned_code ? ' / ' + c.planned_code : '')) + '</td><td style="text-align:center;font-weight:700;">' + escVal(c.actual) + '</td>' +
+      '<td style="text-align:center;">' + escVal((c.planned_letter || 'почивка') + (c.planned_code ? ' / ' + c.planned_code : '')) + '</td><td style="text-align:center;font-weight:700;">' + escVal(c.actual) + (c.trip_store ? ' → ' + escVal(c.trip_store) : '') + '</td>' +
       '<td>' + escVal(c.reason) + '</td><td>' + escVal(grChWho(c.created_by)) + '</td><td></td></tr>';
   }).join('');
   wrap.innerHTML = '<style>' + css + '</style>' +
@@ -1986,13 +2148,15 @@ function grPrintChanges(){
 var GR_PRESENCE_LEGEND = 'Оранжево = ден с отклонение от „Промени“. Легенда неявявания: О платен отпуск · М майчинство · Б болест · Д държавни задължения · А с разрешение на администрацията · С самоотлъчка · Н неплатен отпуск';
 var GR_PRESENCE_COLS = [['О', 'Платен отпуск'], ['М', 'Майчинство'], ['Б', 'Болест'], ['Д', 'Изпълн. държ. задълж.'], ['А', 'С разреш. на админ.'], ['С', 'Самоотлъчка'], ['Н', 'Неплатен отпуск']];
 function grPresenceButtons(){
-  return '<button class="btn-sm" onclick="grPrintPresence()" title="График + промени — A4 хоризонтално">🖨 Присъствена</button>' +
+  /* Пакет 1, т.3: „към днес“ — само за текущия месец (подаден / одобрен — бутоните са само тогава). */
+  var today = grMonth === grThisMonth() ? '<button class="btn-sm" id="gr-pres-today" onclick="grPrintPresence(true)" title="Присъствената до днешната дата — за разписване">🖨 Присъствена към днес</button>' : '';
+  return '<button class="btn-sm" onclick="grPrintPresence()" title="График + промени — A4 хоризонтално">🖨 Присъствена</button>' + today +
     '<button class="btn-sm" onclick="grExportPresence()" title="Присъствената форма — Excel за ТРЗ">📥 Присъствена Excel</button>';
 }
-function grPresenceModel(){
+function grPresenceModel(upTo){
   if(!grData || !grFiled() || !grData.month_row || !grData.month_row.snapshot) return null;
   var snap = grData.month_row.snapshot, H = snap.header || {};
-  var p = GrafikEngine.presence(grData.setup || {}, grMonth, snap.rows || [], grChanges || []);
+  var p = GrafikEngine.presence(grData.setup || {}, grMonth, snap.rows || [], grChanges || [], upTo || 0);
   var M = p.month;
   return { p: p, M: M, header: { company: H.company_name || '', eik: H.company_eik || '', addr: H.company_addr || '', store: H.store_blank_name || grStore,
     compiledBy: H.compiled_by || (grData.month_row && grData.month_row.submitted_by_name) || '', monthText: GR_MONTHS[M.month - 1] + ' ' + M.year + ' г.', workDays: M.workDays, norm: M.norm, storeName: grStore, ym: grMonth } };
@@ -2006,8 +2170,11 @@ function grPresenceBlocked(m){
   return true;
 }
 function grPresenceCell(c){ return typeof c.v === 'number' ? grHrsTxt(c.v) : (c.v || ''); }
-function grPrintPresence(){
-  var m = grPresenceModel();
+/* asOf (пакет 1, т.3) — „към днес“: дните след днес са празни, надпис „към дд.мм.гггг“. */
+function grPrintPresence(asOf){
+  var now = new Date(), upTo = asOf && grMonth === grThisMonth() ? now.getDate() : 0;
+  var asOfTxt = upTo ? grPad(now.getDate()) + '.' + grPad(now.getMonth() + 1) + '.' + now.getFullYear() : '';
+  var m = grPresenceModel(upTo);
   if(!m || grPresenceBlocked(m)) return;
   var wrap = document.getElementById('mod-print');
   if(!wrap) return;
@@ -2021,7 +2188,7 @@ function grPrintPresence(){
     '.grq-tbl tr:last-child td{border-bottom:1px solid #333;}' +
     '.grq-tbl th{background:#f1f5f9;font-weight:700;}' +
     '.grq-tbl td.grq-name{text-align:left;}' +
-    '.grq-we{background:#e2e8f0;}.grq-hol{background:#fecaca;}.grq-chg{background:' + GR_CH_FILL + ';}' +
+    '.grq-we{background:#e2e8f0;}.grq-hol{background:#fecaca;}.grq-chg{background:' + GR_CH_FILL + ';}.grq-cut{background:#f8fafc;}' +
     '#grq-foot{break-inside:avoid;page-break-inside:avoid;font-size:7px;margin-top:2mm;}' +
     '@media print{.grq-tbl tr{page-break-inside:avoid;}#grq-page{padding:0 !important;}}';
   var cols = '<col style="width:5mm;"><col style="width:35mm;"><col style="width:24mm;">' + Array.apply(null, Array(nd)).map(function(){ return '<col style="width:5mm;">'; }).join('') +
@@ -2034,7 +2201,7 @@ function grPrintPresence(){
   head += '</tr>';
   var body = m.p.rows.map(function(r, i){
     var h = '<tr class="grq-row"><td>' + (i + 1) + '</td><td class="grq-name">' + escVal(r.name) + '</td><td>' + escVal(r.title) + '</td>';
-    r.cells.forEach(function(c, d){ h += '<td class="' + (c.change ? 'grq-chg' : dayCls(d)) + '">' + escVal(grPresenceCell(c)) + '</td>'; });
+    r.cells.forEach(function(c, d){ h += '<td class="' + (c.cut ? 'grq-cut' : c.change ? 'grq-chg' : dayCls(d)) + '">' + escVal(grPresenceCell(c)) + '</td>'; });
     return h + '<td>' + r.days + '</td><td>' + grHrsTxt(r.hours) + '</td>' + GR_PRESENCE_COLS.map(function(c){ return '<td>' + r[c[0]] + '</td>'; }).join('') + '<td>' + grHrsTxt(r.total) + '</td></tr>';
   }).join('');
   var T = m.p.totals;
@@ -2050,13 +2217,13 @@ function grPrintPresence(){
       '<div id="grq-wrap">' +
         '<div class="grq-head"><div>Предприятие: <b>' + escVal(H.company) + '</b>, ЕИК ' + escVal(H.eik) + '<br>Адрес: ' + escVal(H.addr) + '<br>Обект: <b>' + escVal(H.store) + '</b></div>' +
           '<div style="text-align:right;" id="grq-made">Съставил: ' + escVal(H.compiledBy) + '<br>(име и фамилия)<br>………………………… (подпис)</div></div>' +
-        '<div class="grq-title" id="grq-title">ПРИСЪСТВЕНА ФОРМА</div>' +
+        '<div class="grq-title" id="grq-title">ПРИСЪСТВЕНА ФОРМА' + (asOfTxt ? ' <span id="grq-asof">— към ' + asOfTxt + '</span>' : '') + '</div>' +
         '<div style="text-align:center;font-size:10px;margin-bottom:2mm;">за месец ' + escVal(H.monthText) + ' · ' + H.workDays + ' раб. дни · ' + H.norm + ' часа</div>' +
         '<table class="grq-tbl" id="grq-tbl"><colgroup>' + cols + '</colgroup><thead>' + head + '</thead><tbody>' + body + '</tbody></table>' +
         '<div id="grq-foot">' + escVal(GR_PRESENCE_LEGEND) + '</div>' +
       '</div>' +
     '</div>';
-  grLogOut('print_presence');
+  grLogOut(upTo ? 'print_presence_today' : 'print_presence');
   showModule('print');
 }
 /* Excel за ТРЗ — като файла на графика: без защита, формулите в реда, празният ден е празна клетка. */

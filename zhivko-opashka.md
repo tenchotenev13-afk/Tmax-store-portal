@@ -14,6 +14,10 @@
 
 ## Чака изпращане
 
+(grafik-changes-trip-schema.sql — миграция grafik_changes_trip, версия 20261127121336, приложена 27.11.2026; „Работен график“ не е в огледалото — редовете са само за записа)
+- 27.11 · grafik_changes.trip_store — text, NULL, без default (обектът, където е командирован човекът; задължителен точно при actual = 'К')
+- 27.11 · grafik_changes.actual — нова стойност 'К'
+
 (grafik-zashtita-schema.sql — миграция grafik_zashtita, версия 20261127095555; grafik-access-roles-schema.sql — миграция grafik_access_roles, версия 20261127112531; и двете приложени 27.11.2026; „Работен график“ не е в огледалото — редовете са само за записа)
 - 27.11 · grafik_access.can_reset_pin — boolean, NOT NULL, default false
 - 27.11 · grafik_access.list — нови стойности 'view' и 'edit' (стойността 'beta' изчезва — става 'edit')

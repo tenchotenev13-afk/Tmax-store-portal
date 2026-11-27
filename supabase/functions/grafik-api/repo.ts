@@ -118,9 +118,33 @@ export function makeRepo(): Repo {
       return ok<Staff[]>(await db.from("grafik_staff").select("*").eq("store_name", store).order("sort_order").order("short_name"));
     },
     async staffDates(stores) {
-      let q = db.from("grafik_staff").select("store_name,hired_on,left_on");
+      let q = db.from("grafik_staff").select("id,store_name,hired_on,left_on");
       if (stores) q = q.in("store_name", stores.length ? stores : ["—"]);
-      return ok<{ store_name: string; hired_on: string | null; left_on: string | null }[]>(await q);
+      return ok<{ id: string; store_name: string; hired_on: string | null; left_on: string | null }[]>(await q);
+    },
+    async monthLetters(ids) {
+      if (!ids.length) return [];
+      return ok(await db.from("grafik_rows").select("month_id,staff_id,letters").in("month_id", ids));
+    },
+    async monthChanges(ids) {
+      if (!ids.length) return [];
+      return ok(await db.from("grafik_changes").select("month_id,staff_id,day,actual").in("month_id", ids));
+    },
+    // Пакет 1, т.7 — активните потребители на обекта (само имейл и име) и писмото през resend-email.
+    async storeUsers(store) {
+      return ok(await db.from("users").select("email,display_name,active").eq("store_name", store));
+    },
+    async sendMail(to, subject, html) {
+      try {
+        const res = await fetch(Deno.env.get("SUPABASE_URL") + "/functions/v1/resend-email", {
+          method: "POST",
+          // resend-email е с verify_jwt: true — без този заглавен ред връща 401 (както в bulletin-notify).
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") },
+          body: JSON.stringify({ type: "email", to, subject, html }),
+        });
+        if (!res.ok) console.error("resend-email HTTP " + res.status + ": " + (await res.text().catch(() => "")));
+        return res.ok;
+      } catch (e) { console.error("resend-email: " + ((e as Error).message || String(e))); return false; }
     },
     async getStaff(ids) {
       if (!ids.length) return [];

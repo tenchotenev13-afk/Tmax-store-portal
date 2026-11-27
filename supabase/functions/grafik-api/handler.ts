@@ -45,7 +45,7 @@ export type Staff = { id: string; store_name: string; [k: string]: unknown };
 // „Промени“ (grafik_changes, 05.11.2026): реалните отклонения от ПОДАДЕН график, ред за човек и ден.
 export type ChangeRow = {
   id: string; month_id: string; staff_id: string; day: number; planned_letter: string | null; planned_code: string | null;
-  actual: string; reason: string; created_at?: string; created_by?: string | null; updated_at?: string; updated_by?: string | null;
+  actual: string; reason: string; trip_store?: string | null; created_at?: string; created_by?: string | null; updated_at?: string; updated_by?: string | null;
   trz_done: boolean; trz_done_at?: string | null; trz_done_by?: string | null;
 };
 // Ролята в модула (grafik_access.list, решение на Тенчо 27.11.2026): view — всички обекти, само четене;
@@ -93,7 +93,12 @@ export interface Repo {
   upsertRows(rows: RowRec[]): Promise<void>;
   listStaff(store: string): Promise<Staff[]>;
   // Датите на назначаване / напускане по обект — броят в месеца се смята тук (staffInMonth).
-  staffDates(stores: string[] | null): Promise<{ store_name: string; hired_on: string | null; left_on: string | null }[]>;
+  staffDates(stores: string[] | null): Promise<{ id?: string; store_name: string; hired_on: string | null; left_on: string | null }[]>;
+  // Пакет 1, т.4 — буквите и промените на месеците за „Активни“ (без съдържание към браузъра).
+  monthLetters(monthIds: string[]): Promise<{ month_id: string; staff_id: string; letters: string[] }[]>;
+  monthChanges(monthIds: string[]): Promise<{ month_id: string; staff_id: string; day: number; actual: string }[]>;
+  storeUsers(store: string): Promise<{ email: string | null; display_name?: string | null; active: boolean | null }[]>;
+  sendMail(to: string[], subject: string, html: string): Promise<boolean>;
   getStaff(ids: string[]): Promise<Staff[]>;
   insertStaff(fields: Record<string, unknown>): Promise<Staff>;
   updateStaff(id: string, fields: Record<string, unknown>): Promise<Staff | null>;
@@ -358,7 +363,31 @@ export function submitIssues(staff: Staff[], rows: RowRec[], snapRows: Record<st
 // ── „Промени“ (П1, план одобрен 05.11.2026; решения а–з) ─────────────────────
 // „Реално“ — списъкът на бланката (лист „Промени“, D2:D500): работните букви + неявяванията от
 // Настройки Q:R. „По график“ се взема тук (grafik_rows + снимката), не от браузъра.
-export const CHANGE_ACTUALS = ["ЛД", "ЗД", "П", "В", "М", "почивка", "О", "Б", "Н", "Д", "А", "С", "Майч"];
+// „К“ (пакет 1, т.6, 27.11.2026) — командировка: задължителен обект получател (trip_store; миграция
+// grafik_changes_trip). Часовете — пълната смяна по договора, както в графика; при обекта получател —
+// пакет 4 (същото поле).
+export const CHANGE_ACTUALS = ["ЛД", "ЗД", "П", "В", "М", "К", "почивка", "О", "Б", "Н", "Д", "А", "С", "Майч"];
+
+// ── Активен персонал за месеца (пакет 1, т.4, решение на Тенчо 27.11.2026) ─────
+// Човекът (в месеца по датите си) НЕ е активен, ако в нито един свой ден няма работна смяна
+// (ЛД, ЗД, П, В, М, К, свободни часове) или платен отпуск (О, О4), а има поне един ден Б / НО
+// (или от „Промени“: Б, Н, Майч). Почивките не решават. Празен ред → активен (той е „извън нормата“).
+// Промяната за деня (подаден / одобрен месец) има предимство пред буквата в графика.
+const ACTIVE_WORK = ["ЛД", "ЗД", "П", "В", "М", "К", "О", "О4"];
+const ACTIVE_OFF = ["Б", "НО", "Н", "Майч"];
+export function activeInMonth(s: { hired_on?: unknown; left_on?: unknown }, letters: unknown, changes: Record<number, string>, start: string, days: number): boolean {
+  const L = Array.isArray(letters) ? letters : [];
+  let off = false;
+  for (let d = 1; d <= days; d++) {
+    const date = addDay(start, d);
+    if (typeof s.hired_on === "string" && date < s.hired_on) continue;
+    if (typeof s.left_on === "string" && date > s.left_on) continue;
+    const v = changes[d] !== undefined ? changes[d] : (typeof L[d - 1] === "string" ? L[d - 1] as string : "");
+    if (ACTIVE_WORK.indexOf(v) >= 0 || HOURS_RE.test(v)) return true;
+    if (ACTIVE_OFF.indexOf(v) >= 0) off = true;
+  }
+  return !off;
+}
 // „Реално“ = „по график“ → няма отклонение. В графика неплатеният е „НО“, а празният ден е почивка.
 export function sameAsPlanned(actual: string, plannedLetter: string): boolean {
   const p = plannedLetter === "НО" ? "Н" : plannedLetter === "" ? "почивка" : plannedLetter;
@@ -438,7 +467,7 @@ async function submittedMonth(repo: Repo, store: string, ym: unknown, allowReope
   return { m, month };
 }
 // Всички проверки на един ред „Промени“ → „по график“ (буква и официален код).
-async function checkChange(repo: Repo, store: string, m: { start: string; end: string; days: number }, month: MonthRow, staffId: unknown, day: unknown, actual: unknown, reason: unknown) {
+async function checkChange(repo: Repo, store: string, m: { start: string; end: string; days: number }, month: MonthRow, staffId: unknown, day: unknown, actual: unknown, reason: unknown, tripStore?: unknown) {
   const sid = uuid(staffId, "служител");
   if (typeof day !== "number" || !Number.isInteger(day) || day < 1 || day > m.days) throw new HttpError(400, "bad_request", "Денят не е в месеца.");
   if (typeof actual !== "string" || CHANGE_ACTUALS.indexOf(actual) < 0) throw new HttpError(400, "bad_request", "„Реално“ е една от: " + CHANGE_ACTUALS.join(", ") + ".");
@@ -453,11 +482,19 @@ async function checkChange(repo: Repo, store: string, m: { start: string; end: s
   if (st && ((typeof st.hired_on === "string" && date < st.hired_on) || (typeof st.left_on === "string" && date > st.left_on))) {
     throw new HttpError(400, "not_employed", "На " + date + " служителят не е на работа (назначен / напуснал).");
   }
+  // „К“ — обектът получател е задължителен, от списъка с обекти и не е своят (пакет 1, т.6).
+  let trip: string | null = null;
+  if (actual === "К") {
+    trip = typeof tripStore === "string" ? tripStore.trim() : "";
+    if (!trip) throw new HttpError(400, "trip_store", "При „К“ избери обекта, където е командирован човекът.");
+    if ((await repo.storeNames()).indexOf(trip) < 0) throw new HttpError(400, "trip_store", "Няма такъв обект: „" + trip + "“.");
+    if (trip === store) throw new HttpError(400, "trip_store", "Командировка в собствения обект — избери друг обект.");
+  }
   // Решение в: ЛД в неделя — както в графика.
   if (actual === "ЛД" && new Date(date + "T00:00:00Z").getUTCDay() === 0) throw new HttpError(400, "sunday_ld", "ЛД в неделя — ползвай ЗД.");
   // Работната буква трябва да има код за договора на човека (П3: присъствената я превежда по договора;
   // напр. ЛД при 4 ч. няма код). Буквите — от grafik_letter_map за ВТР на месеца.
-  if (["ЛД", "ЗД", "П", "В", "М"].indexOf(actual) >= 0) {
+  if (["ЛД", "ЗД", "П", "В", "М", "К"].indexOf(actual) >= 0) {
     // Часовете — от снимката (присъствената превежда по нея), не от днешния договор.
     const hpd = typeof sr.hours_per_day === "number" && sr.hours_per_day > 0 ? sr.hours_per_day : (st && st.hours_per_day ? +st.hours_per_day : 8);
     const setup = resolveSetup(await repo.setupRaw(store), m.start, m.end);
@@ -469,7 +506,7 @@ async function checkChange(repo: Repo, store: string, m: { start: string; end: s
   const plannedLetter = row && Array.isArray(row.letters) && typeof row.letters[day - 1] === "string" ? row.letters[day - 1] : "";
   const plannedCode = Array.isArray(sr.codes) && typeof sr.codes[day - 1] === "string" ? sr.codes[day - 1] as string : "";
   if (sameAsPlanned(actual, plannedLetter)) throw new HttpError(409, "no_change", "Няма отклонение — по график е същото (" + (plannedLetter || "почивка") + ").");
-  return { sid, plannedLetter, plannedCode, reason: reason.trim() };
+  return { sid, plannedLetter, plannedCode, reason: reason.trim(), trip };
 }
 // Решение а: след ново подаване остават само промените, които още важат — човекът е в графика
 // и денят е в периода му на работа. Останалите се махат (с одит).
@@ -574,6 +611,41 @@ export async function handleGrafik(req: Request, getRepo: () => Repo, now?: numb
   }
 }
 
+// ── Имейл до обекта при „↩ Върни с коментар“ (пакет 1, т.7, решение на Тенчо 27.11.2026) ──────
+// До активните потребители на обекта с роля в grafik_access (без този, който връща). Без текста на
+// коментара (може да съдържа имена) — само обект, месец и линк; коментарът е на екрана на обекта.
+// Паднало изпращане не спира връщането — пише се в одита.
+export const PORTAL_URL = "https://tenchotenev13-afk.github.io/Tmax-store-portal/";
+const BG_MONTHS = ["януари", "февруари", "март", "април", "май", "юни", "юли", "август", "септември", "октомври", "ноември", "декември"];
+export function monthText(start: string): string { return BG_MONTHS[+start.slice(5, 7) - 1] + " " + start.slice(0, 4) + " г."; }
+const htmlEsc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+export function returnMail(store: string, start: string): { subject: string; html: string } {
+  const mt = monthText(start);
+  return {
+    subject: "График за " + mt + " — " + store + ": върнат за корекция",
+    html: "<p>Графикът на обект <b>" + htmlEsc(store) + "</b> за <b>" + htmlEsc(mt) + "</b> е върнат с коментар — виж го в портала.</p>" +
+      "<p><a href=\"" + PORTAL_URL + "\">Отвори портала → „📆 График“</a></p>" +
+      "<p style=\"color:#64748b;font-size:12px;\">Писмото е автоматично от „Работен график“.</p>",
+  };
+}
+async function notifyReturned(repo: Repo, acc: Access, store: string, start: string): Promise<{ to: number; ok: boolean }> {
+  try {
+    const [rows, users] = await Promise.all([repo.listAccess(), repo.storeUsers(store)]);
+    const to = Array.from(new Set(users.filter((u) => u.active !== false && typeof u.email === "string" && u.email)
+      .map((u) => String(u.email).trim().toLowerCase())
+      .filter((e) => e !== acc.email && !!roleOf(rows, e))));
+    if (!to.length) { await gaudit(repo, acc, "grafik_return_mail", { store, month: start.slice(0, 7), to: 0 }, true); return { to: 0, ok: true }; }
+    const mail = returnMail(store, start);
+    const ok = await repo.sendMail(to, mail.subject, mail.html);
+    await gaudit(repo, acc, "grafik_return_mail", { store, month: start.slice(0, 7), to: to.length }, ok);
+    return { to: to.length, ok };
+  } catch (e) {
+    console.error("grafik_return_mail: " + ((e as Error).message || String(e)));
+    await gaudit(repo, acc, "grafik_return_mail", { store, month: start.slice(0, 7), error: true }, false);
+    return { to: 0, ok: false };
+  }
+}
+
 // ── Одит на четенето (етап В, решение на Тенчо 27.11.2026) ───────────────────
 // Кой, роля, обект, месец, действие и кога — без съдържанието. Едно и също четене от един човек
 // се пише веднъж на 10 мин (dedup_key, unique в базата; повторът е „on conflict do nothing“).
@@ -584,6 +656,8 @@ export const READ_EVENTS: Record<string, string> = {
 export const LOG_WHAT: Record<string, string> = {
   print_grafik: "grafik_print", print_presence: "grafik_print_presence", print_changes: "grafik_print_changes",
   export_trz: "grafik_export_trz", export_presence: "grafik_export_presence",
+  // Пакет 1: ZIP с одобрените (по един ред на обект), обобщението и присъствената „към днес“.
+  export_zip: "grafik_export_zip", export_summary: "grafik_export_summary", print_presence_today: "grafik_print_presence_today",
 };
 export const DEDUP_SECONDS = 600;
 function monthKey(v: unknown): string | null { return parseMonth(v) ? String(v) : null; }
@@ -738,9 +812,10 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
     case "log": {
       const ev = typeof b.what === "string" ? LOG_WHAT[b.what] : undefined;
       if (!ev) throw new HttpError(400, "bad_request", "Непознато действие за одита.");
-      const store = await needStore(repo, acc, b.store, "read");
+      // Обобщението (пакет 1, т.2) е за всички видими обекти — без обект; всичко друго — за един обект.
+      const store = ev === "grafik_export_summary" && (b.store === undefined || b.store === null) ? null : await needStore(repo, acc, b.store, "read");
       const month = monthKey(b.month);
-      await repo.gAudit(gEntry(acc, ev, store, month, true, null, [acc.email, ev, store, month || "", Math.floor(nowS / DEDUP_SECONDS)].join("|"))).catch(() => {});
+      await repo.gAudit(gEntry(acc, ev, store, month, true, null, [acc.email, ev, store || "", month || "", Math.floor(nowS / DEDUP_SECONDS)].join("|"))).catch(() => {});
       return {};
     }
 
@@ -960,7 +1035,8 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
       if (!canReturn(acc, store, month)) {
         throw new HttpError(403, "forbidden", month!.status === "approved" ? "Одобрен график връщат ТРЗ и admin." : "Нямате права да връщате графика на този обект.");
       }
-      return await returnToDraft(repo, acc, store, m, month!, comment);
+      const out = await returnToDraft(repo, acc, store, m, month!, comment);
+      return { ...out, mail: await notifyReturned(repo, acc, store, m.start) };
     }
 
     case "approve": {
@@ -996,13 +1072,15 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
       const rows = (await repo.listChanges(month.id)).sort((a, c) => a.day - c.day);
       // „Въведено от“ / „отметнато от“ — с име (users.display_name); имейл само ако няма име.
       const emails = Array.from(new Set(rows.flatMap((c) => [c.created_by, c.updated_by, c.trz_done_by]).filter((e): e is string => typeof e === "string" && !!e).map((e) => e.toLowerCase())));
-      return { rows, names: await repo.userNames(emails) };
+      // Пакет 1, т.6: обектите за „К“ (обект получател) — всички без своя; същият списък, по който се проверява.
+      const [names, all] = await Promise.all([repo.userNames(emails), repo.storeNames()]);
+      return { rows, names, trip_stores: all.filter((n) => n !== store) };
     }
 
     case "changes_save": {
       const store = await needStore(repo, acc, b.store, "edit");
       const { m, month } = await submittedMonth(repo, store, b.month);
-      const ch = await checkChange(repo, store, m, month, b.staff_id, b.day, b.actual, b.reason);
+      const ch = await checkChange(repo, store, m, month, b.staff_id, b.day, b.actual, b.reason, b.trip_store);
       const all = await repo.listChanges(month.id);
       const self = b.id === undefined || b.id === null ? null : uuid(b.id, "id");
       const cur = self ? all.filter((c) => c.id === self)[0] : null;
@@ -1013,9 +1091,9 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
         throw new HttpError(409, "duplicate", "За този служител и ден вече има промяна — редактирай нея.");
       }
       const now = new Date().toISOString();
-      const fields = { staff_id: ch.sid, day: b.day, planned_letter: ch.plannedLetter, planned_code: ch.plannedCode, actual: b.actual, reason: ch.reason, updated_at: now, updated_by: acc.email };
+      const fields = { staff_id: ch.sid, day: b.day, planned_letter: ch.plannedLetter, planned_code: ch.plannedCode, actual: b.actual, reason: ch.reason, trip_store: ch.trip, updated_at: now, updated_by: acc.email };
       const row = cur ? await repo.updateChange(cur.id, fields) : await repo.insertChange({ ...fields, month_id: month.id, created_by: acc.email });
-      await audit(repo, acc, cur ? "grafik_change_update" : "grafik_change_create", store, { month: m.start, id: row ? row.id : null, staff_id: ch.sid, day: b.day, actual: b.actual, planned: ch.plannedLetter + "/" + ch.plannedCode });
+      await audit(repo, acc, cur ? "grafik_change_update" : "grafik_change_create", store, { month: m.start, id: row ? row.id : null, staff_id: ch.sid, day: b.day, actual: b.actual, planned: ch.plannedLetter + "/" + ch.plannedCode, ...(ch.trip ? { trip_store: ch.trip } : {}) });
       return { row };
     }
 
@@ -1093,10 +1171,23 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
       const stats = await repo.rowStats(months.map((r) => r.id));
       const chs = await repo.changeStats(months.filter(asSub).map((r) => r.id));   // П3: „промени / неотразени“
       // „Служители“ — активните в месеца (назначен до края му, не напуснал преди началото му; 20.11.2026).
-      const staffN: Record<string, number> = {};
-      if (acc.kind !== "trz") (await repo.staffDates(visible)).filter((s) => staffInMonth(s, m.start, m.end)).forEach((s) => { staffN[s.store_name] = (staffN[s.store_name] || 0) + 1; });
+      const staffN: Record<string, number> = {}, activeN: Record<string, number> = {};
       const byStore: Record<string, MonthRow> = {};
       months.forEach((r) => { byStore[r.store_name] = r; });
+      if (acc.kind !== "trz") {
+        // Пакет 1, т.4: „Активни“ — без целия месец Б / НО / майчинство (activeInMonth). Буквите — от графика;
+        // за подаден / одобрен — и промените (имат предимство). Месец без график → всички активни.
+        const inMonth = (await repo.staffDates(visible)).filter((s) => staffInMonth(s, m.start, m.end));
+        const [lets, chg] = await Promise.all([repo.monthLetters(months.map((r) => r.id)), repo.monthChanges(months.filter(isFiled).map((r) => r.id))]);
+        const L: Record<string, string[]> = {}, C: Record<string, Record<number, string>> = {};
+        lets.forEach((x) => { L[x.month_id + "|" + x.staff_id] = x.letters; });
+        chg.forEach((x) => { const k = x.month_id + "|" + x.staff_id; (C[k] = C[k] || {})[x.day] = x.actual; });
+        inMonth.forEach((s) => {
+          staffN[s.store_name] = (staffN[s.store_name] || 0) + 1;
+          const mo = byStore[s.store_name], k = mo ? mo.id + "|" + s.id : "";
+          if (activeInMonth(s, mo ? L[k] : [], mo ? C[k] || {} : {}, m.start, m.days)) activeN[s.store_name] = (activeN[s.store_name] || 0) + 1;
+        });
+      }
       const who = await repo.userNames(Array.from(new Set(Object.values(stats).map((s) => (s.last_by || "").toLowerCase()).filter(Boolean))));
       const list = (acc.kind === "trz" ? visible.filter((n) => !!byStore[n]) : visible).map((n) => {
         const r = byStore[n], st = r ? stats[r.id] : null, sub = !!r && asSub(r), reo = reopenedOf(r), trzReo = sub && !!reo;
@@ -1110,7 +1201,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
           approved_at: r && r.status === "approved" ? r.approved_at || null : null,
           approved_by_name: r && r.status === "approved" ? r.approved_by_name || null : null,
           can_approve: canApprove(acc) && !!r && r.status === "submitted", can_return: canReturn(acc, n, r),
-          staff: (staffN as Record<string, number>)[n] || 0, can_edit: canEdit(acc, n),
+          staff: (staffN as Record<string, number>)[n] || 0, active: acc.kind === "trz" ? null : activeN[n] || 0, can_edit: canEdit(acc, n),
           last_at: st ? st.last_at : null, last_by: lastBy ? (who[lastBy] || lastBy) : null,
           off_norm: sub ? snapshotOffNorm(r!.snapshot) : null,
           changes: sub ? (chs[r!.id] || { n: 0, open: 0 }).n : null, changes_open: sub ? (chs[r!.id] || { n: 0, open: 0 }).open : null,

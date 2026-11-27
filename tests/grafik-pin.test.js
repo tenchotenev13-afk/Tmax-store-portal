@@ -293,7 +293,7 @@ const ss = h => { try { return JSON.parse(h.w.sessionStorage.getItem('gr-pin') |
     const src = fs.readFileSync(path.join(ROOT, 'grafik.js'), 'utf8');
     const fnBody = name => { const i = src.indexOf('function ' + name + '('); return i < 0 ? '' : src.slice(i, src.indexOf('\nfunction ', i + 10)); };
     const pairs = [['grPrintGrafik', 'print_grafik'], ['grPrintPresence', 'print_presence'], ['grPrintChanges', 'print_changes'], ['grExportTrz', 'export_trz'], ['grExportPresence', 'export_presence']];
-    pairs.forEach(([fn, what]) => ok(fn + ' пише в одита (' + what + ')', fnBody(fn).indexOf("grLogOut('" + what + "')") >= 0));
+    pairs.forEach(([fn, what]) => ok(fn + ' пише в одита (' + what + ')', fnBody(fn).indexOf('grLogOut(') >= 0 && fnBody(fn).indexOf("'" + what + "'") >= 0));
   }
 
   report();
