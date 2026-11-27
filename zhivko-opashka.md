@@ -14,7 +14,7 @@
 
 ## Чака изпращане
 
-(grafik-zashtita-schema.sql — миграция grafik_zashtita, версия 20261127095555, приложена 27.11.2026; grafik-access-roles-schema.sql — ОЩЕ НЕ Е ПРИЛОЖЕНА; „Работен график“ не е в огледалото — редовете са само за записа)
+(grafik-zashtita-schema.sql — миграция grafik_zashtita, версия 20261127095555; grafik-access-roles-schema.sql — миграция grafik_access_roles, версия 20261127112531; и двете приложени 27.11.2026; „Работен график“ не е в огледалото — редовете са само за записа)
 - 27.11 · grafik_access.can_reset_pin — boolean, NOT NULL, default false
 - 27.11 · grafik_access.list — нови стойности 'view' и 'edit' (стойността 'beta' изчезва — става 'edit')
 - 27.11 · нова таблица grafik_pin — user_id uuid NOT NULL (PK, → users.id), pin_hash text NOT NULL, fails int NOT NULL default 0, locked_until timestamptz NULL, blocked boolean NOT NULL default false, set_at timestamptz NOT NULL default now(), last_ok_at timestamptz NULL, last_try_at timestamptz NULL
