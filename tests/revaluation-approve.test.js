@@ -42,7 +42,7 @@ const CAMP = { id: 'c-1', title: 'Пожелателна преоценка 11.2
 const PAST = Object.assign({}, CAMP, { starts_on: dayOffset(-5), ends_on: dayOffset(-2) });
 const NOW = new Date().toISOString();
 const ITEM = (sub, store) => ({ id: 'i-' + sub, submission_id: sub, campaign_id: 'c-1', store_name: store, sort_order: 1, sap_code: '14557',
-  product_name: 'ЛАМПА', unit: 'бр.', qty: 2, std_price: 120, discount_pct: 50, proposed_price: 60, store_comment: 'стар модел' });
+  product_name: 'ЛАМПА', unit: 'бр.', qty: 2, std_price: 120, discount_pct: 50, proposed_price: 60, store_comment: 'стар модел', photos: ['https://x/p.jpg'] });
 const SUB_K = st => ({ id: 's-k', campaign_id: 'c-1', store_name: 'Кърджали', status: st, no_items: false, submitted_at: st === 'draft' ? null : NOW, default_pct: null });
 const SUB_SH = { id: 's-sh', campaign_id: 'c-1', store_name: 'Шумен', status: 'draft', no_items: false, default_pct: null };
 

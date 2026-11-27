@@ -204,6 +204,65 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 @media(min-width:1200px){
   #mod-revaluation .tbl-compact thead th,#rv-lbl-modal .tbl-compact thead th{top:0;}
 }
+/* Преоценка на телефон (27.11.2026, т.1/2/5/6 на Теодор). Прозорецът „➕ Добави артикул“ /
+   „✏️ Промени“ (#rv-form, в body): полета и бутони ≥ 44px, шрифт 16px в полетата (иначе iOS
+   увеличава страницата); под 700px — на цял екран. Карти (.rv-cards) вместо таблицата под
+   700px само при .rv-has-cards (обектът и регионалният; ЦО остава с таблицата).
+   Вграденият font-size:10px на номерата / проблемите в реда се надвива с !important. */
+.rv-form-bg{position:fixed;inset:0;z-index:300;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+.rv-form{background:#fff;color:#0f172a;border-radius:12px;width:100%;max-width:560px;max-height:100%;overflow-y:auto;overflow-x:hidden;padding:16px;box-sizing:border-box;box-shadow:0 10px 30px rgba(0,0,0,.25);}
+.rv-form *{box-sizing:border-box;}
+.rv-f-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:19px;margin-bottom:12px;}
+.rv-f-x{min-width:44px;min-height:44px;font-size:20px;border:none;background:#f1f5f9;border-radius:8px;cursor:pointer;}
+.rv-f-fld{margin-bottom:12px;min-width:0;}
+.rv-f-l{display:block;font-size:14px;color:#475569;font-weight:600;margin-bottom:4px;}
+.rv-f-req{font-weight:400;color:#b91c1c;}
+.rv-form input[type=text]{display:block;width:100%;max-width:none;font-size:16px;min-height:44px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#0f172a;}
+.rv-form input[readonly]{background:#f1f5f9;color:#475569;}
+.rv-f-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.rv-f-grid3{grid-template-columns:1fr 1fr 1fr;}
+.rv-f-hint{font-size:13px;color:#b45309;margin-top:4px;}
+.rv-f-units{font-size:15px;color:#334155;margin-top:4px;font-weight:600;}
+.rv-f-ac{position:absolute;left:0;right:0;z-index:20;background:#fff;border:1px solid #cbd5e1;border-radius:8px;max-height:50vh;overflow-y:auto;}
+.rv-f-ac > div{font-size:15px!important;padding:11px 10px!important;}
+.rv-f-row{display:flex;flex-wrap:wrap;gap:8px;}
+.rv-f-row .rv-f-btn{flex:1 1 140px;}
+.rv-f-btn{min-height:44px;font-size:16px;padding:8px 14px;border:1px solid #cbd5e1;background:#fff;color:#0f172a;border-radius:8px;cursor:pointer;font-weight:600;}
+.rv-f-btn:disabled{opacity:.6;cursor:wait;}
+.rv-f-scan{display:block;width:100%;margin-bottom:12px;}
+.rv-f-save{background:#16a34a;color:#fff;border-color:#16a34a;}
+.rv-f-foot{margin-top:14px;position:sticky;bottom:-16px;background:#fff;padding:8px 0 16px;}   /* „Запази“ винаги видим при скрол */
+.rv-f-photos{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;}
+.rv-f-tile{display:flex;flex-direction:column;width:84px;gap:4px;}
+.rv-f-tile img,.rv-f-tile-ph{width:84px;height:84px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:center;font-size:28px;background:#f8fafc;}
+.rv-f-tile-x{min-height:44px;width:84px;border:none;border-radius:6px;background:#dc2626;color:#fff;font-size:16px;cursor:pointer;}
+.rv-f-nophoto{font-size:15px;color:#b91c1c;font-weight:600;}
+.rv-f-err{font-size:15px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px;margin-top:8px;}
+.rv-f-ok{font-size:17px;color:#166534;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px;margin-bottom:10px;overflow-wrap:anywhere;}
+.rv-f-note{font-size:20px;color:#1e3a8a;background:#eff6ff;border:2px solid #93c5fd;border-radius:8px;padding:12px;}
+#mod-revaluation .rv-add-big{display:block;width:100%;max-width:420px;margin:14px auto 4px;min-height:52px;font-size:18px;font-weight:700;background:#dc2626;color:#fff;border:none;border-radius:10px;cursor:pointer;}
+#mod-revaluation .rv-cards{display:none;}
+#mod-revaluation .rv-card{border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;background:#fff;font-size:16px;overflow-wrap:anywhere;}
+#mod-revaluation .rv-card-bad{background:#fef2f2;border-color:#fecaca;}
+#mod-revaluation .rv-card-empty{text-align:center;color:#94a3b8;font-size:16px;padding:12px;}
+#mod-revaluation .rv-card-code{font-family:DM Mono,monospace;font-weight:700;font-size:17px;}
+#mod-revaluation .rv-card .rv-units{font-size:16px!important;color:#1e3a8a!important;font-weight:700;margin-top:2px;}
+#mod-revaluation .rv-card .rv-bad,#mod-revaluation .rv-card .rv-err,#mod-revaluation .rv-card .rv-unit-miss{font-size:15px!important;color:#b91c1c;font-weight:600;}
+#mod-revaluation .rv-card .rv-unit-retry{font-size:15px!important;min-height:44px;padding:4px 10px!important;}
+#mod-revaluation .rv-card-name{margin-top:6px;}
+#mod-revaluation .rv-card-line{margin-top:4px;}
+#mod-revaluation .rv-card-std{color:#64748b;font-size:14px;}
+#mod-revaluation .rv-card-why{margin-top:4px;color:#334155;font-style:italic;}
+#mod-revaluation .rv-card .rv-thumb{width:64px!important;height:64px!important;}
+#mod-revaluation .rv-card .rv-photo-rm{display:none!important;}   /* махането — от „✏️ Промени“ (✕ 44px), не случайно с пръст */
+#mod-revaluation .rv-card-btns{display:flex;gap:8px;margin-top:10px;}
+#mod-revaluation .rv-card-btns .rv-f-btn{flex:1 1 0;}
+@media(max-width:699px){
+  .rv-form-bg{padding:0;}
+  .rv-form{max-width:none;height:100%;border-radius:0;}
+  #mod-revaluation .rv-cards{display:block;}
+  #mod-revaluation .tbl-rv-sheet.rv-has-cards{display:none;}
+}
 /* Разлики (.tbl-sd-compact), изглед „Решени редове“: 7 колони (8 в „Междускладови“ — там е
    „Склад · Магазин“). Общият модел е .tbl-compact: под 1200px — хоризонтален скрол в кутията,
    от 1200px — закачен thead. Ширините са по КЛАС на клетката (sd-c-*), не по :nth-child, защото

@@ -93,6 +93,7 @@ const TESTS = [
   'revaluation-etiketi-proces.test.js',
   'revaluation-diff-pct.test.js',
   'revaluation-teodor-2711.test.js',
+  'revaluation-telefon.test.js',
   'xlsx-real-datenf.test.js',
   'revision-schedule.test.js',
   'minusi.test.js',

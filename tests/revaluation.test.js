@@ -363,6 +363,9 @@ async function imported(o) {
     ok('без коментари → бланката НЕ е подадена', !h.calls.patch.some(x => x.table === 'revaluation_submissions'));
     ok('5 маркирани реда', h.doc.querySelectorAll('#rv-rows .rv-bad').length === 5);
     ok('toast с броя', h.calls.toast.some(t => t.indexOf('5 реда не минават') >= 0), h.calls.toast.join(' | '));
+    /* От 27.11.2026 снимката е задължителна — тук всички редове я имат; спирането
+       без снимка е в revaluation-telefon.test.js. */
+    h.w.rvItems.forEach(it => { it.photos = ['https://x/' + it.id + '.jpg']; });
     for (const it of h.w.rvItems.slice()) {
       const c = rowInput(h, it.sap_code, 'store_comment'); c.value = 'стар модел'; fire(h.w, c, 'change'); await ticks(3);
     }
@@ -394,8 +397,8 @@ async function imported(o) {
     ok('статусът показва „Подадена"', h.doc.getElementById('rv-status').textContent.indexOf('Подадена') === 0);
     /* обектът след подаване — само четене */
     ok('обектът: няма „Изтрий ред"', !btn(mod(h), 'Изтрий ред'));
-    ok('обектът: няма „＋ Ред", „Качи файл", „Подай", „Нямаме", „Приложи %"',
-      !btn(mod(h), '＋ Ред') && !btn(mod(h), 'Качи файл') && !btn(mod(h), 'Подай') && !btn(mod(h), 'Нямаме') && !btn(mod(h), 'Приложи %'));
+    ok('обектът: няма „➕ Добави артикул", „Качи файл", „Подай", „Нямаме", „Приложи %"',
+      !btn(mod(h), 'Добави артикул') && !btn(mod(h), 'Качи файл') && !btn(mod(h), 'Подай') && !btn(mod(h), 'Нямаме') && !btn(mod(h), 'Приложи %'));
     ok('обектът: няма полета в редовете', h.doc.querySelectorAll('#rv-rows input').length === 0);
     ok('„Изтегли моята бланка" остава', !!btn(mod(h), 'Изтегли моята бланка'));
   }
@@ -439,7 +442,7 @@ async function imported(o) {
     ok('празна бланка → POST с no_items true, status submitted', sp && sp.body.no_items === true && sp.body.status === 'submitted' && !!sp.body.submitted_at);
     ok('известие „…: нямат за преоценка"', e.push[0] && e.push[0].msg === 'Преоценка · Шумен · Октомври: нямат за преоценка — чака одобрение');
     ok('статус „Нямат за преоценка"', e.doc.getElementById('rv-status').textContent.indexOf('Нямат') === 0);
-    ok('после няма „＋ Ред"', !btn(mod(e), '＋ Ред'));
+    ok('после няма „➕ Добави артикул"', !btn(mod(e), 'Добави артикул'));
   }
 
   section('10. Провалено известие — подаването стои, жълт toast');
@@ -499,9 +502,20 @@ async function imported(o) {
   section('14. Ръчен ред, дубликат, прозорец, нова кампания');
   {
     const h = await imported();
-    realClick(h.w, btn(mod(h), '＋ Ред'));
+    /* От 27.11.2026 — прозорецът „➕ Добави артикул" със задължителна снимка
+       (пълният път е в revaluation-telefon.test.js). */
+    const photo = () => {
+      const inp = h.doc.getElementById('rv-f-cam');
+      Object.defineProperty(inp, 'files', { value: [new h.w.File(['x'], 'p.jpg', { type: 'image/jpeg' })], configurable: true });
+      fire(h.w, inp, 'change');
+    };
+    realClick(h.w, btn(mod(h), 'Добави артикул'));
     h.doc.getElementById('rv-a-code').value = '53531';
-    realClick(h.w, btn(h.doc.getElementById('rv-add'), 'Добави')); await ticks(3);
+    h.doc.getElementById('rv-a-std').value = '17,79';
+    h.doc.getElementById('rv-a-comment').value = 'втора бройка';
+    photo();
+    realClick(h.w, h.doc.getElementById('rv-f-save')); await ticks(6);
+    realClick(h.w, h.doc.getElementById('rv-f-next')); await ticks(1);
     /* До 23.11.2026 повторен код се отказваше; оттогава е НОВ ред — всяка
        бройка със свой % и дефект (revaluation-scan.test.js). */
     ok('код, който вече е в бланката → нов ред, без сливане', h.w.rvItems.length === 6 && !h.calls.toast.some(t => t.indexOf('вече е в бланката') >= 0));
@@ -510,7 +524,8 @@ async function imported(o) {
     h.doc.getElementById('rv-a-qty').value = '2';
     h.doc.getElementById('rv-a-std').value = '1,29';
     h.doc.getElementById('rv-a-comment').value = 'повреден';
-    realClick(h.w, btn(h.doc.getElementById('rv-add'), 'Добави')); await ticks(3);
+    photo();
+    realClick(h.w, h.doc.getElementById('rv-f-save')); await ticks(6);
     const p = h.calls.post.filter(x => x.table === 'revaluation_items').pop();
     ok('ръчен ред: POST с цена 0,65 (1,29 × 50 %)', p && p.body.sap_code === '11111' && p.body.proposed_price === 0.65 && p.body.std_price === 1.29, JSON.stringify(p && p.body));
     ok('7 реда', h.w.rvItems.length === 7);

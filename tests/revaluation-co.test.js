@@ -226,7 +226,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     items[0].new_sap_code = '8014557'; items[0].sale_price = 60; items[0].co_qty = 2; items[0].co_comment = 'ок';
     items[1].new_sap_code = '8082216'; items[1].sale_price = 7; items[1].co_qty = 1;
     const h = env({ user: KARDZHALI, subs: [proc], items }); await h.w.loadRevaluation(); await ticks(6);
-    ok('обектът при processed: без бутони за редакция', !btn(mod(h), 'Изтрий ред') && !btn(mod(h), 'Подай') && !btn(mod(h), '＋ Ред') && !btn(mod(h), 'Качи файл') && !btn(mod(h), 'Нямаме'));
+    ok('обектът при processed: без бутони за редакция', !btn(mod(h), 'Изтрий ред') && !btn(mod(h), 'Подай') && !btn(mod(h), 'Добави артикул') && !btn(mod(h), 'Качи файл') && !btn(mod(h), 'Нямаме'));
     ok('без полета в редовете', h.doc.querySelectorAll('#rv-rows input').length === 0);
     ok('вижда розовите колони (само четене)', h.doc.getElementById('rv-row-i-1').textContent.indexOf('8014557') >= 0 && h.doc.getElementById('rv-row-i-1').textContent.indexOf('ок') >= 0);
     ok('без бутоните на ЦО', !btn(mod(h), 'Готово') && !btn(mod(h), 'Отключи'));
@@ -239,7 +239,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     ok('МЕ в износа по SAP („бр.“ → БР)', r && r[5] === 'БР');
     ok('Тотал преоценка = прехвърлено × цена (2 × 60 = 120)', r && r[13] === 120);
     const rg = env({ user: REG_K, subs: [proc], items }); await openCo(rg, 'Кърджали');
-    ok('регионалният при processed: без бутони за редакция', !btn(mod(rg), 'Изтрий ред') && !btn(mod(rg), 'Качи файл') && !btn(mod(rg), '＋ Ред'));
+    ok('регионалният при processed: без бутони за редакция', !btn(mod(rg), 'Изтрий ред') && !btn(mod(rg), 'Качи файл') && !btn(mod(rg), 'Добави артикул'));
     const rgs = env({ user: REG_K, subs: [Object.assign({}, SUB, { status: 'submitted' })] }); await openCo(rgs, 'Кърджали');
     ok('…а при submitted регионалният пише (контрол)', !!btn(mod(rgs), 'Изтрий ред'));
     const c = env({ user: KARDZHALI, subs: [Object.assign({}, SUB, { status: 'submitted' })] }); await c.w.loadRevaluation(); await ticks(6);

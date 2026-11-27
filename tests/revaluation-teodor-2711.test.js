@@ -103,10 +103,20 @@ const mod = h => h.doc.getElementById('mod-revaluation');
 const $ = (h, id) => h.doc.getElementById(id);
 const itemPosts = h => h.calls.post.filter(x => x.table === 'revaluation_items');
 const catGets = h => h.calls.get.filter(u => /product_catalog/.test(u));
-const addBtn = h => btn($(h, 'rv-add'), 'Добави');
+/* 27.11.2026 (т.1/6 на Теодор): прозорецът „➕ Добави артикул"; снимката е
+   задължителна — addBtn слага една (истински change на скрития вход) и връща „💾 Запази". */
+function attachPhoto(h) {
+  const f = h.w.rvForm;
+  if (!f || f.files.length || f.keep.length) return;
+  const inp = $(h, 'rv-f-cam');
+  Object.defineProperty(inp, 'files', { value: [new h.w.File(['x'], 'p.jpg', { type: 'image/jpeg' })], configurable: true });
+  fire(h.w, inp, 'change');
+}
+const addBtn = h => { attachPhoto(h); return $(h, 'rv-f-save'); };
+async function nextForm(h) { realClick(h.w, $(h, 'rv-f-next')); await ticks(1); }
 async function openForm(h) {
   await h.w.loadRevaluation(); await ticks(5);
-  realClick(h.w, btn(mod(h), '＋ Ред')); await ticks(1);
+  realClick(h.w, btn(mod(h), 'Добави артикул')); await ticks(1);
 }
 function typeCode(h, code) {
   const el = $(h, 'rv-a-code');
@@ -168,7 +178,7 @@ async function blur(h) { fire(h.w, $(h, 'rv-a-code'), 'blur'); await ticks(4); }
     ok('кодът остава в полето', $(h, 'rv-a-code').value === '99999');
     ok('описанието, МЕ и цената от 53531 са изчистени', $(h, 'rv-a-name').value === '' && $(h, 'rv-a-unit').value === '' && $(h, 'rv-a-std').value === '');
     /* ръчно попълване и „Добави" — минава */
-    $(h, 'rv-a-name').value = 'Ръчно описание'; $(h, 'rv-a-std').value = '10';
+    $(h, 'rv-a-name').value = 'Ръчно описание'; $(h, 'rv-a-std').value = '10'; $(h, 'rv-a-comment').value = 'дефект';
     realClick(h.w, addBtn(h)); await ticks(6);
     const p = itemPosts(h)[0];
     ok('ръчният ред се записва с кода 99999', p && p.body.sap_code === '99999' && p.body.product_name === 'Ръчно описание' && p.body.std_price === 10, JSON.stringify(p && p.body));
@@ -228,7 +238,8 @@ async function blur(h) { fire(h.w, $(h, 'rv-a-code'), 'blur'); await ticks(4); }
     realClick(h.w, addBtn(h)); await ticks(6);
     const p = itemPosts(h)[0];
     ok('второто „Добави" записва ред с описание и цена 17,79', itemPosts(h).length === 1 && p.body.product_name === 'АРКА ГРАДИНСКА МЕТАЛНА' && p.body.std_price === 17.79, JSON.stringify(p && p.body));
-    ok('формата е празна след добавянето', $(h, 'rv-a-code').value === '' && $(h, 'rv-a-name').value === '' && $(h, 'rv-a-std').value === '');
+    await nextForm(h);
+    ok('формата е празна след „➕ Следващ"', $(h, 'rv-a-code').value === '' && $(h, 'rv-a-name').value === '' && $(h, 'rv-a-std').value === '');
     /* същият код пак → пак се търси (не се „помни" от предишния ред) */
     const n = catGets(h).length;
     typeCode(h, '53531'); await blur(h);

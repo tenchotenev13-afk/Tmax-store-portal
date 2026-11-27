@@ -100,7 +100,7 @@ const $ = (h, id) => h.doc.getElementById(id);
 const itemPosts = h => h.calls.post.filter(x => x.table === 'revaluation_items');
 async function openForm(h) {
   await h.w.loadRevaluation(); await ticks(5);
-  realClick(h.w, btn(mod(h), '＋ Ред')); await ticks(1);
+  realClick(h.w, btn(mod(h), 'Добави артикул')); await ticks(1);
 }
 /* Ръчен скенер: пише цифрите и натиска Enter → onkeydown на полето. */
 async function typeAndEnter(h, code) {
@@ -112,7 +112,17 @@ async function typeAndEnter(h, code) {
   await ticks(4);
   return ev;
 }
-const addBtn = h => btn($(h, 'rv-add'), 'Добави');
+/* 27.11.2026 (т.1/6 на Теодор): прозорецът „➕ Добави артикул"; снимката е
+   задължителна — addBtn слага една (истински change на скрития вход) и връща „💾 Запази". */
+function attachPhoto(h) {
+  const f = h.w.rvForm;
+  if (!f || f.files.length || f.keep.length) return;
+  const inp = $(h, 'rv-f-cam');
+  Object.defineProperty(inp, 'files', { value: [new h.w.File(['x'], 'p.jpg', { type: 'image/jpeg' })], configurable: true });
+  fire(h.w, inp, 'change');
+}
+const addBtn = h => { attachPhoto(h); return $(h, 'rv-f-save'); };
+async function nextForm(h) { realClick(h.w, $(h, 'rv-f-next')); await ticks(1); }
 
 (async function run() {
 
@@ -120,7 +130,7 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
   {
     const h = env(); await openForm(h);
     ok('полето за код приема EAN (placeholder)', $(h, 'rv-a-code').placeholder === 'SAP код или EAN');
-    ok('бутон „📷 Сканирай" във формата', !!btn($(h, 'rv-add'), '📷 Сканирай'));
+    ok('бутон „📷 Сканирай" във формата', !!btn($(h, 'rv-form'), '📷 Сканирай'));
     ok('% по подразбиране = процентът на бланката (50)', $(h, 'rv-a-pct').value === '50');
     ok('количество по подразбиране 1', $(h, 'rv-a-qty').value === '1');
     ok('коментар — placeholder „Причина / дефект"', $(h, 'rv-a-comment').placeholder === 'Причина / дефект');
@@ -163,7 +173,9 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
       realClick(h.w, addBtn(h)); await ticks(4);            /* EAN + „Добави" → само попълва */
       $(h, 'rv-a-pct').value = pct;
       $(h, 'rv-a-comment').value = pct === '50' ? 'счупен ъгъл' : 'липсва капак';
-      realClick(h.w, addBtn(h)); await ticks(4);            /* второто „Добави" записва */
+      realClick(h.w, addBtn(h)); await ticks(4);            /* второто „Запази" записва */
+      ok('…записано: „➕ Следващ" в прозореца (' + pct + ' %)', !!$(h, 'rv-f-next'));
+      await nextForm(h);
     }
     const posts = itemPosts(h);
     ok('същият EAN два пъти → 2 реда (2 POST-а)', posts.length === 2 && h.w.rvItems.length === 2, posts.length + ' / ' + h.w.rvItems.length);
@@ -172,7 +184,7 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
       posts[1] && posts[1].body.discount_pct === 70 && posts[1].body.proposed_price === 5.34, JSON.stringify(posts.map(p => [p.body.discount_pct, p.body.proposed_price])));
     ok('свой дефект в store_comment', posts[0].body.store_comment === 'счупен ъгъл' && posts[1].body.store_comment === 'липсва капак');
     ok('няма toast „вече е в бланката"', !h.calls.toast.some(t => t.indexOf('вече е в бланката') >= 0));
-    ok('след „Добави" формата остава отворена и празна', !!$(h, 'rv-add') && $(h, 'rv-a-code').value === '' && $(h, 'rv-a-name').value === '' && $(h, 'rv-a-comment').value === '');
+    ok('след „➕ Следващ" прозорецът е отворен и празен', !!$(h, 'rv-form') && $(h, 'rv-a-code').value === '' && $(h, 'rv-a-name').value === '' && $(h, 'rv-a-comment').value === '');
     ok('…% и количество — пак по подразбиране', $(h, 'rv-a-pct').value === '50' && $(h, 'rv-a-qty').value === '1');
     ok('…фокусът е в полето за код (следващо сканиране)', h.doc.activeElement === $(h, 'rv-a-code'));
     ok('два реда в таблицата', h.doc.querySelectorAll('#rv-rows tr[id^="rv-row-"]').length === 2);
@@ -210,12 +222,18 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
     const p = itemPosts(h)[0];
     ok('SAP код → директно ред, % от формата (50 → 0,65)', p && p.body.sap_code === '11111' && p.body.proposed_price === 0.65 && p.body.qty === 1, JSON.stringify(p && p.body));
     ok('без заявка по ean_code', !h.calls.get.some(u => /ean_code=/.test(u)));
-    $(h, 'rv-a-code').value = '11111'; $(h, 'rv-a-pct').value = '120';
+    await nextForm(h);
+    $(h, 'rv-a-code').value = '11111'; $(h, 'rv-a-pct').value = '120'; $(h, 'rv-a-comment').value = 'повреден';
     realClick(h.w, addBtn(h)); await ticks(4);
-    ok('% 120 → отказ, без POST', itemPosts(h).length === 1 && h.calls.toast.indexOf('Процентът е от 0 до 100') >= 0);
-    $(h, 'rv-a-pct').value = '100'; $(h, 'rv-a-std').value = '2';
+    ok('% 120 → отказ, без POST', itemPosts(h).length === 1 && h.calls.toast.some(t => String(t).indexOf('процентът е от 0 до 100') >= 0), h.calls.toast.join(' | '));
+    $(h, 'rv-a-pct').value = '100'; $(h, 'rv-a-std').value = '2'; $(h, 'rv-a-price').value = '';
     realClick(h.w, addBtn(h)); await ticks(4);
-    ok('% точно 100 → приет (граница)', itemPosts(h).length === 2 && itemPosts(h)[1].body.discount_pct === 100);
+    /* От 27.11.2026 „Запази" иска нова цена > 0 (като „Подай") — 100 % е валиден %,
+       но дава цена 0 и се спира още в прозореца. */
+    ok('% точно 100 → цена 0 → отказ „няма нова цена", без POST', itemPosts(h).length === 1 && h.calls.toast.some(t => String(t).indexOf('няма нова цена') >= 0));
+    $(h, 'rv-a-pct').value = '0';
+    realClick(h.w, addBtn(h)); await ticks(4);
+    ok('% точно 0 → приет (граница), цената = стандартната', itemPosts(h).length === 2 && itemPosts(h)[1].body.discount_pct === 0 && itemPosts(h)[1].body.proposed_price === 2, JSON.stringify(itemPosts(h)[1] && itemPosts(h)[1].body));
     ok('12 цифри (UPC-A) → търси и с водеща 0', h.w.llEanVariants('380012345678').join(',') === '380012345678,0380012345678');
     ok('rvIsEan: 7 цифри не, 8 и 14 да, 15 не', !h.w.rvIsEan('8025298') && h.w.rvIsEan('12345678') && h.w.rvIsEan('12345678901234') && !h.w.rvIsEan('123456789012345'));
   }
@@ -232,7 +250,7 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
     h.w.Html5Qrcode.prototype.stop = function () { return Promise.resolve(); };
     h.w.Html5Qrcode.prototype.clear = function () {};
     const scriptsBefore = h.doc.querySelectorAll('script').length;
-    realClick(h.w, btn($(h, 'rv-add'), '📷 Сканирай')); await ticks(3);
+    realClick(h.w, btn($(h, 'rv-form'), '📷 Сканирай')); await ticks(3);
     ok('модалът е отворен със заглавие на Преоценка', !!$(h, 'll-scan-modal') && $(h, 'll-scan-modal').textContent.indexOf('Сканиране — Преоценка') >= 0);
     ok('библиотеката не е заредена втори път (вече е в window)', h.doc.querySelectorAll('script').length === scriptsBefore);
     ok('камерата е стартирана', typeof onOk === 'function');
@@ -251,7 +269,7 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
     const h = env(); await h.w.loadRevaluation(); await ticks(5);
     h.w.rvCampaigns[0].ends_on = dayOffset(-1);
     h.w.rvRender();
-    ok('извън прозореца → няма „＋ Ред"', !btn(mod(h), '＋ Ред'));
+    ok('извън прозореца → няма „➕ Добави артикул"', !btn(mod(h), 'Добави артикул'));
     const r = await h.w.rvScanOpen();
     ok('rvScanOpen → false, без модал', r === false && !$(h, 'll-scan-modal'));
   }
@@ -260,7 +278,7 @@ const addBtn = h => btn($(h, 'rv-add'), 'Добави');
   const SUB = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали', status: 'draft', no_items: false, default_pct: 50 };
   const row = (id, code, pct, std, sort, extra) => Object.assign({ id, submission_id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали',
     sap_code: code, product_name: 'АРТ ' + code, unit: 'БР', qty: 1, std_price: std, discount_pct: pct,
-    proposed_price: Math.round(std * (1 - pct / 100) * 100) / 100, store_comment: 'дефект ' + id, sort_order: sort }, extra || {});
+    proposed_price: Math.round(std * (1 - pct / 100) * 100) / 100, store_comment: 'дефект ' + id, sort_order: sort, photos: ['https://x/' + id + '.jpg'] }, extra || {});
   const subPatch = h => h.calls.patch.filter(x => x.table === 'revaluation_submissions' && x.body.status);
   const badOf = (h, id) => { const el = h.doc.querySelector('#rv-row-' + id + ' .rv-bad'); return el ? el.textContent : ''; };
   const OLD_MSG = 'Еднакъв артикул с различен %';

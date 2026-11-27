@@ -310,7 +310,7 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
     await open(h);
     ok('изтекла кампания с processed бланка → вижда я', h.w.rvCampaignId === 'c-9' && !!h.doc.getElementById('rv-row-p-1'), h.w.rvCampaignId);
     ok('статус „Обработена“ и розовите колони', h.doc.getElementById('rv-status').textContent.indexOf('Обработена') === 0 && h.doc.getElementById('rv-row-p-1').textContent.indexOf('8014557') >= 0);
-    ok('без бутони за редакция', !btn(mod(h), 'Изтрий ред') && !btn(mod(h), 'Подай') && !btn(mod(h), '＋ Ред') && !btn(mod(h), 'Качи файл') && !btn(mod(h), 'Нямаме') && !btn(mod(h), 'Приложи %'));
+    ok('без бутони за редакция', !btn(mod(h), 'Изтрий ред') && !btn(mod(h), 'Подай') && !btn(mod(h), 'Добави артикул') && !btn(mod(h), 'Качи файл') && !btn(mod(h), 'Нямаме') && !btn(mod(h), 'Приложи %'));
     ok('без полета в редовете', h.doc.querySelectorAll('#rv-rows input').length === 0);
     realClick(h.w, btn(mod(h), 'Копирай новите кодове')); await ticks(3);
     ok('„Копирай новите кодове“ → „8014557\n8082216“', clip === '8014557\n8082216', JSON.stringify(clip));

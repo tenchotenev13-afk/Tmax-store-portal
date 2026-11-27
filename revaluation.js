@@ -38,7 +38,6 @@ var rvErr = {};        /* id на ред → съобщение от прова�
 var rvImportFails = []; /* кодове от последния импорт, които не са записани */
 var rvMe = null;       /* {is_regional, assigned_stores} от users */
 var rvLoadSeq = 0;
-var rvShowAdd = false;
 var rvAcRes = [];
 var rvAcSeq = 0;
 var rvAcTimer = null;
@@ -266,11 +265,11 @@ function rvLoadSheet(){
     }).then(function(){ if(seq === rvLoadSeq) rvRender(); });
 }
 function rvPickCampaign(id){
-  rvCampaignId = id; rvShowAdd = false;
+  rvCampaignId = id; rvFormClose();
   if(rvIsCoViewer()){ rvCoOpen = false; return rvLoadOverview(); }
   return rvLoadSheet();
 }
-function rvPickStore(name){ rvStore = name; rvShowAdd = false; return rvLoadSheet(); }
+function rvPickStore(name){ rvStore = name; rvFormClose(); return rvLoadSheet(); }
 
 /* ─── Рендер ───────────────────────────────────────────── */
 function rvCampaignLabel(c){
@@ -372,7 +371,6 @@ function rvRender(){
 
   h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">';
   if(edit){
-    h += '<button class="btn-sm" onclick="rvToggleAdd()">＋ Ред</button>';
     h += '<button class="btn-sm" onclick="document.getElementById(\'rv-file\').click()">📤 Качи файл от SAP (ZSTOCK)</button>' +
       '<input id="rv-file" type="file" accept=".xlsx,.xls" style="display:none;" onchange="rvImportFile(this)">';
   }
@@ -388,19 +386,26 @@ function rvRender(){
     h += '<button class="btn-sm" onclick="rvNoItems()">🚫 Нямаме за преоценка</button>';
   }
   h += '</div>';
-  if(edit && rvShowAdd) h += rvAddRowHtml();
   if(edit && rvAddNote) h += '<div id="rv-add-note" style="font-size:13px;color:#1e3a8a;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 10px;margin-bottom:8px;">✍ ' + esc(rvAddNote) + '</div>';
 
   var PINK_TH = 'background:#fce7f3;color:#9d174d;';
-  /* tbl-rv-sheet — пренасяне на „Описание“ / „Коментар обект“ и скрол в кутията (index.html, 15.11.2026) */
-  h += '<div class="tbl-wrap tbl-compact tbl-rv-sheet"><table><thead><tr><th>Код</th><th>Описание</th><th>Кол.</th><th>МЕ</th><th>Коментар обект</th><th>Ст. цена</th><th>%</th><th>Предложение</th>' +
+  /* tbl-rv-sheet — пренасяне на „Описание“ / „Коментар обект“ и скрол в кутията (index.html, 15.11.2026).
+     Под 700 px обектът вижда карти (rvCardsHtml) вместо таблицата — rv-has-cards я
+     скрива там. ЦО и регионалните (admin / accounting → изгледът на ЦО) остават с
+     таблицата — „без промяна" по задачата от 27.11.2026. */
+  var cards = !rvIsCoViewer();
+  h += '<div class="tbl-wrap tbl-compact tbl-rv-sheet' + (cards ? ' rv-has-cards' : '') + '"><table><thead><tr><th>Код</th><th>Описание</th><th>Кол.</th><th>МЕ</th><th>Коментар обект</th><th>Ст. цена</th><th>%</th><th>Предложение</th>' +
     (pink ? '<th style="' + PINK_TH + '">Преоценен код</th><th style="' + PINK_TH + '">Цена преоц. код</th><th style="' + PINK_TH + '">Прехвърлено</th><th style="' + PINK_TH + '">Коментар Ели</th>' : '') +
     (edit ? '<th></th>' : '') + '</tr></thead><tbody id="rv-rows">';
   if(!rvItems.length){
     h += '<tr><td colspan="' + (8 + (pink ? 4 : 0) + (edit ? 1 : 0)) + '" style="text-align:center;color:#94a3b8;">' + (rvSub && rvSub.no_items ? 'Обектът няма артикули за преоценка.' : 'Няма редове.') + '</td></tr>';
   }
   rvItems.forEach(function(it){ h += rvRowHtml(it, edit, pink, coEdit); });
-  h += '</tbody></table></div></div>';
+  h += '</tbody></table></div>';
+  if(cards) h += rvCardsHtml(rvCanSubmit());
+  /* Т.6 на Теодор (27.11.2026): големият бутон под таблицата — и при празна бланка. */
+  if(edit && !(rvSub && rvSub.no_items)) h += '<button type="button" id="rv-add-btn" class="rv-add-big" onclick="rvFormOpen()">➕ Добави артикул</button>';
+  h += '</div>';
   el.innerHTML = h;
 }
 function rvInp(it, field, val, w){
@@ -439,6 +444,32 @@ function rvRowHtml(it, edit, pink, coEdit){
     '<button class="btn-sm rv-photo-btn rv-photo-gal-btn" data-id="' + escAttr(it.id) + '" onclick="rvPhotoPick(this.dataset.id)" title="От галерията">🖼</button> ' : '') +
     '<button class="btn-sm" data-id="' + escAttr(it.id) + '" onclick="rvDeleteRow(this.dataset.id)" title="Изтрий ред">🗑 Изтрий ред</button></td>';
   return h + '</tr>';
+}
+/* Карти на телефон (т.2 и т.5 на Теодор, 27.11.2026): под 700 px вместо
+   таблицата (CSS в index.html), само в изгледа на обекта. edit = rvCanSubmit() —
+   само черновата има „✏️ Промени" / „🗑 Изтрий"; подадената — само за четене. */
+function rvCardsHtml(edit){
+  var h = '<div class="rv-cards" id="rv-cards">';
+  if(!rvItems.length) h += '<div class="rv-card-empty">' + (rvSub && rvSub.no_items ? 'Обектът няма артикули за преоценка.' : 'Няма редове.') + '</div>';
+  rvItems.forEach(function(it){
+    var bad = rvBad[it.id], err = rvErr[it.id];
+    var pct = it.discount_pct == null ? '' : rvFmtQty(it.discount_pct) + ' %';
+    h += '<div class="rv-card' + (bad || err ? ' rv-card-bad' : '') + '" id="rv-card-' + escAttr(it.id) + '">' +
+      '<div class="rv-card-code">' + esc(it.sap_code) + (rvIsRepeat(it.sap_code) ? ' <span class="rv-repeat" style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:1px 7px;font-size:12px;font-weight:700;">вече преоценен</span>' : '') + '</div>' +
+      (bad ? '<div class="rv-bad">' + esc(bad.join(' · ')) + '</div>' : '') +
+      (err ? '<div class="rv-err">⚠ ' + esc(err) + '</div>' : '') +
+      rvUnitsHtml(it) +
+      '<div class="rv-card-name">' + esc(it.product_name) + '</div>' +
+      '<div class="rv-card-line">' + esc(rvFmtQty(it.qty)) + ' ' + esc(it.unit || '') +
+        (pct ? ' · ' + esc(pct) : '') + ' → <b>' + esc(rvFmt(it.proposed_price) || '—') + '</b>' +
+        (it.std_price != null ? ' <span class="rv-card-std">(ст. ' + esc(rvFmt(it.std_price)) + ')</span>' : '') + '</div>' +
+      (String(it.store_comment || '').trim() ? '<div class="rv-card-why">' + esc(it.store_comment) + '</div>' : '') +
+      rvPhotosHtml(it) +
+      (edit ? '<div class="rv-card-btns"><button type="button" class="rv-f-btn rv-card-edit" data-id="' + escAttr(it.id) + '" onclick="rvFormOpen(this.dataset.id)">✏️ Промени</button>' +
+        '<button type="button" class="rv-f-btn rv-card-del" data-id="' + escAttr(it.id) + '" onclick="rvDeleteRow(this.dataset.id)">🗑 Изтрий</button></div>' : '') +
+      '</div>';
+  });
+  return h + '</div>';
 }
 
 /* ─── Бланка (submission) ──────────────────────────────── */
@@ -691,7 +722,8 @@ function rvUnitsHtml(it){
    бланката е чернова и редактируема (rvCanPhoto); компресия през canvas
    (diffCompressImage от stock-differences.js), bucket 'bulletin-files',
    префикс 'revaluation/' (като Разлики — 'differences/'). Махане = само от
-   масива, файлът остава в bucket-а. Снимката е по избор — „Подай" не я иска.
+   масива, файлът остава в bucket-а. От 27.11.2026 снимката е задължителна —
+   „Подай" спира ред без снимка (rvRowProblems), прозорецът не записва без нея.
    Регионалният и ЦО виждат миниатюрите; клик → цял екран (rvPhotoView). */
 var RV_PHOTO_BKT = 'bulletin-files';
 var rvPhotoItemId = null;
@@ -779,9 +811,8 @@ function rvPhotoView(id, k){
 function rvPhotoClose(){ var d = document.getElementById('rv-photo-view'); if(d && d.parentNode) d.parentNode.removeChild(d); }
 
 /* ─── Ръчен ред + автодопълване ────────────────────────── */
-/* Бележката с номерата след „Добави" / импорта (25.11.2026); '' = няма. */
+/* Бележката с номерата след „Запази" / импорта (25.11.2026); '' = няма. */
 var rvAddNote = '';
-function rvToggleAdd(){ rvShowAdd = !rvShowAdd; rvAcRes = []; rvRender(); }
 /* Сканиране (етап 1/3, 23.11.2026): полето за код приема и EAN. SAP кодовете
    в product_catalog са 5–7 цифри, EAN-ите — 8–14, тоест 8–14 цифри винаги
    значат баркод (сверено в базата на 23.11.2026). Enter (ръчен скенер пише
@@ -789,20 +820,267 @@ function rvToggleAdd(){ rvShowAdd = !rvShowAdd; rvAcRes = []; rvRender(); }
    rvEanLookup. Същият код втори път → НОВ ред, без сливане: всяка бройка
    може да има свой % и дефект (решение на Тенчо, 23.11.2026). */
 var rvEanRes = [];   /* EAN на повече от един ред в каталога → избор */
-function rvAddRowHtml(){
-  var f = function(id, ph, w, extra){ return '<input id="' + id + '" type="text" placeholder="' + ph + '" style="width:' + w + ';"' + (extra || '') + '>'; };
-  var pct = rvPct();
-  return '<div id="rv-add" style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:8px;">' +
-    '<div style="position:relative;">' + f('rv-a-code', 'SAP код или EAN', '130px', ' inputmode="numeric" oninput="rvAcSchedule(this.value)" onkeydown="rvCodeKey(event)" onblur="rvCodeBlur()" autocomplete="off"') +
-    '<div id="rv-ac" style="display:none;position:absolute;z-index:20;background:#fff;border:1px solid #cbd5e1;border-radius:6px;min-width:320px;"></div></div>' +
-    '<button class="btn-sm" onclick="rvScanOpen()" title="Сканирай баркода с камерата">📷 Сканирай</button>' +
-    f('rv-a-name', 'Описание', '220px') + f('rv-a-unit', 'МЕ', '50px') +
-    f('rv-a-qty', 'Кол.', '60px', ' value="1" inputmode="decimal"') +
-    '<div>' + f('rv-a-std', 'Ст. цена', '72px', ' inputmode="decimal"') +
-    '<div id="rv-a-std-hint" style="display:none;font-size:11px;color:#b45309;max-width:170px;">Повторна преоценка — въведи текущата цена на обекта</div></div>' +
-    f('rv-a-pct', '%', '52px', ' inputmode="decimal" value="' + escAttrVal(pct == null ? '' : rvFmtQty(pct)) + '"') +
-    f('rv-a-comment', 'Причина / дефект', '180px') +
-    '<button class="btn-sm" onclick="rvAddRow()" style="background:#2563eb;color:#fff;">Добави</button></div>';
+
+/* ─── Прозорец „➕ Добави артикул" / „✏️ Промени" ────────────
+   Т.1, 2, 5, 6 на Теодор (27.11.2026): заменя лентата „＋ Ред". Прозорецът е
+   отделен елемент в body (#rv-form, клас rv-form-bg — НЕ modal-bg, за да не
+   се затвори от случаен клик встрани); rvRender не го пипа, полетата не губят
+   стойностите си. Полетата пазят старите id-та (rv-a-*), затова rvSapLookup /
+   rvEanLookup / скенерът / автодопълването работят без промяна. Под 700 px
+   прозорецът е на цял екран (index.html, .rv-form).
+   Снимката е задължителна (решение на Тенчо 27.11.2026): „💾 Запази" проверява
+   код, кол. > 0, нова цена > 0, причина и поне една снимка; после качва
+   снимките — падне ли дори една, НИЩО не се записва (качените се помнят за
+   следващия опит); после записва реда с photos; после номерата. Ред без
+   номера → маркерът „без номер — опитай пак" на реда, както досега.
+   „5 празни реда" (т.1) НЕ се правят — номерата се дават при запис. */
+var rvForm = null;   /* {id, keep:[url], files:[{file, src, url}], busy, last:'pct'|'price'} */
+function rvFormClose(){
+  var d = document.getElementById('rv-form');
+  if(d && d.parentNode) d.parentNode.removeChild(d);
+  if(rvForm) rvFormRevoke(rvForm.files);
+  rvForm = null; rvAcRes = []; rvEanRes = []; rvCodeAsked = '';
+}
+function rvFormRevoke(files){
+  (files || []).forEach(function(f){ if(f.src && window.URL && URL.revokeObjectURL){ try { URL.revokeObjectURL(f.src); } catch(e){} } });
+}
+/* id = ред за промяна; без id — нов ред. */
+function rvFormOpen(id){
+  if(!rvCanEdit()) return false;
+  if(rvSub && rvSub.no_items){ toast('Бланката е отбелязана „нямаме за преоценка" — първо я отключи ЦО', '#dc2626'); return false; }
+  var it = id ? rvItem(id) : null;
+  if(id && !it) return false;
+  rvFormClose();
+  var d = document.createElement('div');
+  d.id = 'rv-form'; d.className = 'rv-form-bg';
+  document.body.appendChild(d);
+  rvFormDraw(it);
+  return true;
+}
+function rvFormDraw(it){
+  var d = document.getElementById('rv-form');
+  if(!d) return;
+  if(rvForm) rvFormRevoke(rvForm.files);
+  rvForm = { id: it ? it.id : null, keep: it ? rvPhotoList(it) : [], files: [], busy: false };
+  rvAcRes = []; rvEanRes = []; rvCodeAsked = it ? String(it.sap_code || '') : '';
+  var pct = it ? it.discount_pct : rvPct();
+  var ro = it ? ' readonly' : '';
+  var inp = function(id, val, extra){ return '<input id="' + id + '" type="text" value="' + escAttrVal(val) + '"' + (extra || '') + '>'; };
+  var fld = function(t, inner){ return '<div class="rv-f-fld"><span class="rv-f-l">' + t + '</span>' + inner + '</div>'; };
+  var units = it ? (rvUnits[it.id] || []) : [];
+  var h = '<div class="rv-form" role="dialog" aria-modal="true">';
+  h += '<div class="rv-f-head"><b>' + (it ? '✏️ Промени ред' : '➕ Добави артикул') + '</b>' +
+    '<button type="button" class="rv-f-x" onclick="rvFormClose()" aria-label="Затвори">✕</button></div>';
+  h += '<div id="rv-f-body">';
+  if(!it) h += '<button type="button" class="rv-f-btn rv-f-scan" onclick="rvScanOpen()">📷 Сканирай</button>';
+  h += fld('SAP код или EAN', '<div style="position:relative;">' +
+    inp('rv-a-code', it ? it.sap_code : '', ' placeholder="SAP код или EAN"' + (it ? ro : ' inputmode="numeric" oninput="rvAcSchedule(this.value)" onkeydown="rvCodeKey(event)" onblur="rvCodeBlur()" autocomplete="off"')) +
+    '<div id="rv-ac" class="rv-f-ac" style="display:none;"></div></div>' +
+    (units.length ? '<div class="rv-f-units">№ ' + esc(rvUnitsLabel(units)) + '</div>' : ''));
+  h += fld('Описание', inp('rv-a-name', it ? it.product_name : '', ' placeholder="Описание"' + ro));
+  h += '<div class="rv-f-grid">' +
+    fld('МЕ', inp('rv-a-unit', it ? it.unit : '', ' placeholder="МЕ"' + ro)) +
+    fld('Ст. цена', inp('rv-a-std', it ? rvFmt(it.std_price) : '', ' placeholder="Ст. цена" inputmode="decimal" oninput="rvFormCalc(\'std\')"') +
+      '<div id="rv-a-std-hint" class="rv-f-hint" style="display:none;">Повторна преоценка — въведи текущата цена на обекта</div>') + '</div>';
+  h += '<div class="rv-f-grid rv-f-grid3">' +
+    fld('Кол.', inp('rv-a-qty', it ? rvFmtQty(it.qty) : '1', ' placeholder="Кол." inputmode="decimal"')) +
+    fld('%', inp('rv-a-pct', pct == null ? '' : rvFmtQty(pct), ' placeholder="%" inputmode="decimal" oninput="rvFormCalc(\'pct\')"')) +
+    fld('Нова цена', inp('rv-a-price', it ? rvFmt(it.proposed_price) : '', ' placeholder="Нова цена" inputmode="decimal" oninput="rvFormCalc(\'price\')"')) + '</div>';
+  h += fld('Причина / дефект', inp('rv-a-comment', it ? it.store_comment || '' : '', ' placeholder="Причина / дефект"'));
+  h += fld('Снимки <span class="rv-f-req">— поне една</span>', '<div id="rv-f-photos" class="rv-f-photos"></div>' +
+    '<div class="rv-f-row"><button type="button" class="rv-f-btn" id="rv-f-cam-btn" onclick="rvFormPick(\'cam\')">📷 Снимай</button>' +
+    '<button type="button" class="rv-f-btn" id="rv-f-gal-btn" onclick="rvFormPick()">🖼 От галерията</button></div>' +
+    '<input id="rv-f-cam" type="file" accept="image/*" capture="environment" style="display:none;" onchange="rvFormFiles(this)">' +
+    '<input id="rv-f-file" type="file" accept="image/*" multiple style="display:none;" onchange="rvFormFiles(this)">');
+  h += '<div id="rv-f-err" class="rv-f-err" style="display:none;"></div>';
+  h += '<div class="rv-f-row rv-f-foot"><button type="button" class="rv-f-btn rv-f-save" id="rv-f-save" onclick="rvFormSave()">💾 Запази</button>' +
+    '<button type="button" class="rv-f-btn" id="rv-f-cancel" onclick="rvFormClose()">Отказ</button></div>';
+  h += '</div></div>';
+  d.innerHTML = h;
+  rvFormPhotosDraw();
+  /* На телефон фокусът би извадил клавиатурата върху прозореца — там първо камерата. */
+  if(!it && !(window.innerWidth < 700)) rvFocus('rv-a-code');
+}
+/* Ст. цена / % → нова цена; нова цена → %. Същите формули като в реда. */
+function rvFormCalc(src){
+  if(rvForm && (src === 'pct' || src === 'price')) rvForm.last = src;
+  var std = rvNum(v('rv-a-std')), pct = rvNum(v('rv-a-pct')), pr = rvNum(v('rv-a-price'));
+  if(src === 'price'){
+    if(pr != null && std) rvSetVal('rv-a-pct', rvFmtQty(rvPctFromPrice(std, pr)));
+    return;
+  }
+  if(pct != null && std != null) rvSetVal('rv-a-price', rvFmt(rvPriceFromPct(std, pct)));
+}
+function rvFormErr(msg){
+  var el = document.getElementById('rv-f-err');
+  if(!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+}
+function rvFormTile(src, kind, k){
+  return '<span class="rv-f-tile">' + (src ? '<img src="' + escAttr(src) + '" alt="снимка">' : '<span class="rv-f-tile-ph">📷</span>') +
+    '<button type="button" class="rv-f-tile-x" data-kind="' + kind + '" data-k="' + k + '" onclick="rvFormPhotoRm(this.dataset.kind,+this.dataset.k)" aria-label="Махни снимката">✕</button></span>';
+}
+function rvFormPhotosDraw(){
+  var box = document.getElementById('rv-f-photos');
+  if(!box || !rvForm) return;
+  var tiles = rvForm.keep.map(function(url, k){ return rvFormTile(url, 'keep', k); })
+    .concat(rvForm.files.map(function(f, k){ return rvFormTile(f.src || f.url, 'file', k); }));
+  box.innerHTML = tiles.length ? tiles.join('') : '<span class="rv-f-nophoto">Няма снимка</span>';
+}
+/* Махане в прозореца — без confirm: при промяна на ред важи чак със „Запази". */
+function rvFormPhotoRm(kind, k){
+  if(!rvForm || rvForm.busy) return false;
+  var list = kind === 'keep' ? rvForm.keep : rvForm.files;
+  if(!(k >= 0 && k < list.length)) return false;
+  var gone = list.splice(k, 1);
+  if(kind === 'file') rvFormRevoke(gone);
+  rvFormPhotosDraw();
+  return true;
+}
+function rvFormPick(src){
+  if(!rvForm || rvForm.busy) return false;
+  var inp = document.getElementById(src === 'cam' ? 'rv-f-cam' : 'rv-f-file');
+  if(inp) inp.click();
+  return true;
+}
+function rvFormFiles(input){
+  var files = Array.prototype.slice.call((input && input.files) || []);
+  if(input) input.value = '';
+  if(!rvForm || !files.length) return 0;
+  var img = files.filter(function(f){ return !f.type || f.type.indexOf('image/') === 0; });
+  if(!img.length){ toast('Само снимки', '#dc2626'); return 0; }
+  img.forEach(function(f){
+    var src = '';
+    try { src = window.URL && URL.createObjectURL ? URL.createObjectURL(f) : ''; } catch(e){}
+    rvForm.files.push({ file: f, src: src, url: null });
+  });
+  rvFormErr('');
+  rvFormPhotosDraw();
+  return img.length;
+}
+/* Качва още некачените; null = поне една не мина (качените остават запомнени). */
+function rvFormUpload(form){
+  var todo = form.files.filter(function(f){ return !f.url; });
+  if(!todo.length) return Promise.resolve(form.files.map(function(f){ return f.url; }));
+  toast('⏳ Качване на ' + todo.length + (todo.length === 1 ? ' снимка' : ' снимки') + '…');
+  return Promise.all(todo.map(function(f){
+    return rvPhotoPut(f.file).then(function(url){ if(url) f.url = url; return url; }, function(){ return null; });
+  })).then(function(urls){
+    if(urls.some(function(u){ return !u; })) return null;
+    return form.files.map(function(f){ return f.url; });
+  });
+}
+function rvFormBusy(on){
+  var b = document.getElementById('rv-f-save');
+  if(b){ b.disabled = !!on; b.textContent = on ? '⏳ Записване…' : '💾 Запази'; }
+}
+function rvFormSave(){
+  var form = rvForm;
+  if(!form || form.busy) return Promise.resolve(false);
+  var fail = function(msg){ form.busy = false; rvFormBusy(false); rvFormErr(msg); toast(msg, '#dc2626'); return false; };
+  if(!rvCanEdit()) return Promise.resolve(fail('Бланката е само за четене'));
+  var it = form.id ? rvItem(form.id) : null;
+  if(form.id && !it) return Promise.resolve(fail('Редът вече го няма — затвори прозореца'));
+  var code = v('rv-a-code');
+  if(!it){
+    if(rvSub && rvSub.no_items) return Promise.resolve(fail('Бланката е отбелязана „нямаме за преоценка" — първо я отключи ЦО'));
+    if(!code) return Promise.resolve(fail('Въведи SAP код или EAN'));
+    /* EAN в полето → първо каталогът; записът е със следващото „Запази",
+       след като човекът види артикула. Същото, ако кодът още се търси. */
+    if(rvIsEan(code)) return rvEanLookup(code).then(function(){ return false; });
+    if(rvCodePending && rvCodePending.code === code) return rvCodePending.p.then(function(){ return false; });
+  }
+  var stdS = v('rv-a-std'), pctS = v('rv-a-pct'), prS = v('rv-a-price'), comment = v('rv-a-comment');
+  var qty = rvNum(v('rv-a-qty'));
+  var std = stdS === '' ? null : rvNum(stdS);
+  var pct = pctS === '' ? null : rvNum(pctS);
+  var pr = prS === '' ? null : rvNum(prS);
+  var msg = [];
+  if(!(qty > 0)) msg.push('количеството трябва да е над 0');
+  if(stdS !== '' && (std == null || std < 0)) msg.push('невалидна стандартна цена');
+  if(pctS !== '' && (pct == null || pct < 0 || pct > 100)) msg.push('процентът е от 0 до 100');
+  if(!msg.length){
+    /* Решава последното пипнато от двете (% или нова цена); без пипане — %.
+       Така и поле, сменено без oninput, не оставя стара цена до нов %. */
+    if(form.last === 'price' && pr != null){ if(std) pct = rvPctFromPrice(std, pr); }
+    else if(pct != null && std != null) pr = rvPriceFromPct(std, pct);
+    else if(pctS === '' && pr != null && std) pct = rvPctFromPrice(std, pr);
+  }
+  if(!(pr > 0)) msg.push('няма нова цена');
+  if(!comment) msg.push('няма причина / дефект');
+  if(!form.keep.length && !form.files.length) msg.push('няма снимка');
+  if(msg.length) return Promise.resolve(fail('Не е записано: ' + msg.join(' · ')));
+  form.busy = true; rvFormBusy(true); rvFormErr('');
+  var name = v('rv-a-name'), unit = v('rv-a-unit');
+  return rvFormUpload(form).then(function(urls){
+    if(rvForm !== form) return false;
+    if(!urls) return fail('Снимките не са качени — нищо не е записано. Опитай пак.');
+    var photos = form.keep.concat(urls);
+    var f = {
+      qty: qty, std_price: std == null ? null : rvRound2(std), discount_pct: pct == null ? null : rvRound2(pct),
+      proposed_price: rvRound2(pr), store_comment: comment, photos: photos
+    };
+    return it ? rvFormPatchRow(form, it, f, fail) : rvFormInsertRow(form, code, name, unit, f, fail);
+  });
+}
+function rvFormInsertRow(form, code, name, unit, f, fail){
+  return rvEnsureSub().then(function(sub){
+    if(!sub){ rvRender(); return fail('Бланката не е създадена — редът НЕ е записан'); }
+    var body = rvItemBody(sub, code, name, unit, f.qty, f.std_price, f.store_comment, rvNextSort(), f.discount_pct);
+    body.proposed_price = f.proposed_price;
+    body.photos = f.photos;
+    return sbPostReturn('revaluation_items', body).then(function(res){
+      if(!res.ok || !res.row) return fail('Редът не е записан: ' + sbErrMsg(res));
+      rvItems.push(res.row);
+      return rvUnitsSync(res.row).then(function(ok){
+        var list = rvUnits[res.row.id] || [];
+        rvAddNote = ok && list.length ? 'Запиши на стоката: № ' + rvUnitsLabel(list) : '';
+        if(ok) toast('Редът е добавен');   /* иначе червеният toast от rvUnitsSync остава */
+        rvRender();
+        if(rvForm === form) rvFormSaved(form, res.row, ok, true);
+        return true;
+      });
+    });
+  });
+}
+function rvFormPatchRow(form, it, f, fail){
+  var p = {};
+  Object.keys(f).forEach(function(k){ p[k] = f[k]; });
+  p.updated_at = new Date().toISOString();
+  var qtyChanged = Number(it.qty) !== f.qty;
+  return sbPatch('revaluation_items', 'id=eq.' + it.id, p).then(function(res){
+    if(!res.ok) return fail('Редът не е записан: ' + sbErrMsg(res));
+    Object.keys(p).forEach(function(k){ it[k] = p[k]; });
+    delete rvErr[it.id]; delete rvBad[it.id];
+    /* Кол. минава през номерата — както в реда (rvEdit). */
+    return (qtyChanged ? rvUnitsSync(it) : Promise.resolve(true)).then(function(ok){
+      if(ok) toast('Редът е записан');
+      rvRender();
+      if(rvForm === form) rvFormSaved(form, it, ok, false);
+      return true;
+    });
+  });
+}
+function rvFormSaved(form, row, ok, isNew){
+  form.busy = false;
+  rvFormRevoke(form.files); form.files = [];
+  var body = document.getElementById('rv-f-body');
+  if(!body) return;
+  var list = rvUnits[row.id] || [];
+  var note = ok && list.length
+    ? '<div id="rv-f-note" class="rv-f-note">✍ Запиши на стоката: № <b>' + esc(rvUnitsLabel(list)) + '</b></div>'
+    : '<div id="rv-f-note" class="rv-f-err">Редът е записан, но е без номер — „🔁 Опитай пак" на реда.</div>';
+  body.innerHTML = '<div class="rv-f-ok">✅ Записано: <b>' + esc(row.sap_code) + '</b> ' + esc(row.product_name || '') + '</div>' + note +
+    '<div class="rv-f-row rv-f-foot">' +
+    (isNew ? '<button type="button" class="rv-f-btn rv-f-save" id="rv-f-next" onclick="rvFormNext()">➕ Следващ</button>' : '') +
+    '<button type="button" class="rv-f-btn" id="rv-f-done" onclick="rvFormClose()">Затвори</button></div>';
+}
+/* Празен прозорец за следващия артикул — без затваряне. */
+function rvFormNext(){
+  if(!document.getElementById('rv-form') || !rvCanEdit()) return false;
+  rvFormDraw(null);
+  return true;
 }
 function rvIsEan(code){ return /^\d{8,14}$/.test(String(code == null ? '' : code).trim()); }
 /* Предложение на Теодор т.3 (27.11.2026): SAP код + Enter (или излизане от
@@ -867,6 +1145,7 @@ function rvFillFromCat(p){
   if(std) std.placeholder = rep ? 'въведи текущата цена на обекта' : 'Ст. цена';
   var hint = document.getElementById('rv-a-std-hint');
   if(hint) hint.style.display = rep ? 'block' : 'none';
+  rvFormCalc('std');   /* прозорецът: новата цена по % на бланката */
   rvFocus(rep ? 'rv-a-std' : 'rv-a-comment');
 }
 function rvEanLookup(code){
@@ -987,45 +1266,6 @@ function rvItemBody(sub, code, name, unit, qty, std, comment, sort, pct){
     created_by: currentUser.display_name || currentUser.email || null
   };
 }
-function rvAddRow(){
-  if(!rvCanEdit()) return Promise.resolve(false);
-  if(rvSub && rvSub.no_items){ toast('Бланката е отбелязана „нямаме за преоценка" — първо я отключи ЦО', '#dc2626'); return Promise.resolve(false); }
-  var code = v('rv-a-code');
-  if(!code){ toast('Въведи SAP код или EAN', '#dc2626'); return Promise.resolve(false); }
-  /* EAN в полето → първо каталогът; редът се добавя със следващото „Добави",
-     след като човекът види попълнения артикул. Код, който вече е в бланката,
-     НЕ се отказва — нов ред (решение 23.11.2026). */
-  if(rvIsEan(code)) return rvEanLookup(code).then(function(){ return false; });
-  /* Кодът още се търси в каталога (blur от натискането на „Добави") —
-     изчакай го; редът се добавя със следващото „Добави". */
-  if(rvCodePending && rvCodePending.code === code) return rvCodePending.p.then(function(){ return false; });
-  var qty = v('rv-a-qty') === '' ? 0 : rvNum(v('rv-a-qty'));
-  var std = v('rv-a-std') === '' ? null : rvNum(v('rv-a-std'));
-  var pct = v('rv-a-pct') === '' ? null : rvNum(v('rv-a-pct'));
-  if(qty == null || qty < 0){ toast('Количеството е число ≥ 0', '#dc2626'); return Promise.resolve(false); }
-  if(v('rv-a-std') !== '' && (std == null || std < 0)){ toast('Невалидна стандартна цена', '#dc2626'); return Promise.resolve(false); }
-  if(v('rv-a-pct') !== '' && (pct == null || pct < 0 || pct > 100)){ toast('Процентът е от 0 до 100', '#dc2626'); return Promise.resolve(false); }
-  var name = v('rv-a-name'), unit = v('rv-a-unit'), comment = v('rv-a-comment');
-  return rvEnsureSub().then(function(sub){
-    if(!sub){ rvRender(); return false; }
-    return sbPostReturn('revaluation_items', rvItemBody(sub, code, name, unit, qty, std == null ? null : rvRound2(std), comment, rvNextSort(), pct)).then(function(res){
-      if(!res.ok || !res.row){ toast('Редът не е записан: ' + sbErrMsg(res), '#dc2626'); rvRender(); return false; }
-      rvItems.push(res.row);
-      /* Формата остава отворена и празна, фокусът — в полето за код:
-         следващото сканиране (ръчен скенер) влиза направо. */
-      rvAcRes = []; rvEanRes = []; rvCodeAsked = '';
-      return rvUnitsSync(res.row).then(function(ok){
-        if(ok) toast('Редът е добавен');   /* иначе червеният toast от rvUnitsSync остава */
-        /* Бележката под формата (25.11.2026) — остава до следващото добавяне. */
-        rvAddNote = ok && (rvUnits[res.row.id] || []).length ? 'Запиши на стоката: № ' + rvUnitsLabel(rvUnits[res.row.id]) : '';
-        rvRender();
-        rvFocus('rv-a-code');
-        return true;
-      });
-    });
-  });
-}
-
 /* ─── Импорт от SAP (ZSTOCK „Стоков анализ") ───────────── */
 /* Ред 1 = заглавия, колоните се търсят по ИМЕ. „Завод" (напр. 1514) — последните
    две цифри са номерът на обекта. Код, който вече е в бланката → обновява
@@ -1150,6 +1390,9 @@ function rvRowProblems(it){
   if(!(Number(it.qty) > 0)) p.push('количество 0 — оправи наличността в SAP');
   if(!String(it.store_comment || '').trim()) p.push('няма коментар');
   if(!(Number(it.proposed_price) > 0)) p.push('няма цена');
+  /* Снимката е задължителна (решение на Тенчо 27.11.2026) — и за редовете от
+     ZSTOCK (снимат се от реда / картата). Одобрението и ЦО не я проверяват. */
+  if(!rvPhotoList(it).length) p.push('няма снимка');
   return p;
 }
 /* Еднакъв артикул с РАЗЛИЧЕН % / цена е позволен — всяка бройка със свой
@@ -1627,7 +1870,7 @@ function rvOverviewHtml(){
 }
 function rvCoOpenStore(name){
   if(rvRegionalAcc() && rvRegionStores().indexOf(name) < 0){ toast('Обектът не е в твоя регион', '#dc2626'); return Promise.resolve(false); }
-  rvCoOpen = true; rvStore = name; rvShowAdd = false; return rvLoadSheet();
+  rvCoOpen = true; rvStore = name; rvFormClose(); return rvLoadSheet();
 }
 function rvCoBack(){ rvCoOpen = false; rvBad = {}; rvErr = {}; return rvLoadOverview(); }
 

@@ -161,12 +161,18 @@ const row = (h, id) => $(h, 'rv-row-' + id);
 const unitsTxt = (h, id) => { const el = row(h, id) && row(h, id).querySelector('.rv-units'); return el ? el.textContent : ''; };
 const unitPosts = h => h.calls.post.filter(x => x.table === 'revaluation_units');
 const lastToast = h => { const t = h.calls.toast[h.calls.toast.length - 1]; return t ? [].concat(t).join(' ') : ''; };
+/* 27.11.2026: прозорецът „➕ Добави артикул" — снимката е задължителна,
+   слага се през скрития вход за камерата (истински change). */
 async function addRow(h, code, unit, qty) {
-  if (!$(h, 'rv-add')) { realClick(h.w, btn(mod(h), '＋ Ред')); await ticks(1); }
+  if (!$(h, 'rv-form')) { realClick(h.w, btn(mod(h), 'Добави артикул')); await ticks(1); }
+  else if ($(h, 'rv-f-next')) { realClick(h.w, $(h, 'rv-f-next')); await ticks(1); }
   $(h, 'rv-a-code').value = code; $(h, 'rv-a-name').value = 'Артикул ' + code;
   $(h, 'rv-a-unit').value = unit; $(h, 'rv-a-qty').value = qty;
   $(h, 'rv-a-std').value = '10'; $(h, 'rv-a-comment').value = 'дефект';
-  realClick(h.w, btn($(h, 'rv-add'), 'Добави')); await ticks(8);
+  const inp = $(h, 'rv-f-cam');
+  Object.defineProperty(inp, 'files', { value: [new h.w.File(['x'], 'p.jpg', { type: 'image/jpeg' })], configurable: true });
+  fire(h.w, inp, 'change');
+  realClick(h.w, $(h, 'rv-f-save')); await ticks(8);
   return h.db.items[h.db.items.length - 1];
 }
 async function editQty(h, id, val) {
@@ -189,15 +195,14 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     ok('toast „Редът е добавен"', /Редът е добавен/.test(lastToast(h)), lastToast(h));
     /* Г. (25.11.2026) — видима бележка под формата, не само toast */
     const note = () => { const e = $(h, 'rv-add-note'); return e ? e.textContent : ''; };
-    ok('бележка под формата: „Запиши на стоката: № KJ1 … KJ3"', /Запиши на стоката: № KJ1 … KJ3$/.test(note()) &&
-      !!$(h, 'rv-add') && ($(h, 'rv-add').compareDocumentPosition($(h, 'rv-add-note')) & 4) !== 0, note());
+    ok('бележка на страницата: „Запиши на стоката: № KJ1 … KJ3"', /Запиши на стоката: № KJ1 … KJ3$/.test(note()), note());
+    ok('…и в прозореца (27.11.2026): „✍ Запиши на стоката: № KJ1 … KJ3"', !!$(h, 'rv-f-note') && /Запиши на стоката: № KJ1 … KJ3$/.test($(h, 'rv-f-note').textContent), $(h, 'rv-f-note') && $(h, 'rv-f-note').textContent);
     const b = await addRow(h, '61000', 'M2', '9,33');
     ok('M2 9,33 → 1 номер', h.db.units.filter(u => u.item_id === b.id).length === 1);
     ok('под кода: „№ KJ4"', unitsTxt(h, b.id) === '№ KJ4', unitsTxt(h, b.id));
     ok('бележката се сменя със следващото добавяне: „… № KJ4"', /Запиши на стоката: № KJ4$/.test(note()), note());
-    realClick(h.w, btn(mod(h), '＋ Ред')); await ticks(1);
-    ok('остава и при затворена форма (до следващото добавяне)', !$(h, 'rv-add') && /KJ4$/.test(note()), note());
-    realClick(h.w, btn(mod(h), '＋ Ред')); await ticks(1);
+    realClick(h.w, $(h, 'rv-f-done')); await ticks(1);
+    ok('остава и при затворен прозорец (до следващото добавяне)', !$(h, 'rv-form') && /KJ4$/.test(note()), note());
     const c = await addRow(h, '61001', 'бр.', '2');
     ok('„бр." се нормализира като БР → 2 номера', h.db.units.filter(u => u.item_id === c.id).length === 2);
     ok('без маркер „без номер" на нито един ред', !mod(h).querySelector('.rv-unit-miss'));
@@ -307,6 +312,10 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     const h = env();
     await h.w.loadRevaluation(); await ticks(5);
     const a = await addRow(h, '53531', 'БР', '1');
+    realClick(h.w, $(h, 'rv-f-done')); await ticks(1);
+    /* От 27.11.2026 редът идва от прозореца с 1 снимка — броим спрямо нея. */
+    const up0 = h.db.uploads.length;
+    ok('прозорецът качи 1 снимка и я записа в реда', up0 === 1 && h.w.rvPhotoList(a).length === 1, up0);
     // Два бутона (24.11.2026): 📷 „Снимай" → вход с capture; 🖼 „От галерията" → вход с multiple, без capture.
     const camBtn = () => row(h, a.id).querySelector('button[title="Снимай"]');
     const galBtn = () => row(h, a.id).querySelector('button[title="От галерията"]');
@@ -329,10 +338,10 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     const f1 = new h.w.File(['a'], 'a.jpg', { type: 'image/jpeg' }), f2 = new h.w.File(['b'], 'b.jpg', { type: 'image/jpeg' });
     Object.defineProperty(galInp, 'files', { value: [f1, f2], configurable: true });
     fire(h.w, galInp, 'change'); await ticks(10);
-    ok('🖼: две качвания в bulletin-files/revaluation/', h.db.uploads.length === 2 && h.db.uploads.every(u => /\/storage\/v1\/object\/bulletin-files\/revaluation\/\d+_[a-z0-9]+\.jpg$/.test(u)), h.db.uploads.join(' | '));
+    ok('🖼: две качвания в bulletin-files/revaluation/', h.db.uploads.length === up0 + 2 && h.db.uploads.slice(up0).every(u => /\/storage\/v1\/object\/bulletin-files\/revaluation\/\d+_[a-z0-9]+\.jpg$/.test(u)), h.db.uploads.join(' | '));
     const patch = h.calls.patch.filter(x => x.table === 'revaluation_items' && x.body.photos).pop();
-    ok('🖼: PATCH на реда с 2 публични адреса', !!patch && patch.body.photos.length === 2 && patch.body.photos.every(u => /\/object\/public\/bulletin-files\/revaluation\//.test(u)), patch && JSON.stringify(patch.body));
-    ok('2 миниатюри на реда', row(h, a.id).querySelectorAll('.rv-thumb').length === 2);
+    ok('🖼: PATCH на реда с 3 публични адреса (1 + 2)', !!patch && patch.body.photos.length === 3 && patch.body.photos.every(u => /\/object\/public\/bulletin-files\/revaluation\//.test(u)), patch && JSON.stringify(patch.body));
+    ok('3 миниатюри на реда', row(h, a.id).querySelectorAll('.rv-thumb').length === 3);
     // Качване през 📷 (след пререндера — новите елементи)
     hits = []; hook();
     realClick(h.w, camBtn());
@@ -341,14 +350,16 @@ const SUB_DRAFT = { id: 's-1', campaign_id: 'c-1', store_name: 'Кърджали
     const f3 = new h.w.File(['c'], 'c.jpg', { type: 'image/jpeg' });
     Object.defineProperty(camInp2, 'files', { value: [f3], configurable: true });
     fire(h.w, camInp2, 'change'); await ticks(10);
-    ok('📷: трето качване в bulletin-files/revaluation/', h.db.uploads.length === 3 && /\/bulletin-files\/revaluation\//.test(h.db.uploads[2]), h.db.uploads.join(' | '));
+    ok('📷: трето качване в bulletin-files/revaluation/', h.db.uploads.length === up0 + 3 && /\/bulletin-files\/revaluation\//.test(h.db.uploads[up0 + 2]), h.db.uploads.join(' | '));
     const patch3 = h.calls.patch.filter(x => x.table === 'revaluation_items' && x.body.photos).pop();
-    ok('📷: снимката е в photos на реда (3 адреса, първите 2 запазени)', !!patch3 && patch3.body.photos.length === 3 && patch3.body.photos.slice(0, 2).join() === patch.body.photos.join(), patch3 && JSON.stringify(patch3.body));
-    ok('3 миниатюри на реда', row(h, a.id).querySelectorAll('.rv-thumb').length === 3);
+    ok('📷: снимката е в photos на реда (4 адреса, първите 3 запазени)', !!patch3 && patch3.body.photos.length === 4 && patch3.body.photos.slice(0, 3).join() === patch.body.photos.join(), patch3 && JSON.stringify(patch3.body));
+    ok('4 миниатюри на реда', row(h, a.id).querySelectorAll('.rv-thumb').length === 4);
     realClick(h.w, row(h, a.id).querySelector('.rv-photo-rm')); await ticks(5);
     const p2 = h.calls.patch.filter(x => x.table === 'revaluation_items' && 'photos' in x.body).pop();
-    ok('✕ маха снимката само от масива (без DELETE към storage)', p2.body.photos.length === 2 && !h.calls.del.some(u => /storage/.test(u)));
-    ok('„Подай" не иска снимка', h.w.rvRowProblems({ qty: 1, store_comment: 'x', proposed_price: 5 }).length === 0);
+    ok('✕ маха снимката само от масива (без DELETE към storage)', p2.body.photos.length === 3 && !h.calls.del.some(u => /storage/.test(u)));
+    /* От 27.11.2026 снимката е задължителна (решение на Тенчо). */
+    ok('„Подай" иска снимка: без нея → „няма снимка"', h.w.rvRowProblems({ qty: 1, store_comment: 'x', proposed_price: 5 }).join() === 'няма снимка');
+    ok('…със снимка → чисто', h.w.rvRowProblems({ qty: 1, store_comment: 'x', proposed_price: 5, photos: ['https://x/a.jpg'] }).length === 0);
   }
 
   section('8. Регионалният: миниатюра → клик → цял екран; без 📷 и ✕ в подадена');

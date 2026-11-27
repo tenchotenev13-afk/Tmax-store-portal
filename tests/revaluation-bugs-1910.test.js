@@ -161,7 +161,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     /* обектът вижда обикновена чернова — пак може да добавя редове или „нямаме“ */
     const draft = Object.assign({}, SUB, { status: 'draft', no_items: false });
     const s = env({ user: STORE, subs: [draft], items: [] }); await s.w.loadRevaluation(); await ticks(6);
-    ok('обектът след отключване: „＋ Ред“, „Подай“ и „Нямаме за преоценка“', !!btn(mod(s), 'Ред') && !!btn(mod(s), 'Подай') && !!btn(mod(s), 'Нямаме за преоценка'));
+    ok('обектът след отключване: „➕ Добави артикул“, „Подай“ и „Нямаме за преоценка“', !!btn(mod(s), 'Добави артикул') && !!btn(mod(s), 'Подай') && !!btn(mod(s), 'Нямаме за преоценка'));
   }
 
   section('4. rvSapUnit — само по SAP списъка');
