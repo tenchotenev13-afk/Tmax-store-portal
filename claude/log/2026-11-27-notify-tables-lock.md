@@ -1,0 +1,7 @@
+# 27.11 — notify-tables-lock
+
+- Таблиците „кой какво получава“ (`report_recipients`, `notification_topics` / `matrix` / `overrides` / `schedules`) — порталът ги чете и пише само през новата едж функция `notify-admin` (вариант А, решение на Тенчо 27.11): пропуск → роля и `active` от `users` (admin; schedules — и accounting) → бели списъци на таблица / действие / полета / филтри. Клиентът — `naList` / `naInsert` / `naUpdate` / `naDelete` в `shared.js`; 401 → повторен вход (`kasaReauth`). Пипнати: admin.js (Известия), report.js („📧 Общи отчети“), bulletin.js (🔔, „В сила от“, отчет за задача).
+- Код: SHA — след комита. Функцията — НЕ е деплойната (чака „давай“). Миграцията `notify-tables-lock-schema.sql` (RLS on, revoke all от anon/authenticated, `mirror_reader_select`) — НЕ е приложена: огледалото още чете петте с anon (edge_logs 27.11 06:07 UTC) — `claude/open/27-11-notify-tables-lock-migraciya.md`.
+- Сверка преди: живите bulletin-notify, dynamic-responder, send-routed-report, send-scheduled-report — байт в байт с репото (`download --use-api`), всички със service ключ.
+- Тестове: `supabase/functions/notify-admin/handler.test.ts` (deno, 12); `tests/notify-admin-writes.test.js` (60; мутант sbDelete в report.js → exit 1); harness емулира notify-admin като PostgREST (`calls.notifyAdmin`); `delete-tables-whitelist` без четирите таблици.
+- Отворени: `27-11-notify-tables-lock-migraciya.md` (Живко), `27-11-rls-ostanali-15.md`, `27-11-regression-anon-reads.md`.

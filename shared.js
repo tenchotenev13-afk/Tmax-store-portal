@@ -902,6 +902,76 @@ function kasaApiCall(action,params){
     return {ok:false,status:0,data:{reason:'network',message:'Няма връзка със сървъра.'}};
   });
 }
+/* ─── notify-admin: таблиците „кой какво получава“ (27.11.2026) ─────────────
+   report_recipients, notification_topics / matrix / overrides / schedules —
+   публичният ключ НЯМА права върху тях. Четене и запис минават само през
+   едж функцията notify-admin с пропуска (currentSession); ролята се проверява
+   там (admin; schedules — и accounting). Не добавяй sbGet/sbPost към тях.
+   Резултатите са с формата на sbGet / sbPost / sbPatch / sbDelete, за да
+   работят sbErrMsg и извикващите както досега. 401 session_expired →
+   модалът за повторен вход (kasaReauth) и една повторна заявка. */
+function notifyAdminCall(body){
+  var send=function(){
+    var b={session:currentSession};
+    for(var k in body) if(Object.prototype.hasOwnProperty.call(body,k)) b[k]=body[k];
+    return fetch(SB_URL+'/functions/v1/notify-admin',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_KEY,'apikey':SB_KEY},
+      body:JSON.stringify(b)
+    }).then(function(r){
+      return r.json().catch(function(){return null;}).then(function(d){
+        return {ok:r.ok&&!!d&&d.ok===true,status:r.status,data:d||{}};
+      });
+    }).catch(function(e){
+      return {ok:false,status:0,data:{reason:'network',message:String((e&&e.message)||e)}};
+    });
+  };
+  return send().then(function(res){
+    if(res.status===401&&res.data&&res.data.reason==='session_expired'&&typeof kasaReauth==='function'){
+      return kasaReauth().then(send,function(e){
+        return {ok:false,status:401,data:{reason:'reauth_cancelled',message:(e&&e.message)||'Сесията е изтекла.'}};
+      });
+    }
+    return res;
+  });
+}
+function notifyAdminFail(fn,body,res){
+  return sbWriteFail(fn,'notify-admin '+body.table+' ('+body.action+')',res.status,res.data);
+}
+/* Като sbGet: масив; провал → [] и червен тост (освен при silent).
+   opts: {match:{кол:стойност|[...]}, message_prefix:'…'} */
+function naList(table,opts,silent){
+  var body={table:table,action:'list'};
+  if(opts&&opts.match) body.match=opts.match;
+  if(opts&&opts.message_prefix) body.message_prefix=opts.message_prefix;
+  return notifyAdminCall(body).then(function(res){
+    if(res.ok&&Array.isArray(res.data.rows)) return res.data.rows;
+    var msg=(res.data&&res.data.message)||('HTTP '+(res.status||'—'));
+    try{console.error('naList '+table+' → '+(res.status||'мрежов срив')+': '+msg);}catch(e){}
+    if(!silent){ try{toast('Грешка при зареждане: '+msg,'#dc2626');}catch(e){} }
+    return [];
+  });
+}
+/* Като sbPost: {ok:true, rows} или {ok:false,status,error}. */
+function naInsert(table,fields){
+  var body={table:table,action:'insert',fields:fields};
+  return notifyAdminCall(body).then(function(res){
+    return res.ok?{ok:true,status:res.status,rows:res.data.rows||[]}:notifyAdminFail('naInsert',body,res);
+  });
+}
+/* Като sbPatch / sbDelete: {ok:true, count} — count е броят засегнати редове. */
+function naUpdate(table,match,fields){
+  var body={table:table,action:'update',match:match,fields:fields};
+  return notifyAdminCall(body).then(function(res){
+    return res.ok?{ok:true,status:res.status,count:res.data.count}:notifyAdminFail('naUpdate',body,res);
+  });
+}
+function naDelete(table,match){
+  var body={table:table,action:'delete',match:match};
+  return notifyAdminCall(body).then(function(res){
+    return res.ok?{ok:true,status:res.status,count:res.data.count}:notifyAdminFail('naDelete',body,res);
+  });
+}
 function kasaApiError(status,reason,message){
   var e=new Error(message||('Грешка '+(status||'')));
   e.kasaApi=true; e.status=status||0; e.reason=reason||'';

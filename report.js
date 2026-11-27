@@ -5215,7 +5215,9 @@ function sendMinusMultiReportNow(done){
    до 15.09.2026 беше в таб "Днес"). send-scheduled-report го чете по крон;
    „📤 Изпрати сега" (sendDailyReportNow / sendWeeklyReportNow) вика пак нея. */
 function loadReportRecipients(cb){
-  sbGet('report_recipients','active=eq.true&order=created_at.asc').then(function(rows){
+  /* Само през notify-admin (shared.js) — anon няма права върху таблицата;
+     редът (created_at asc) е във функцията. */
+  naList('report_recipients', { match: { active: true } }).then(function(rows){
     cb(Array.isArray(rows) ? rows : []);
   }).catch(function(){ cb([]); });
 }
@@ -5225,7 +5227,7 @@ function addReportRecipient(name, email, flags, cb){
   if (!email) { cb(false); return; }
   var row = { name: name||null, email: email };
   REPORT_RECIPIENT_FLAGS.forEach(function(f){ row[f] = !!(flags && flags[f]); });
-  sbPost('report_recipients', row).then(function(res){
+  naInsert('report_recipients', row).then(function(res){
     cb(!!res.ok);
   }).catch(function(){ cb(false); });
 }
@@ -5233,7 +5235,7 @@ function addReportRecipient(name, email, flags, cb){
 function setReportRecipientFlag(id, flag, value, cb){
   if (!id || REPORT_RECIPIENT_FLAGS.indexOf(flag) < 0) { cb(false); return; }
   var patch = {}; patch[flag] = !!value;
-  sbPatch('report_recipients', 'id=eq.' + id, patch).then(function(res){
+  naUpdate('report_recipients', { id: String(id) }, patch).then(function(res){
     cb(!!(res && res.ok));
   }).catch(function(){ cb(false); });
 }
@@ -5245,12 +5247,12 @@ function setReportRecipientScope(id, stores, cb){
   var ok = stores === null || (Array.isArray(stores) && stores.length > 0 &&
     stores.every(function(s){ return typeof s === 'string' && s.trim(); }));
   if (!id || !ok) { cb(false); return; }
-  sbPatch('report_recipients', 'id=eq.' + id, { scope_stores: stores }).then(function(res){
+  naUpdate('report_recipients', { id: String(id) }, { scope_stores: stores }).then(function(res){
     cb(!!(res && res.ok));
   }).catch(function(){ cb(false); });
 }
 function deleteReportRecipient(id, cb){
-  sbDelete('report_recipients','id=eq.'+id).then(function(res){ cb(!!res.ok); }).catch(function(){ cb(false); });
+  naDelete('report_recipients', { id: String(id) }).then(function(res){ cb(!!res.ok); }).catch(function(){ cb(false); });
 }
 
 /* Кой получава дневния / седмичния (otcheti-recipients-only, 12.11.2026) — ЕДИН

@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(права, без промяна на схемата: notify-tables-lock-schema.sql; миграцията още НЕ е приложена — чака това)
+- 27.11 · report_recipients, notification_topics, notification_matrix, notification_overrides, notification_schedules скоро спират да се четат с публичния ключ — само с mirror_reader. Огледалото още ги тегли с anon (edge_logs, 27.11 06:07 UTC); моля, преди миграцията скриптът да ги чете с ключа на mirror_reader (те са в 93-те) и потвърди обратно
+
 (grafik-changes-trip-schema.sql — миграция grafik_changes_trip, версия 20261127121336, приложена 27.11.2026; „Работен график“ не е в огледалото — редовете са само за записа)
 - 27.11 · grafik_changes.trip_store — text, NULL, без default (обектът, където е командирован човекът; задължителен точно при actual = 'К')
 - 27.11 · grafik_changes.actual — нова стойност 'К'

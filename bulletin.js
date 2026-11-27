@@ -2509,9 +2509,11 @@ function bulTaskBulletinId(taskId){
    Всички те са реални: записът е с точна дата и текст, а редакцията е
    отделна функция от създаването. */
 var NS_STARTS_PREFIX='Нова задача: ';
+/* Филтърът за naList (notify-admin, 27.11.2026): префиксът се търси буквално
+   във функцията — същото като досегашното message=like.<префикс>*. */
 function bulStartsNoticeFilter(taskId){
-  return 'entity_type=eq.task&entity_id=eq.'+encodeURIComponent(String(taskId))+
-         '&schedule_type=eq.once&message=like.'+encodeURIComponent(NS_STARTS_PREFIX+'*');
+  return { match:{ entity_type:'task', entity_id:String(taskId), schedule_type:'once' },
+           message_prefix:NS_STARTS_PREFIX };
 }
 /* startsOn в БЪДЕЩЕТО → един ред с тази дата; иначе (празно, днес или минало)
    → редът се маха. „Днес" не се насрочва: прозорецът на dynamic-responder е 15
@@ -2521,16 +2523,17 @@ function bulSyncStartsNotice(taskId, startsOn, title, stores){
   if(!taskId) return Promise.resolve(false);
   var fltr=bulStartsNoticeFilter(taskId);
   var future=!!startsOn && String(startsOn)>bulTodayISO();
-  return sbGet('notification_schedules','select=id&'+fltr).then(function(rows){
+  return naList('notification_schedules',fltr).then(function(rows){
     var have=(Array.isArray(rows)&&rows.length)?rows[0]:null;
-    if(!future) return have ? sbDelete('notification_schedules',fltr) : {ok:true};
+    /* Махат се ВСИЧКИ редове по филтъра (както при досегашния DELETE по него). */
+    if(!future) return have ? naDelete('notification_schedules',{ id:rows.map(function(r){ return String(r.id); }), entity_type:'task' }) : {ok:true};
     var body={
       scheduled_date:startsOn, scheduled_time:'08:00',
       message:NS_STARTS_PREFIX+title,
       target_stores:(stores&&stores.length)?stores:null, active:true
     };
-    if(have) return sbPatch('notification_schedules','id=eq.'+have.id,body);
-    return sbPost('notification_schedules',Object.assign({
+    if(have) return naUpdate('notification_schedules',{ id:String(have.id) },body);
+    return naInsert('notification_schedules',Object.assign({
       entity_type:'task', entity_id:String(taskId), schedule_type:'once',
       created_by:currentUser.display_name||currentUser.email
     },body));
@@ -4401,8 +4404,9 @@ function bulLoadTaskReports(){
   bulTaskReports = [];
   var all = bulTasks.concat(Array.isArray(recurringTasks) ? recurringTasks : []);
   if (!canEdit() || !all.length) return;
-  var ids = all.map(function(t){ return t.id; }).join(',');
-  sbGet('notification_schedules','entity_type=eq.task_report&entity_id=in.('+ids+')&active=eq.true&select=id,entity_id,scheduled_date,scheduled_time,target_recipients,last_sent_at,created_by').then(function(rows){
+  var ids = all.map(function(t){ return String(t.id); });
+  /* notify-admin (shared.js): anon няма права върху notification_schedules. */
+  naList('notification_schedules', { match: { entity_type: 'task_report', entity_id: ids, active: true } }).then(function(rows){
     if (!Array.isArray(rows) || !rows.length) return;
     bulTaskReports = rows;
     renderBulletin();
@@ -4424,7 +4428,7 @@ function trTaskReportsListHtml(t){
 function trDeleteReport(id){
   if (!canEdit()) return;
   if (!confirm('Да махна насрочения отчет?')) return;
-  sbDelete('notification_schedules','id=eq.'+id+'&entity_type=eq.task_report').then(function(res){
+  naDelete('notification_schedules', { id: String(id), entity_type: 'task_report' }).then(function(res){
     if (!res || res.ok === false) { toast('Грешка при изтриване: '+sbErrMsg(res),'#dc2626'); return; }
     bulTaskReports = bulTaskReports.filter(function(r){ return String(r.id)!==String(id); });
     toast('✅ Отчетът е махнат');
@@ -4552,7 +4556,7 @@ function trSaveReports(taskId, list){
   if (!list || !list.length) return Promise.resolve(true);
   var who = bulActor();
   return Promise.all(list.map(function(d){
-    return sbPost('notification_schedules', {
+    return naInsert('notification_schedules', {
       entity_type:'task_report', entity_id:String(taskId), schedule_type:'once',
       scheduled_date:d.date, scheduled_time:d.time, message:null, active:true,
       created_by:who, target_recipients:{ groups:d.groups, user_ids:d.user_ids }
@@ -8097,7 +8101,7 @@ function closeNotifyScheduleModal(){
 }
 function loadNotifySchedules(){
   if(!notifyCurrentEntity)return;
-  sbGet('notification_schedules','entity_type=eq.'+notifyCurrentEntity.type+'&entity_id=eq.'+notifyCurrentEntity.id+'&order=created_at.desc').then(function(data){
+  naList('notification_schedules',{ match:{ entity_type:String(notifyCurrentEntity.type), entity_id:String(notifyCurrentEntity.id) } }).then(function(data){
     var list=Array.isArray(data)?data:[];
     var wrap=document.getElementById('notify-list-wrap'); if(!wrap)return;
     if(!list.length){wrap.innerHTML='<div style="text-align:center;padding:10px;color:#94a3b8;font-size:12px;">Няма зададени графици.</div>';return;}
@@ -8155,7 +8159,7 @@ function submitNotifySchedule(){
     active:true,
     created_by:currentUser.display_name||currentUser.email
   };
-  sbPost('notification_schedules',data).then(function(res){
+  naInsert('notification_schedules',data).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('✅ Напомнянето е насрочено!');
     document.getElementById('ns-message').value='';
@@ -8163,14 +8167,14 @@ function submitNotifySchedule(){
   });
 }
 function toggleNotifySchedule(id,active){
-  sbPatch('notification_schedules','id=eq.'+id,{active:active}).then(function(res){
+  naUpdate('notification_schedules',{id:String(id)},{active:active}).then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
     loadNotifySchedules();
   });
 }
 function deleteNotifySchedule(id){
   if(!confirm('Изтрий този график?'))return;
-  sbDelete('notification_schedules','id=eq.'+id).then(function(res){
+  naDelete('notification_schedules',{id:String(id)}).then(function(res){
     if(!res.ok){toast('Грешка при изтриване','#dc2626');return;}
     toast('✅ Изтрито!');
     loadNotifySchedules();

@@ -644,6 +644,14 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
   таблици без RLS, плюс `users` (затворена с колонни grants, виж долу); общо
   86 от 106 в `public` с включено RLS. Повечето политики следват permissive `anon_all_*`
   (`for all using (true) with check (true)`).
+- **„Кой какво получава“** (27.11.2026, сесия notify-tables-lock) —
+  `report_recipients`, `notification_topics` / `matrix` / `overrides` /
+  `schedules` се четат и пишат от портала САМО през едж функцията
+  `notify-admin` (`naList` / `naInsert` / `naUpdate` / `naDelete` в
+  `shared.js`; admin, а `notification_schedules` — и accounting). Не добавяй
+  `sbGet`/`sbPost`/… към тях — заковано в `tests/notify-admin-writes.test.js`.
+  Правата на anon се отнемат с `notify-tables-lock-schema.sql` (чака
+  огледалото — `claude/open/27-11-notify-tables-lock-migraciya.md`).
 - `users` е с **изключено RLS**. `anon` и `authenticated` имат САМО колонен
   SELECT върху 11 безопасни колони (от `20260824190214_users_column_grants`) —
   без `password`, `password_hash`, `history_pin_hash`. От 30.09.2026
@@ -695,7 +703,7 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
   `query_logs` за диагностика по логовете (ClickHouse SQL срещу таблица `logs`,
   филтър по `source` — напр. `edge_logs`, `postgres_logs`, `function_edge_logs`;
   прозорецът е максимум 24 часа)
-- **Edge Functions** — 13 на брой (11.11.2026: папки в репото = живи). Изходният код е в `supabase/functions/`
+- **Edge Functions** — 14 на брой в репото (11.11.2026: папки = живи; 27.11.2026 + `notify-admin`, деплой след „давай“). Изходният код е в `supabase/functions/`
   (таблица с версия, крон задание и кой ги вика — в README-то там).
   **Деплоят е РЪЧЕН през Supabase; файлът в репото е ОГЛЕДАЛО, не източник.**
   Няма CI стъпка. **От 18.09.2026 `supabase` CLI е инсталиран и логнат**

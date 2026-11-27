@@ -1368,8 +1368,8 @@ function loadNotificationsAdmin(){
   if (!admin) {
     /* Темите трябват само за редовете на матрицата — таблицата им не се рисува. */
     Promise.all([
-      sbGet('notification_topics','order=sort_order,key'),
-      sbGet('notification_matrix','order=topic_key,group_key')
+      naList('notification_topics'),
+      naList('notification_matrix')
     ]).then(function(res){
       adminNotifTopics = Array.isArray(res[0]) ? res[0] : [];
       adminNotifMatrix = Array.isArray(res[1]) ? res[1] : [];
@@ -1378,12 +1378,16 @@ function loadNotificationsAdmin(){
     return;
   }
   Promise.all([
-    sbGet('notification_topics','order=sort_order,key'),
-    sbGet('notification_matrix','order=topic_key,group_key'),
-    sbGet('notification_overrides','order=user_email,topic_key'),
+    /* Петте таблици „кой какво получава“ — само през notify-admin (ред и
+       филтри се решават там: темите по sort_order,key; матрицата по
+       topic_key,group_key; изключенията по user_email,topic_key;
+       насрочените — най-новите първи). */
+    naList('notification_topics'),
+    naList('notification_matrix'),
+    naList('notification_overrides'),
     /* Изричен select= — users никога не се чете със select=* от клиента. */
     sbGet('users','active=eq.true&order=display_name,email&select=id,email,display_name,active'),
-    sbGet('notification_schedules','order=created_at.desc')
+    naList('notification_schedules')
   ]).then(function(res){
     adminNotifTopics    = Array.isArray(res[0]) ? res[0] : [];
     adminNotifMatrix    = Array.isArray(res[1]) ? res[1] : [];
@@ -1943,7 +1947,7 @@ function toggleNotifTopicActive(key, active){
       return;
     }
   }
-  sbPatch('notification_topics','key=eq.' + encodeURIComponent(key), { active: !!active }).then(function(res){
+  naUpdate('notification_topics', { key: key }, { active: !!active }).then(function(res){
     if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
     var t = adminNotifTopics.filter(function(x){ return x.key === key; })[0];
     if (t) t.active = !!active;
@@ -2070,7 +2074,7 @@ function submitNotifTopic(){
   } else {
     payload.weekdays = null; payload.day_of_week = null; payload.scheduled_time = null;
   }
-  sbPatch('notification_topics','key=eq.' + encodeURIComponent(key), payload).then(function(res){
+  naUpdate('notification_topics', { key: key }, payload).then(function(res){
     if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); return; }
     logAudit('notif_topic_changed', { details: { topic_key: key, payload: payload } });
     toast('✅ Записано');
@@ -2136,13 +2140,13 @@ function renderNotifMatrix(){
 function notifMatrixChannel(sel, topicKey, groupKey){
   var ch = sel.value;
   var m = notifMatrixCell(topicKey, groupKey);
-  var flt = 'topic_key=eq.' + encodeURIComponent(topicKey) + '&group_key=eq.' + encodeURIComponent(groupKey);
+  var flt = { topic_key: topicKey, group_key: groupKey };
   /* „none" е равносилно на празна клетка — редът се ТРИЕ, не се записва със
      стойност 'none'. Иначе матрицата се пълни с редове, които не значат нищо,
      а edge функцията ги чете при всяко събуждане. */
   if (ch === 'none') {
     if (!m) { renderNotifMatrix(); return; }
-    sbDelete('notification_matrix', flt).then(function(res){
+    naDelete('notification_matrix', flt).then(function(res){
       if(!res.ok){ toast('Грешка при изтриване: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
       adminNotifMatrix = adminNotifMatrix.filter(function(x){
         return !(x.topic_key === topicKey && x.group_key === groupKey);
@@ -2154,7 +2158,7 @@ function notifMatrixChannel(sel, topicKey, groupKey){
     return;
   }
   if (m) {
-    sbPatch('notification_matrix', flt, { channel: ch }).then(function(res){
+    naUpdate('notification_matrix', flt, { channel: ch }).then(function(res){
       if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
       m.channel = ch;
       logAudit('notif_matrix_changed', { details: { topic_key: topicKey, group_key: groupKey, channel: ch } });
@@ -2163,7 +2167,7 @@ function notifMatrixChannel(sel, topicKey, groupKey){
     });
     return;
   }
-  sbPost('notification_matrix', { topic_key: topicKey, group_key: groupKey, channel: ch, scope: 'all' }).then(function(res){
+  naInsert('notification_matrix', { topic_key: topicKey, group_key: groupKey, channel: ch, scope: 'all' }).then(function(res){
     if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
     adminNotifMatrix.push({ topic_key: topicKey, group_key: groupKey, channel: ch, scope: 'all' });
     logAudit('notif_matrix_added', { details: { topic_key: topicKey, group_key: groupKey, channel: ch } });
@@ -2218,8 +2222,7 @@ function pickNotifScope(scope){
   /* Същият обхват — няма какво да се записва, само се затваря. Иначе всяко
      отваряне-затваряне би оставяло ред в одита. */
   if (m.scope === scope) { closeNotifScopeModal(); return; }
-  var flt = 'topic_key=eq.' + encodeURIComponent(topicKey) + '&group_key=eq.' + encodeURIComponent(groupKey);
-  sbPatch('notification_matrix', flt, { scope: scope }).then(function(res){
+  naUpdate('notification_matrix', { topic_key: topicKey, group_key: groupKey }, { scope: scope }).then(function(res){
     if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); closeNotifScopeModal(); loadNotificationsAdmin(); return; }
     m.scope = scope;
     logAudit('notif_matrix_changed', { details: { topic_key: topicKey, group_key: groupKey, scope: scope } });
@@ -2349,7 +2352,7 @@ function submitNotifOverride(){
     scope:   isExclude ? null : v('ntf-ovr-scope'),
     note: v('ntf-ovr-note') || null
   };
-  sbPost('notification_overrides', payload).then(function(res){
+  naInsert('notification_overrides', payload).then(function(res){
     if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); return; }
     logAudit('notif_override_added', { details: payload });
     toast('✅ Изключението е записано');
@@ -2361,7 +2364,7 @@ function submitNotifOverride(){
 function deleteNotifOverride(id){
   var o = adminNotifOverrides.filter(function(x){ return x.id === id; })[0];
   if (!confirm('Изтрий изключението' + (o ? ' на ' + o.user_email : '') + '?')) return;
-  sbDelete('notification_overrides','id=eq.' + encodeURIComponent(id)).then(function(res){
+  naDelete('notification_overrides', { id: id }).then(function(res){
     if(!res.ok){ toast('Грешка при изтриване: ' + sbErrMsg(res), '#dc2626'); return; }
     if (res.count === 0) { toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadNotificationsAdmin(); return; }
     logAudit('notif_override_deleted', { details: { id: id, user_email: o ? o.user_email : null, topic_key: o ? o.topic_key : null } });
@@ -2501,7 +2504,7 @@ function renderNotifSchedules(){
 }
 
 function toggleAdminNotifSchedule(id, active){
-  sbPatch('notification_schedules','id=eq.' + encodeURIComponent(id), { active: !!active }).then(function(res){
+  naUpdate('notification_schedules', { id: String(id) }, { active: !!active }).then(function(res){
     if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
     logAudit('notif_schedule_toggled', { details: { id: id, active: !!active } });
     toast(active ? '✅ Пуснато' : '⏸ Спряно');
@@ -2513,7 +2516,7 @@ function deleteAdminNotifSchedule(id){
   var s = adminNotifSchedules.filter(function(x){ return String(x.id) === String(id); })[0];
   var title = s ? adminNotifEntityTitles[s.entity_type + '|' + String(s.entity_id)] : null;
   if (!confirm('Изтрий насроченото напомняне' + (title ? ' за „' + title + '"' : '') + '? Действието е окончателно.')) return;
-  sbDelete('notification_schedules','id=eq.' + encodeURIComponent(id)).then(function(res){
+  naDelete('notification_schedules', { id: String(id) }).then(function(res){
     if(!res.ok){ toast('Грешка при изтриване: ' + sbErrMsg(res), '#dc2626'); return; }
     if (res.count === 0) { toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadNotificationsAdmin(); return; }
     logAudit('notif_schedule_deleted', { details: { id: id, entity_type: s ? s.entity_type : null, entity_id: s ? s.entity_id : null } });

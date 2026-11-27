@@ -46,11 +46,13 @@ const DELETE_ALLOWED = [
   'loading_list_items', 'loading_list_photos',
   // loading_lists — от 18.11.2026 („🗑 Изтрий черновата“, ll-nahodki т.10);
   // базата пуска DELETE само при status = 'draft' (миграция 20261118095818).
-  'loading_list_products', 'loading_lists', 'notification_matrix', 'notification_overrides',
-  'notification_schedules', 'order_restrictions', 'picking_batches',
+  // notification_matrix, notification_overrides, notification_schedules,
+  // report_recipients — махнати 27.11.2026 (notify-tables-lock): триенето
+  // минава през notify-admin, правата се отнемат в notify-tables-lock-schema.sql.
+  'loading_list_products', 'loading_lists', 'order_restrictions', 'picking_batches',
   'picking_pallet_items', 'picking_pallets', 'picking_shipments',
   'product_catalog', 'recurring_task_periods', 'recurring_task_skips',
-  'recurring_task_versions', 'recurring_tasks', 'report_recipients',
+  'recurring_task_versions', 'recurring_tasks',
   // revaluation_units — от 23.11.2026 (Преоценка етап 2): намалено qty трие
   // най-големите номера на реда (rvUnitsSyncNow); grant delete в
   // revaluation-units-schema.sql.
@@ -140,8 +142,10 @@ ok('няма запис в DELETE_ALLOWED без код', unused.length === 0,
    '\n      ' + unused.map(t => t + ' → махни от DELETE_ALLOWED (и revoke delete в нова миграция)').join('\n      '));
 ok('DELETE_ALLOWED без повторения', new Set(DELETE_ALLOWED).size === DELETE_ALLOWED.length);
 /* 45 от anon-revoke-delete-schema.sql + loading_lists (18.11.2026) + revaluation_units (23.11.2026, нова таблица)
-   − kasa_storno, kasa_storno_items (26.11.2026, kasa-etap2-schema.sql). */
-ok('45 таблици (45 от anon-revoke-delete-schema.sql + loading_lists + revaluation_units − 2 касови)', DELETE_ALLOWED.length === 45, 'реално: ' + DELETE_ALLOWED.length);
+   − kasa_storno, kasa_storno_items (26.11.2026, kasa-etap2-schema.sql)
+   − notification_matrix, notification_overrides, notification_schedules,
+     report_recipients (27.11.2026, notify-tables-lock-schema.sql). */
+ok('41 таблици (45 от anon-revoke-delete-schema.sql + loading_lists + revaluation_units − 2 касови − 4 „кой какво получава“)', DELETE_ALLOWED.length === 41, 'реално: ' + DELETE_ALLOWED.length);
 
 /* Таблици, отнети по-късно с ОТДЕЛНА миграция — revoke delete трябва да е там. */
 const REVOKED_LATER = { kasa_storno: 'kasa-etap2-schema.sql', kasa_storno_items: 'kasa-etap2-schema.sql' };

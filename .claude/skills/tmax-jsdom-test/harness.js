@@ -151,7 +151,8 @@ function boot(opts) {
     toast: [], confirm: [], alert: [],
     scrollTo: [], scrollIntoView: [],
     notOk: [],       /* заявки, върнали ok:false — за "тихите" грешки */
-    adminUsers: []   /* телата към едж функцията admin-users (записите в users) */
+    adminUsers: [],  /* телата към едж функцията admin-users (записите в users) */
+    notifyAdmin: []  /* телата към notify-admin (петте таблици „кой какво получава“) */
   };
 
   /* ── Браузърни неща, които jsdom няма ── */
@@ -243,9 +244,75 @@ function boot(opts) {
     };
   }
 
+  /* Едж функцията notify-admin (27.11.2026): report_recipients и
+     notification_topics / matrix / overrides / schedules вече не се четат и
+     пишат през /rest/v1 — anon няма права. Тук тя се ЕМУЛИРА като PostgREST,
+     за да виждат тестовете същото, което виждаха досега:
+       · list   → calls.get   (URL), отговор от opts.data[table] (масив или fn(url))
+       · insert → calls.post  ({url, table, body: fields, via:'notify-admin'})
+       · update → calls.patch ({url, table, body: fields, via:'notify-admin'})
+       · delete → calls.del   (URL)
+     URL-ът е синтетичен — <SB_URL>/rest/v1/<table>?<кол>=eq.<стойност>&…
+     (масив → in.(a,b); message_prefix → message=like.<префикс>*) с
+     &via=notify-admin накрая; opts.fail по метода (GET/POST/PATCH/DELETE)
+     важи за него както за истинския. Суровите тела — в calls.notifyAdmin.
+     opts.notifyAdmin(body) → {status, body} подменя отговора изцяло. */
+  const NA_METHOD = { list: 'GET', insert: 'POST', update: 'PATCH', delete: 'DELETE' };
+  function notifyAdminUrl(b) {
+    const parts = [];
+    const m = (b && b.match) || {};
+    Object.keys(m).forEach(k => {
+      const v = m[k];
+      parts.push(k + '=' + (Array.isArray(v) ? 'in.(' + v.join(',') + ')' : 'eq.' + encodeURIComponent(String(v))));
+    });
+    if (b && b.message_prefix) parts.push('message=like.' + encodeURIComponent(b.message_prefix + '*'));
+    parts.push('via=notify-admin');
+    return (w.SB_URL || '') + '/rest/v1/' + ((b && b.table) || '') + '?' + parts.join('&');
+  }
+  function notifyAdminReply(b) {
+    const reply = (st, body) => ({
+      ok: st < 400, status: st,
+      json: () => body === null ? Promise.reject(new SyntaxError('Unexpected end of JSON input')) : Promise.resolve(body),
+      text: () => Promise.resolve(body === null ? '' : JSON.stringify(body))
+    });
+    const method = NA_METHOD[b && b.action] || 'POST';
+    const url = notifyAdminUrl(b);
+    const table = (b && b.table) || '';
+    const custom = typeof opts.notifyAdmin === 'function' ? opts.notifyAdmin(b) : null;
+    if (custom) {
+      const st = custom.status || 200;
+      if (st >= 400) calls.notOk.push({ method, url, status: st });
+      return reply(st, custom.body === undefined ? null : custom.body);
+    }
+    const f = failureFor(method, url);
+    if (method === 'GET') calls.get.push(url);
+    else if (method === 'POST') calls.post.push({ url, table, body: b.fields, via: 'notify-admin' });
+    else if (method === 'PATCH') calls.patch.push({ url, table, body: b.fields, via: 'notify-admin' });
+    else calls.del.push(url);
+    if (f) {
+      calls.notOk.push({ method, url, status: f.status });
+      return reply(f.status, f.empty ? null : f.body);
+    }
+    if (method === 'GET') {
+      let rows = data[table];
+      if (typeof rows === 'function') rows = rows(url);
+      rows = rows ? JSON.parse(JSON.stringify(rows)) : [];
+      return reply(200, { ok: true, rows: Array.isArray(rows) ? rows : [] });
+    }
+    if (method === 'POST') return reply(200, { ok: true, rows: [Object.assign({ id: 'na-new-1' }, b.fields || {})] });
+    return reply(200, { ok: true, count: 1 });
+  }
+
   w.fetch = function (url, init) {
     init = init || {};
     const method = (init.method || 'GET').toUpperCase();
+
+    if (String(url).indexOf('/functions/v1/notify-admin') >= 0) {
+      let parsed = null;
+      try { parsed = init.body ? JSON.parse(init.body) : null; } catch (e) { parsed = init.body; }
+      calls.notifyAdmin.push(parsed);
+      return Promise.resolve(notifyAdminReply(parsed));
+    }
 
     if (String(url).indexOf('/functions/v1/admin-users') >= 0) {
       let parsed = null;
