@@ -73,11 +73,10 @@ function renderReference() {
   var h = '<div style="max-width:1100px;margin:0 auto;padding:16px;">';
 
   h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px;">';
-  /* Бутонът за бланките стои до заглавието — вижда се и без избрана марка
-     (предложение на Теодор, 24.11.2026). Менюто не зависи от марката. */
+  /* Общото меню „🖨 Гаранционна карта ▾“ до заглавието е махнато по искане на
+     Теодор (27.11.2026) — бланките са само в реда по сектори отдолу. */
   h += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">' +
     '<div style="font-size:20px;font-weight:600;">📘 Гаранционен справочник</div>' +
-    refTemplatePickerHtml() +
     '</div>';
   if (isAdmin) {
     h += '<div style="display:flex;gap:8px;">';
@@ -243,47 +242,13 @@ function refField(label, val) {
     '<div style="font-size:13px;color:#0f172a;white-space:pre-wrap;">'+ (val ? mdBold(val) : '—') +'</div></div>';
 }
 
-/* Бутон „🖨 Гаранционна карта ▾“ + менюто с бланките. Стои горе до заглавието
-   (renderReference), не в картата на марката — вижда се и без избрана марка.
-
-   РЪЧЕН избор на гаранционна карта вместо автоматично познаване по марка/категория —
-   автоматичното мапване често сочеше към грешен шаблон (потвърден бъг). Колегата,
-   който държи продукта, знае най-добре коя карта е правилната.
-
-   Имената (label) на шаблоните се четат от таблица warranty_templates,
-   редактируема през интерфейса (⚙️ Управление на записи) - не са твърдо кодирани. */
-function refTemplatePickerHtml() {
-  var WARRANTY_TEMPLATES = warrantyTemplates.length
-    ? warrantyTemplates.map(function(t){ return [t.filename, t.label]; })
-    : [
-      ['hobby.pdf','Hobby / Дребни артикули'],
-      ['heatmann.pdf','Heatmann / Кухненски ел. уреди'],
-      ['tayfun.pdf','Тайфун'],
-      ['mehanik.pdf','Механик / Ръчни инструменти'],
-      ['agromashini.pdf','Агро машини (косачки, тримери...)'],
-      ['smesiteli.pdf','Смесители'],
-      ['praskachka.pdf','Пръскачки'],
-      ['oranzherii.pdf','Оранжерии'],
-      ['monoblok.pdf','Моноблокове'],
-      ['powervac.pdf','Ел. инструменти (винтоверти, перфоратори...)'],
-      ['mivkialpaka.pdf','Мивки алпака'],
-      ['vrati.pdf','Метални входни врати']
-    ]; /* fallback, ако базата все още не е заредена/достъпна */
-  return '<div style="position:relative;display:inline-block;">' +
-      '<button onclick="var m=document.getElementById(\'ref-tpl-menu\');m.style.display=m.style.display===\'block\'?\'none\':\'block\';" style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">🖨 Гаранционна карта ▾</button>' +
-      '<div id="ref-tpl-menu" style="display:none;position:absolute;left:0;top:calc(100% + 4px);background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:260px;max-width:90vw;z-index:50;overflow:hidden;">' +
-        WARRANTY_TEMPLATES.map(function(t){
-          return '<a href="warranty-templates/'+encodeURIComponent(t[0])+'" target="_blank" style="display:block;padding:8px 12px;font-size:12.5px;color:#1a1a1a;text-decoration:none;border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">'+esc(t[1])+'</a>';
-        }).join('') +
-      '</div>' +
-    '</div>';
-}
-
 /* ── Гаранционни карти по сектори (24.11.2026; няколко сектора — 25.11.2026) ──
    Списъкът е константа; бланката се закача към един или няколко сектора с
    warranty_templates.sectors (text[]) от „⚙️ Управление на записи“ и излиза във
    всеки от тях. Сектор без бланка е сив бутон „няма бланка“ — не се скрива.
-   Бланка без сектор (sectors = null) е само в общото меню „🖨 Гаранционна карта ▾“. */
+   Бланка без сектор (sectors = null) не се вижда никъде в справочника — общото
+   меню „🖨 Гаранционна карта ▾“ е махнато (Теодор, 27.11.2026); в „Управление“
+   под нея стои жълто предупреждение. Размерите на реда — 15px (27.11.2026). */
 var REF_SECTORS = ['Машини','Градина','Осветление','Бои','Строителство','Баня',
   'Дом. потреби и текстил','Интериор и декорация'];
 var refOpenSector = -1; /* индекс в REF_SECTORS на отворения сектор, -1 = нито един */
@@ -298,16 +263,16 @@ function refSectorTemplates(idx) {
 }
 
 function refSectorRowHtml() {
-  var h = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0 8px;">' +
-    '<span style="font-size:12.5px;font-weight:600;color:#475569;margin-right:2px;">Гаранционни карти по сектори:</span>';
+  var h = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 10px;">' +
+    '<span style="font-size:15px;font-weight:600;color:#475569;margin-right:2px;">Гаранционни карти по сектори:</span>';
   REF_SECTORS.forEach(function(name, i){
     var n = refSectorTemplates(i).length;
     if (!n) {
-      h += '<button type="button" disabled data-sector="'+i+'" title="Към този сектор още няма закачена бланка" style="border:1px solid #e2e8f0;background:#f1f5f9;color:#94a3b8;border-radius:6px;padding:4px 10px;font-size:12px;cursor:default;">' +
-        esc(name) + ' <span style="font-size:10.5px;">· няма бланка</span></button>';
+      h += '<button type="button" disabled data-sector="'+i+'" title="Към този сектор още няма закачена бланка" style="border:1px solid #e2e8f0;background:#f1f5f9;color:#94a3b8;border-radius:6px;padding:8px 14px;font-size:15px;cursor:default;">' +
+        esc(name) + ' <span style="font-size:13px;">· няма бланка</span></button>';
     } else {
       var open = refOpenSector === i;
-      h += '<button type="button" data-sector="'+i+'" onclick="refToggleSector('+i+')" style="border:1px solid '+(open?'#2563eb':'#bfdbfe')+';background:'+(open?'#2563eb':'#eff6ff')+';color:'+(open?'#fff':'#1e40af')+';border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">' +
+      h += '<button type="button" data-sector="'+i+'" onclick="refToggleSector('+i+')" style="border:1px solid '+(open?'#2563eb':'#bfdbfe')+';background:'+(open?'#2563eb':'#eff6ff')+';color:'+(open?'#fff':'#1e40af')+';border-radius:6px;padding:8px 14px;font-size:15px;font-weight:600;cursor:pointer;">' +
         esc(name) + ' ('+n+')</button>';
     }
   });
@@ -315,7 +280,7 @@ function refSectorRowHtml() {
   if (refOpenSector >= 0 && refSectorTemplates(refOpenSector).length) {
     h += '<div id="ref-sector-list" style="background:#fff;border:1px solid #bfdbfe;border-radius:8px;padding:6px 0;margin-bottom:10px;max-width:520px;">' +
       refSectorTemplates(refOpenSector).map(function(t){
-        return '<a href="warranty-templates/'+encodeURIComponent(t.filename)+'" target="_blank" style="display:block;padding:6px 12px;font-size:12.5px;color:#1a1a1a;text-decoration:none;" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">🖨 '+esc(t.label)+'</a>';
+        return '<a href="warranty-templates/'+encodeURIComponent(t.filename)+'" target="_blank" style="display:block;padding:8px 14px;font-size:15px;color:#1a1a1a;text-decoration:none;" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">🖨 '+esc(t.label)+'</a>';
       }).join('') +
       '</div>';
   }
@@ -343,12 +308,28 @@ function refTemplateSectorChecksHtml(t) {
         '<input type="checkbox" data-sector="'+i+'"'+(cur.indexOf(s)>=0?' checked':'')+' onchange="refTemplateToggleSector(\''+t.id+'\','+i+',this)">' +
         esc(s) + '</label>';
     }).join('') +
-    '</div>';
+    '</div>' +
+    '<div data-tpl-nosector="'+esc(t.id)+'">' + refTplNoSectorHtml(cur.length > 0) + '</div>';
+}
+
+/* Бланка без нито един сектор не излиза никъде (общото меню е махнато, 27.11.2026). */
+function refTplNoSectorHtml(hasSector) {
+  return hasSector ? '' :
+    '<div style="margin-top:4px;background:#fef9c3;border:1px solid #fde047;color:#854d0e;border-radius:5px;padding:3px 8px;font-size:11.5px;font-weight:600;">⚠️ Без сектор — тази бланка не се вижда никъде в справочника.</div>';
+}
+
+/* Предупреждението следва отметките веднага — и при смяна, и при връщане след грешка. */
+function refTplNoSectorSync(id) {
+  var box = document.querySelector('[data-tpl-sectors="'+id+'"]');
+  var warn = document.querySelector('[data-tpl-nosector="'+id+'"]');
+  if (!box || !warn) return;
+  warn.innerHTML = refTplNoSectorHtml(!!box.querySelector('input[type="checkbox"]:checked'));
 }
 
 function refTemplateToggleSector(id, idx, cb) {
   var item = warrantyTemplates.find(function(x){return String(x.id)===String(id);});
   if (!item) return;
+  refTplNoSectorSync(id);
   var name = REF_SECTORS[idx];
   var on = cb.checked;
   var cur = refTplSectors(item);
@@ -359,6 +340,7 @@ function refTemplateToggleSector(id, idx, cb) {
   sbPatch('warranty_templates','id=eq.'+id,{sectors:val}).then(function(res){
     if (!res || !res.ok) {
       cb.checked = !on;
+      refTplNoSectorSync(id);
       toast('Грешка при запис на сектора: ' + sbErrMsg(res), '#dc2626');
       return;
     }
@@ -545,7 +527,7 @@ function openRefAdminList() {
 
     '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0;">' +
       '<div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Имена на гаранционни шаблони (карти) ('+warrantyTemplates.length+')</div>' +
-      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">Тук се редактира показваното име в менюто "🖨 Гаранционна карта" и секторът, под който бланката излиза в реда „Гаранционни карти по сектори“ — самите PDF файлове са в папката warranty-templates в репото.</div>' +
+      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">Тук се редактират показваното име на бланката и секторите ѝ — бланката излиза в реда „Гаранционни карти по сектори“ под всеки отметнат сектор — самите PDF файлове са в папката warranty-templates в репото.</div>' +
       '<div style="border:1px solid #e2e8f0;border-radius:8px;max-height:280px;overflow-y:auto;">' +
         warrantyTemplates.map(function(t){
           return '<div style="padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:12.5px;">' +
@@ -949,12 +931,3 @@ function submitRefLocations() {
     refLoadEntry(refSelBrand, refSelSubcat);
   });
 }
-
-/* Затваря dropdown менюто с гаранционните карти при клик извън него */
-document.addEventListener('click', function(e){
-  var menu = document.getElementById('ref-tpl-menu');
-  if (!menu || menu.style.display !== 'block') return;
-  if (menu.contains(e.target)) return;
-  if (e.target.tagName === 'BUTTON' && e.target.textContent.indexOf('Гаранционна карта') >= 0) return;
-  menu.style.display = 'none';
-});

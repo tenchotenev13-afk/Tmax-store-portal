@@ -3,8 +3,11 @@
    8 сектора в фиксиран ред; клик показва бланките на сектора
    (warranty_templates.sectors — text[]; бланка в два сектора излиза и в двата),
    втори клик затваря. Сектор без бланка е СИВ <button> с „няма бланка“ — не
-   се скрива. Бланка без сектор (null или []) е само в общото меню
-   „🖨 Гаранционна карта ▾“, което остава с всички.
+   се скрива. Общото меню „🖨 Гаранционна карта ▾“ е МАХНАТО (Теодор,
+   27.11.2026): бланка без сектор (null или []) не се вижда никъде, а в
+   „Управление“ под нея стои жълто „⚠️ Без сектор …“, което следва
+   отметките веднага. Редът със секторите е 15px (надпис, бутони, линкове),
+   бутоните — padding 8px 14px.
    „⚙️ Управление на записи“: 8 отметки на бланка → PATCH {sectors:[…]} в реда
    на REF_SECTORS; без нито една отметка → {sectors:null}, не []; грешка →
    червен toast и отметката се връща.
@@ -18,6 +21,12 @@
    М3 без връщане на отметката при грешка (махнат cb.checked = !on)
       → пада „отметката се връща“.
    Резултат: и трите — exit 1. Чистият код: exit 0.
+
+   Мутационна проверка (27.11.2026, махнато меню / предупреждение / размер):
+   М4 менюто остава — renderReference пак слага <button>„🖨 Гаранционна карта ▾“
+   М5 предупреждението не излиза — refTplNoSectorHtml връща винаги ''
+   М6 стар размер — бутоните на секторите пак с font-size:12px
+   Резултат: и трите — exit 1 (М4: 2 паднали, М5: 8, М6: 1). Чистият код: exit 0.
 
    Пускане: node tests/reference-sectors.test.js .
 */
@@ -79,6 +88,11 @@ function checks(doc, id) {
   const box = doc.querySelector('#ref-admin-ov [data-tpl-sectors="' + id + '"]');
   return box ? Array.prototype.slice.call(box.querySelectorAll('input[type="checkbox"]')) : [];
 }
+/* жълтото „Без сектор“ под бланката в „Управление на записи“ */
+function noSector(doc, id) {
+  const el = doc.querySelector('#ref-admin-ov [data-tpl-nosector="' + id + '"]');
+  return !!el && el.textContent.indexOf('⚠️ Без сектор — тази бланка не се вижда никъде в справочника.') >= 0;
+}
 /* истински клик по отметка: браузърът обръща checked, после пуска onchange */
 function clickCheck(w, cb) {
   cb.checked = !cb.checked;
@@ -139,14 +153,11 @@ function clickCheck(w, cb) {
     });
     ok('vrati.pdf (null) не е в нито един сектор', all.indexOf('warranty-templates/vrati.pdf') < 0);
     ok('agromashini.pdf ([]) не е в нито един сектор', all.indexOf('warranty-templates/agromashini.pdf') < 0);
-    const menu = doc.getElementById('ref-tpl-menu');
-    const pick = Array.prototype.find.call(doc.querySelectorAll('#mod-reference button'),
-      x => x.textContent.indexOf('Гаранционна карта') >= 0);
-    realClick(w, pick, 'Гаранционна карта');
-    ok('„Гаранционна карта“ отваря менюто', menu.style.display === 'block');
-    ok('общото меню е с всички ' + N_TPL + ' бланки', menu.querySelectorAll('a').length === N_TPL);
-    ok('общото меню има vrati.pdf', !!menu.querySelector('a[href="warranty-templates/vrati.pdf"]'));
-    ok('общото меню има hobby.pdf веднъж', menu.querySelectorAll('a[href="warranty-templates/hobby.pdf"]').length === 1);
+    /* общото меню е махнато (27.11.2026) */
+    ok('няма <button> с „Гаранционна карта“', !Array.prototype.some.call(doc.querySelectorAll('button'),
+      x => x.textContent.indexOf('Гаранционна карта') >= 0));
+    ok('няма #ref-tpl-menu', !doc.getElementById('ref-tpl-menu'));
+    ok('vrati.pdf не е никъде на страницата', !doc.querySelector('a[href="warranty-templates/vrati.pdf"]'));
   }
 
   section('2. Управление на записи — отметки правят PATCH {sectors}');
@@ -166,11 +177,23 @@ function clickCheck(w, cb) {
     ok('hobby: отметнати Машини и Градина, само те',
       hb.map((c, i) => c.checked ? SECTORS[i] : null).filter(Boolean).join('|') === 'Машини|Градина');
     ok('vrati: нищо отметнато', checks(doc, 't12').every(c => !c.checked));
+    ok('текстът не говори за менюто „Гаранционна карта“', ov.textContent.indexOf('Гаранционна карта') < 0);
+    ok('текстът казва, че бланката излиза под отметнатите сектори',
+      ov.textContent.indexOf('под всеки отметнат сектор') >= 0);
+    ok('жълто „Без сектор“ под vrati (null)', noSector(doc, 't12'));
+    ok('жълто „Без сектор“ под agromashini ([])', noSector(doc, 't11'));
+    ok('жълто „Без сектор“ под heatmann (null)', noSector(doc, 't2'));
+    ok('hobby (със сектор) — без предупреждение', !noSector(doc, 't1'));
+    ok('предупрежденията са точно 3', ov.textContent.split('Без сектор').length - 1 === 3);
+    const warnEl = doc.querySelector('[data-tpl-nosector="t12"] div');
+    ok('предупреждението е жълто', warnEl && /background:#fef9c3/.test(warnEl.getAttribute('style')));
 
     /* vrati: отмятане в обратен ред — масивът пак е в реда на REF_SECTORS */
     const vr = checks(doc, 't12');
     clickCheck(w, vr[5]); /* Баня */
+    ok('отметка → предупреждението изчезва веднага (преди отговора)', !noSector(doc, 't12'));
     await ticks();
+    ok('след записа предупреждението го няма', !noSector(doc, 't12'));
     let p = calls.patch[calls.patch.length - 1];
     ok('PATCH към warranty_templates за vrati', p && p.table === 'warranty_templates' && /id=eq\.t12/.test(p.url), p && p.url);
     ok('тяло {sectors:["Баня"]}', p && JSON.stringify(p.body) === '{"sectors":["Баня"]}', p && JSON.stringify(p.body));
@@ -188,11 +211,14 @@ function clickCheck(w, cb) {
     await ticks();
     p = calls.patch[calls.patch.length - 1];
     ok('махане на Баня → {sectors:["Строителство"]}', p && JSON.stringify(p.body) === '{"sectors":["Строителство"]}', p && JSON.stringify(p.body));
+    ok('една отметка остава → без предупреждение', !noSector(doc, 't12'));
     clickCheck(w, vr[4]); /* маха последната */
+    ok('махане на последната → предупреждението се появява веднага', noSector(doc, 't12'));
     await ticks();
     p = calls.patch[calls.patch.length - 1];
     ok('последната отметка → PATCH {sectors:null}, не []', p && JSON.stringify(p.body) === '{"sectors":null}', p && JSON.stringify(p.body));
     ok('Строителство пак е празен', sectorBtn(doc, 'Строителство').disabled);
+    ok('след записа предупреждението стои', noSector(doc, 't12'));
 
     /* hobby: махане на Машини оставя Градина */
     clickCheck(w, checks(doc, 't1')[0]);
@@ -205,6 +231,7 @@ function clickCheck(w, cb) {
     await ticks();
     p = calls.patch[calls.patch.length - 1];
     ok('agromashini ([]) + Градина → {sectors:["Градина"]}', p && JSON.stringify(p.body) === '{"sectors":["Градина"]}', p && JSON.stringify(p.body));
+    ok('agromashini — предупреждението изчезна', !noSector(doc, 't11'));
   }
 
   section('3. Грешка при запис — червен toast, отметката се връща');
@@ -216,8 +243,10 @@ function clickCheck(w, cb) {
     w.openRefAdminList();
     const cb = checks(doc, 't12')[3]; /* Бои */
     clickCheck(w, cb);
+    ok('при отметка предупреждението изчезва веднага', !noSector(doc, 't12'));
     await ticks();
     ok('PATCH е опитан', calls.patch.length === 1);
+    ok('грешка → отметката се връща и предупреждението пак стои', noSector(doc, 't12'));
     const red = h.toastColors.find(t => t[1] === '#dc2626');
     ok('червен toast', !!red, JSON.stringify(h.toastColors));
     ok('с причината от базата', red && red[0].indexOf('sectors') >= 0);
@@ -232,7 +261,52 @@ function clickCheck(w, cb) {
     ok('Машини остава (3)', sectorBtn(doc, 'Машини').textContent.indexOf('(3)') >= 0);
   }
 
-  section('4. Обектът не вижда „Управление на записи“');
+  section('4. vrati.pdf през сектор „Строителство“ — обект, без избрана марка');
+  {
+    const tpls = templates().map(t => t.id === 't12' ? Object.assign({}, t, { sectors: ['Строителство'] }) : t);
+    const { w, doc } = env(STORE_USER, { data: {
+      warranty_subcategories: [], warranty_brands: [], warranty_entries: [],
+      warranty_templates: tpls, warranty_service_locations: [] } });
+    w.loadReference();
+    await ticks();
+    ok('няма избрана марка', !w.refSelBrand);
+    ok('преди клик vrati.pdf го няма', !doc.querySelector('a[href="warranty-templates/vrati.pdf"]'));
+    const st = sectorBtn(doc, 'Строителство');
+    ok('Строителство (1), активен', st && !st.disabled && st.textContent.indexOf('(1)') >= 0, st && st.textContent);
+    realClick(w, st, 'Строителство');
+    const a = doc.querySelector('#ref-sector-list a[href="warranty-templates/vrati.pdf"]');
+    ok('Строителство → линк към vrati.pdf', !!a);
+    ok('в нов таб, с името „Метални входни врати“', a && a.getAttribute('target') === '_blank' &&
+      a.textContent.indexOf('Метални входни врати') >= 0);
+  }
+
+  section('5. Размери на реда със секторите (Теодор, 27.11.2026)');
+  {
+    const { w, doc } = env(STORE_USER);
+    w.loadReference();
+    await ticks();
+    const label = Array.prototype.find.call(doc.querySelectorAll('#ref-sector-wrap span'),
+      x => x.textContent.indexOf('Гаранционни карти по сектори:') === 0);
+    ok('надписът е 15px', label && /font-size:15px/.test(label.getAttribute('style')), label && label.getAttribute('style'));
+    const active = sectorBtns(doc).filter(b => !b.disabled);
+    const grey = sectorBtns(doc).filter(b => b.disabled);
+    ok('активните бутони — 15px, padding 8px 14px', active.length === 3 && active.every(b =>
+      /font-size:15px/.test(b.getAttribute('style')) && /padding:8px 14px/.test(b.getAttribute('style'))),
+      active.map(b => b.getAttribute('style')).join(' || '));
+    ok('сивите — 15px, padding 8px 14px, пак сиви и неактивни', grey.length === 5 && grey.every(b =>
+      /font-size:15px/.test(b.getAttribute('style')) && /padding:8px 14px/.test(b.getAttribute('style')) &&
+      /color:#94a3b8/.test(b.getAttribute('style')) && /background:#f1f5f9/.test(b.getAttribute('style')) &&
+      b.disabled && !b.getAttribute('onclick')));
+    ok('редът се пренася (flex-wrap:wrap)', label && /flex-wrap:wrap/.test(label.parentNode.getAttribute('style')));
+    realClick(w, sectorBtn(doc, 'Машини'), 'Машини');
+    const links = Array.prototype.slice.call(doc.querySelectorAll('#ref-sector-list a'));
+    ok('линковете към бланките — 15px', links.length === 3 && links.every(a => /font-size:15px/.test(a.getAttribute('style'))),
+      links.map(a => a.getAttribute('style')).join(' || '));
+    const ls = doc.getElementById('ref-sector-list').getAttribute('style');
+    ok('списъкът е с max-width, без фиксирана ширина', /max-width:520px/.test(ls) && !/(^|;)width:/.test(ls));
+  }
+
+  section('6. Обектът не вижда „Управление на записи“');
   {
     const { w, doc } = env(STORE_USER);
     w.loadReference();

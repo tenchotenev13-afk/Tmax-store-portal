@@ -590,7 +590,6 @@ const TESTS = [
   'co-comment-pending.test.js',
   'korekcii-1511.test.js',
   'publish-instrukcii.test.js',
-  'reference-template-picker.test.js',
   'reference-sectors.test.js',
   'storage-files-index-readonly.test.js',
   'mirror-reader-key.test.js',
