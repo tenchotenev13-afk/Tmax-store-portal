@@ -2415,5 +2415,17 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     sel.value = 'Б';
   }
 
+  {
+    // Пакет 1, т.8: логистичният склад (без ВТР, in_scope: false) — не се предлага и не се отваря по подразбиране.
+    const S = makeServer();
+    const h0 = S.handle;
+    S.handle = (u, b) => { const r = h0(u, b); if (b.action === 'me' && r.body && r.body.ok) r.body.stores = [{ name: 'Логистичен склад Добрич', can_edit: true, in_scope: false }, { name: 'Шумен', can_edit: true, in_scope: true }, { name: 'Кърджали', can_edit: false, in_scope: true }]; return r; };
+    const x = env(REG, { server: S, beta: BETA_ALL }); await load(x);
+    const opts = Array.from(x.doc.querySelectorAll('#gr-toolbar select option')).map(o => o.value || o.textContent);
+    ok('т.8: обектът по подразбиране — първият в обхвата (Шумен), не складът', x.w.grStore === 'Шумен', x.w.grStore);
+    ok('т.8: в избора — без логистичния склад', opts.length > 0 && opts.indexOf('Логистичен склад Добрич') < 0 && opts.indexOf('Шумен') >= 0, opts.join(','));
+    ok('т.8: без грешка на екрана', !x.doc.getElementById('gr-error'));
+  }
+
   report();
 })();

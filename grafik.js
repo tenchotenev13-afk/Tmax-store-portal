@@ -163,6 +163,9 @@ function grPinLock(){
   var card = document.getElementById('gr-admin-card');
   if(card) card.innerHTML = '<div class="card-title">📆 График</div>' + grPinFormHtml('adm', grMe && grMe.pin, '🔒 Въведи ПИН-а за графика.');
 }
+/* Пакет 1, т.8: обектите за избор — само в обхвата на графика (дружество + ВТР; me.in_scope). Логистичните
+   складове и „Централен офис“ не се предлагат и не се отварят по подразбиране. Стар сървър (без in_scope) — всички. */
+function grScopeStores(){ return ((grMe && grMe.stores) || []).filter(function(s){ return s.in_scope !== false; }); }
 /* Без ПИН ли е „me“ (сървър от етап Б)? Стар сървър — без поле pin → както досега. */
 function grNeedsPin(me){ return !!me && !!me.pin && me.unlocked === false; }
 function grPinFormHtml(ctx, pin, lead){
@@ -332,7 +335,7 @@ function loadGrafik(){
     }
     /* Етап Б: без отключен ПИН — само формулярът (задаване първия път / въвеждане). */
     if(grNeedsPin(grMe)){ el.innerHTML = grTitle() + grPinFormHtml('mod', grMe.pin); return; }
-    var names = (grMe.stores || []).map(function(s){ return s.name; });
+    var names = grScopeStores().map(function(s){ return s.name; });
     if(!grStore || names.indexOf(grStore) < 0){
       grStore = (currentUser && names.indexOf(currentUser.store_name) >= 0) ? currentUser.store_name : (names[0] || '');
     }
@@ -800,7 +803,7 @@ function grGroupCovHtml(sk){
 /* ─── Рендер ───────────────────────────────────────────── */
 function grTitle(){ return '<div class="pg-title">📆 Работен график <span style="font-size:12px;color:#f59e0b;font-weight:600;">· в разработка</span></div>'; }
 function grToolbar(){
-  var stores = (grMe && grMe.stores) || [], trz = !!grMe && grMe.kind === 'trz';
+  var stores = grScopeStores(), trz = !!grMe && grMe.kind === 'trz';
   /* ТРЗ: в избора — само обектите с подаден график за месеца (от обзора). */
   if(trz && grOverview) stores = (grOverview.stores || []).map(function(s){ return { name: s.store }; });
   var h = '<div class="card" id="gr-toolbar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';

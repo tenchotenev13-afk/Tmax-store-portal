@@ -4,7 +4,7 @@
 // свой/чужд обект, пропуска, beta/ТРЗ списъците, клетките, снимката и валидността по дати.
 import {
   handleGrafik, HttpError, accessEmails, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
-  snapshotOffNorm, sameAsPlanned, staleChanges, roleOf, activeInMonth, returnMail, PORTAL_URL,
+  snapshotOffNorm, sameAsPlanned, staleChanges, roleOf, activeInMonth, returnMail, PORTAL_URL, sofiaMonthStart,
   type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector, type RowStat, type AccessRow, type ChangeRow,
   type GAuditEntry, type PinState,
 } from "./handler.ts";
@@ -301,10 +301,10 @@ Deno.test("me: вид и видими обекти за всеки", async () =>
   const me = async (u: User) => (await call(r, u, { action: "me" })).body;
   const a = await me(U.admin); eq([a.kind, a.stores.length, a.can_admin], ["admin", 4, true], "admin");
   const t = await me(U.trz); eq([t.kind, t.stores.length, t.can_admin, t.stores.some((s: { can_edit: boolean }) => s.can_edit)], ["trz", 4, false, false], "ТРЗ (role admin) — само чете");
-  const m = await me(U.mgrK); eq([m.kind, m.stores], ["manager", [{ name: "Кърджали", can_edit: true }]], "manager");
-  const v = await me(U.sklK); eq([v.kind, v.stores], ["viewer", [{ name: "Кърджали", can_edit: false }]], "склад");
+  const m = await me(U.mgrK); eq([m.kind, m.stores], ["manager", [{ name: "Кърджали", can_edit: true, in_scope: true }]], "manager");
+  const v = await me(U.sklK); eq([v.kind, v.stores], ["viewer", [{ name: "Кърджали", can_edit: false, in_scope: true }]], "склад");
   const g = await me(U.regSh); eq([g.kind, g.stores.map((s: { name: string }) => s.name), g.can_reopen], ["regional", ["Шумен", "Добрич"], true], "регионален");
-  const ar = await me(U.admReg); eq(ar.kind, "admin", "admin с is_regional остава admin");
+  const ar = await me(U.admReg); eq([ar.kind, ar.can_admin, ar.stores.length], ["regional", false, 4], "admin с is_regional → регионален (пакет 1, т.8): чете всички");
 });
 
 // ── Матрица чете / пише ──────────────────────────────────────────────────
@@ -1526,4 +1526,51 @@ Deno.test("log: новите видове — ZIP, обобщение, прис�
   for (const w of ["export_zip", "export_summary", "print_presence_today"]) eq((await call(r, U.admin, { action: "log", what: w, store: "Кърджали", month: "2026-11" })).status, 200, w);
   const ev = r.gaudits.map((e) => e.event);
   assert(["grafik_export_zip", "grafik_export_summary", "grafik_print_presence_today"].every((e) => ev.indexOf(e) >= 0), ev.join(","));
+});
+
+// ── Пакет 1, т.8 (27.11.2026): регионален с роля edit пише само в своите обекти, дори да е admin в портала ──
+Deno.test("т.8 регионален admin (edit): свой обект — пише; чужд — чете, 403 при запис; admin без is_regional — всички", async () => {
+  const r = new MemRepo();
+  // v.filev: admin в портала, is_regional, assigned = Шумен + логистичен склад (без ВТР); в beta (= edit).
+  r.stores.push("Логистичен склад Добрич");
+  const reg = { ...U.admReg, assigned_stores: ["Шумен", "Логистичен склад Добрич"] };
+  r.users = r.users.map((u) => u.id === reg.id ? reg : u);
+  const sh = kStaff(r, "Шумен")[0], kj = kStaff(r)[0], rd = kStaff(r, "Раднево")[0];
+  const save = (u: User, store: string, sid: string) => call(r, u, { action: "save_rows", store, month: "2026-11", rows: [{ staff_id: sid, letters: L30(["П"]) }] });
+  const table: [string, User, string, string, number][] = [
+    ["регионален admin — свой (Шумен)", reg, "Шумен", sh, 200],
+    ["регионален admin — чужд (Кърджали)", reg, "Кърджали", kj, 403],
+    ["регионален admin — чужд (Раднево)", reg, "Раднево", rd, 403],
+    ["admin без is_regional — Кърджали", U.admin, "Кърджали", kj, 200],
+    ["admin без is_regional — Раднево", U.admin, "Раднево", rd, 200],
+    ["регионален (accounting) — свой (Шумен)", U.regSh, "Шумен", sh, 200],
+    ["регионален (accounting) — чужд (Кърджали)", U.regSh, "Кърджали", kj, 403],
+  ];
+  for (const [name, u, store, sid, want] of table) eq((await save(u, store, sid)).status, want, name);
+  eq((await call(r, reg, { action: "load_month", store: "Кърджали", month: "2026-11" })).body.can_edit, false, "чужд — чете, без редакция");
+  eq((await call(r, reg, { action: "load_month", store: "Шумен", month: "2026-11" })).body.can_edit, true, "свой — редакция");
+  for (const [action, body] of [
+    ["staff_save", { store: "Кърджали", fields: { short_name: "Х", full_name: "Х Х" } }],
+    ["sector_save", { store: "Кърджали", name: "Нов" }],
+    ["admin_get", {}], ["access_list", {}],
+    ["staff_move", { id: sh, to_store: "Кърджали", date: "2026-12-01" }],
+  ] as [string, Record<string, unknown>][]) eq((await call(r, reg, { action, ...body })).status, 403, "регионален admin — " + action + " — 403");
+  const r2 = new MemRepo(); r2.users = r2.users.map((u) => u.id === reg.id ? reg : u);
+  await submittedK(r2);
+  eq((await call(r2, reg, { action: "approve", store: "Кърджали", month: "2026-11" })).status, 403, "не одобрява (и в чужд)");
+  eq((await call(r2, reg, { action: "return", store: "Кърджали", month: "2026-11", comment: "x" })).status, 403, "не връща чужд");
+  eq(r2.months[0].status, "submitted", "…и месецът е непокътнат");
+  // me: всички обекти за четене; логистичният склад — без ВТР → in_scope: false (браузърът не го предлага).
+  const me = (await call(r, reg, { action: "me" })).body;
+  const st: Record<string, { can_edit: boolean; in_scope: boolean }> = {};
+  (me.stores as { name: string; can_edit: boolean; in_scope: boolean }[]).forEach((x) => { st[x.name] = x; });
+  eq([me.kind, me.can_admin, st["Шумен"].can_edit, st["Кърджали"].can_edit, st["Логистичен склад Добрич"].in_scope, st["Шумен"].in_scope],
+    ["regional", false, true, false, false, true], "me: свой — пише; чужд — чете; складът — извън обхвата");
+  const ov = (await call(r, reg, { action: "overview", month: "2026-11" })).body;
+  assert(ov.status !== 500 && !(ov.stores as { store: string }[]).some((x) => x.store === "Логистичен склад Добрич"), "обзорът — без склада, без грешка");
+});
+
+Deno.test("sofiaMonthStart: границата на месеца по българско време", () => {
+  eq(sofiaMonthStart(Date.UTC(2026, 10, 30, 22, 30) / 1000), "2026-12-01", "30.11 22:30 UTC = 01.12 00:30 София");
+  eq(sofiaMonthStart(Date.UTC(2026, 10, 30, 21, 30) / 1000), "2026-11-01", "30.11 21:30 UTC = 23:30 София");
 });

@@ -178,14 +178,24 @@ export function resolveAccess(u: User, grole: GrafikRole | null, canResetPin = f
   if (grole === "trz") return { ...base, kind: "trz", readAll: true, read: [], edit: [], canAdmin: false, canReopen: false, canResetPin };
   if (grole === "view") return { ...base, kind: "view", readAll: true, read: [], edit: [], canAdmin: false, canReopen: false, canResetPin };
   // edit — по правата в портала, както досега.
-  if (u.role === "admin") return { ...base, kind: "admin", readAll: true, read: [], edit: "all", canAdmin: true, canReopen: true, canResetPin: true };
   const assigned = Array.isArray(u.assigned_stores) ? u.assigned_stores.filter((s) => typeof s === "string" && s) : [];
+  // Пакет 1, т.8 (решение на Тенчо 27.11.2026): регионален (is_regional + assigned_stores) пише само в своите
+  // обекти, дори ролята му в портала да е admin; чужди — само четене. Не одобрява и не администрира графика
+  // (иначе „✔ Одобри“ / картата биха писали и в чужди обекти). Admin без is_regional — всички, както досега.
+  if (u.role === "admin" && u.is_regional && assigned.length) return { ...base, kind: "regional", readAll: true, read: [], edit: assigned, canAdmin: false, canReopen: true, canResetPin };
+  if (u.role === "admin") return { ...base, kind: "admin", readAll: true, read: [], edit: "all", canAdmin: true, canReopen: true, canResetPin: true };
   if (u.is_regional && assigned.length) return { ...base, kind: "regional", readAll: false, read: assigned, edit: assigned, canAdmin: false, canReopen: true, canResetPin };
   const own = u.store_name ? [u.store_name] : [];
   if (u.role === "manager") return { ...base, kind: "manager", readAll: false, read: own, edit: own, canAdmin: false, canReopen: false, canResetPin };
   return { ...base, kind: "viewer", readAll: false, read: own, edit: [], canAdmin: false, canReopen: false, canResetPin };
 }
 
+// Първият ден на текущия месец по българско време (ГГГГ-ММ-01).
+export function sofiaMonthStart(nowS: number): string {
+  const p = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Sofia", year: "numeric", month: "2-digit" }).formatToParts(new Date(nowS * 1000));
+  const y = p.filter((x) => x.type === "year")[0].value, m = p.filter((x) => x.type === "month")[0].value;
+  return y + "-" + m + "-01";
+}
 export const canRead = (a: Access, store: string) => a.readAll || a.read.indexOf(store) >= 0;
 export const canEdit = (a: Access, store: string) => a.edit === "all" || a.edit.indexOf(store) >= 0;
 
@@ -805,7 +815,11 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
       if (!unlocked) return { ...base, stores: [] };
       const names = await repo.storeNames();
       const visible = acc.readAll ? names : names.filter((n) => acc.read.indexOf(n) >= 0);
-      return { ...base, stores: visible.map((n) => ({ name: n, can_edit: canEdit(acc, n) })) };
+      // Пакет 1, т.8: in_scope — обектът има дружество И ВТР за текущия месец (scopeStores, както „Обекти“).
+      // Логистичните складове (ТЦД 2, без ВТР) и „Централен офис“ остават видими, но браузърът не ги
+      // предлага за избор и не отваря графика им по подразбиране — без грешка „липсва дружество“.
+      const sc = await scopeStores(repo, visible, sofiaMonthStart(nowS));
+      return { ...base, stores: visible.map((n) => ({ name: n, can_edit: canEdit(acc, n), in_scope: !!sc.company[n] })) };
     }
 
     // ── Етап В: печат / файл (браузърът казва какво), одит — кой и за кой обект.
