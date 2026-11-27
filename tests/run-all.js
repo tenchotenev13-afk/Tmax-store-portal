@@ -469,6 +469,7 @@ const TESTS = [
   'checklist-email.test.js',
   'checklist-send.test.js',
   'checklist-email-recipients.test.js',
+  'checklist-gap-streak.test.js',
   'checklist-store-view.test.js',
   'checklist-responses-view.test.js',
   'checklist-streak.test.js',

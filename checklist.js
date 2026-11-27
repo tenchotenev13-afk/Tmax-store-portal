@@ -2322,42 +2322,68 @@ function checklistEmailFromPortal(metric, row) {
   return c === null || c === undefined || c === '';
 }
 
+/* Пропуск в колона С БРОЙ по ефективния текст на клетката — ЕДНОТО правило
+   за блока „Пропуски" и за поредицата им (checklistGapStreak):
+     · сторната (module:wrong_receipt, „поръчки/позиции") — първото число > 0;
+     · иначе „N/M" с N < M.
+   „не", „да", „нямат", празно, N/N, 0/0 → не е пропуск в брой. */
+function checklistIsCountGap(metric, txt) {
+  if (txt === null || txt === undefined || txt === '') return false;
+  if (checklistModuleId(metric) === 'wrong_receipt') return parseFloat(String(txt).split('/')[0]) > 0;
+  var nm = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(txt);
+  return !!nm && Number(nm[1]) < Number(nm[2]);
+}
+
 /* Пропуските на ЕДИН обект, в реда на колоните.
    gapDays: { 'обект|колона': [ISO дати] } или null (не са заредени).
-   → [{ metric, text, days: [ISO]|null, daysLost: bool }]
+   streakCtx (незадължителен, 27.11.2026): { rows, year, week } — редовете на
+   седмицата + историята; дава streak на всеки пропуск в брой.
+   → [{ metric, text, days: [ISO]|null, daysLost: bool, streak: число }]
    daysLost — колона 'count' с пропуск от портала, за която дни няма или не
    съвпадат с M − N (за предупреждението след изпращане). */
-function checklistStoreGaps(store, rows, metrics, gapDays) {
+function checklistStoreGaps(store, rows, metrics, gapDays, streakCtx) {
   var idx = {};
   (rows || []).forEach(function (r) { if (r) idx[r.store_name + ' ' + r.metric_key] = r; });
+  var streakOf = function (m) {
+    return streakCtx ? checklistGapStreak(streakCtx.rows, m, store, streakCtx.year, streakCtx.week) : 0;
+  };
   var out = [];
   (metrics || []).forEach(function (m) {
     var row = idx[store + ' ' + m.key];
     var txt = checklistEmailCellValue(m, row);
     if (txt === '') return;
     if (checklistModuleId(m) === 'wrong_receipt') {
+      if (!checklistIsCountGap(m, txt)) return;
       var sp = String(txt).split('/');
-      var orders = parseFloat(sp[0]);
-      if (!(orders > 0)) return;
       out.push({ metric: m, text: 'сторнирани: ' + sp[0].trim() + ' поръчки' +
-        (sp.length > 1 ? ' / ' + sp[1].trim() + ' позиции' : ''), days: null, daysLost: false });
+        (sp.length > 1 ? ' / ' + sp[1].trim() + ' позиции' : ''), days: null, daysLost: false, streak: streakOf(m) });
       return;
     }
-    if (txt === 'не') { out.push({ metric: m, text: 'не', days: null, daysLost: false }); return; }
+    if (txt === 'не') { out.push({ metric: m, text: 'не', days: null, daysLost: false, streak: 0 }); return; }
+    if (!checklistIsCountGap(m, txt)) return;
     var nm = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(txt);
-    if (!nm || !(Number(nm[1]) < Number(nm[2]))) return;
     var days = null, lost = false;
     if (m.portal_mode === 'count' && checklistEmailFromPortal(m, row)) {
       var d = gapDays ? gapDays[store + '|' + m.key] : null;
       if (Array.isArray(d) && d.length && d.length === Number(nm[2]) - Number(nm[1])) days = d;
       else lost = true;
     }
-    out.push({ metric: m, text: txt, days: days, daysLost: lost });
+    out.push({ metric: m, text: txt, days: days, daysLost: lost, streak: streakOf(m) });
   });
   return out;
 }
 
-/* Блокът над таблицата. Само inline стилове. */
+/* „· 2-ра поредна седмица" … „· 8+ поредни седмици"; 1-ва и 0 → ''. */
+function checklistGapStreakLabel(n) {
+  if (!(n >= 2)) return '';
+  if (n >= CHECKLIST_STREAK_MAX) return CHECKLIST_STREAK_MAX + '+ поредни седмици';
+  var suf = n === 2 ? 'ра' : (n === 7 || n === 8) ? 'ма' : 'та';
+  return n + '-' + suf + ' поредна седмица';
+}
+
+/* Блокът над таблицата. Само inline стилове.
+   Пропуск в брой от 2-ра поредна седмица → „· N-та поредна седмица";
+   от 3-тата редът е тъмночервен (CHECKLIST_EMAIL_HOT), 27.11.2026. */
 function checklistEmailGapsHtml(store, weekNumber, items) {
   if (!items.length) {
     return '<div style="margin-bottom:16px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:13px;color:#166534;font-weight:600;">' +
@@ -2367,9 +2393,14 @@ function checklistEmailGapsHtml(store, weekNumber, items) {
     '<div style="font-size:14px;font-weight:700;color:#991b1b;margin-bottom:6px;">Пропуски на ' + escVal(store) +
       ' за седмица ' + escVal(String(weekNumber)) + '</div>' +
     items.map(function (it) {
-      return '<div style="padding:3px 0;font-size:13px;color:#334155;">' +
+      var lbl = checklistGapStreakLabel(it.streak);
+      var hot = it.streak >= 3;
+      return '<div style="' + (hot
+          ? 'padding:3px 6px;margin:2px 0;border-radius:4px;font-size:13px;background:' + CHECKLIST_EMAIL_HOT.bg + ';color:' + CHECKLIST_EMAIL_HOT.fg + ';'
+          : 'padding:3px 0;font-size:13px;color:#334155;') + '">' +
         '<b>' + escVal(it.metric.label) + '</b>: ' + escVal(it.text) +
         (it.days ? ' — без отметка: ' + escVal(it.days.map(checklistGapDayLabel).join(', ')) : '') +
+        (lbl ? ' · ' + escVal(lbl) : '') +
         '</div>';
     }).join('') +
     '</div>';
@@ -2380,10 +2411,10 @@ function checklistEmailGapsHtml(store, weekNumber, items) {
      · 'regional' — всеки обект: червен блок или зелен ред „Няма пропуски на X";
      · 'general'  — само обектите с пропуски; нито един → един зелен ред
        „Няма пропуски за седмицата" (същият като в писмото на обекта). */
-function checklistEmailGapsMultiHtml(stores, mode, weekNumber, rows, metrics, gapDays) {
+function checklistEmailGapsMultiHtml(stores, mode, weekNumber, rows, metrics, gapDays, streakCtx) {
   var out = '';
   (stores || []).forEach(function (store) {
-    var items = checklistStoreGaps(store, rows, metrics, gapDays);
+    var items = checklistStoreGaps(store, rows, metrics, gapDays, streakCtx);
     if (items.length) { out += checklistEmailGapsHtml(store, weekNumber, items); return; }
     if (mode === 'regional') {
       out += '<div style="margin-bottom:10px;padding:8px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:13px;color:#166534;font-weight:600;">' +
@@ -2440,8 +2471,12 @@ function checklistPrevIsoWeek(year, week) {
   return checklistIsoWeekOf(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() - 7));
 }
 
-function checklistNoStreak(rows, metric, store, year, week) {
-  if (!metric || metric.value_type === 'number') return 0;
+/* Обходът на поредицата — общ за „не" и за пропуските в брой (27.11.2026):
+   поредни седмици назад по реални дати, докато isFail(текст на клетката)
+   е вярно; липсващ ред дава '' и прекъсва; най-много CHECKLIST_STREAK_MAX.
+   Копието в report.js / index.ts държи същия цикъл вграден в
+   reportChecklistNoStreak — поведението сверява checklist-streak.test.js. */
+function checklistWeekStreak(rows, metric, store, year, week, isFail) {
   var idx = {};
   (rows || []).forEach(function (r) {
     if (r) idx[r.store_name + '|' + r.metric_key + '|' + Number(r.year) + '|' + Number(r.week_number)] = r;
@@ -2449,11 +2484,23 @@ function checklistNoStreak(rows, metric, store, year, week) {
   var n = 0, cur = { year: year, week: week };
   while (n < CHECKLIST_STREAK_MAX) {
     var row = idx[store + '|' + metric.key + '|' + cur.year + '|' + cur.week];
-    if (checklistEmailCellValue(metric, row) !== 'не') break;
+    if (!isFail(checklistEmailCellValue(metric, row))) break;
     n++;
     cur = checklistPrevIsoWeek(cur.year, cur.week);
   }
   return n;
+}
+
+function checklistNoStreak(rows, metric, store, year, week) {
+  if (!metric || metric.value_type === 'number') return 0;
+  return checklistWeekStreak(rows, metric, store, year, week, function (t) { return t === 'не'; });
+}
+
+/* Поредни седмици с пропуск в брой (checklistIsCountGap) в същата клетка —
+   решение на Тенчо 27.11.2026. Ръчно „да" / „не" или N/N прекъсва. */
+function checklistGapStreak(rows, metric, store, year, week) {
+  if (!metric) return 0;
+  return checklistWeekStreak(rows, metric, store, year, week, function (t) { return checklistIsCountGap(metric, t); });
 }
 
 /* „нова" / „2-ра седмица подред" / „3-та …" / „8+ седмици подред". */
@@ -2531,6 +2578,29 @@ function checklistEmailResponsesHtml(year, weekNumber, rows, metrics, stores, ex
     '</div>';
 }
 
+/* „Становища за седмица M" (M = предходната на изпращаната) — САМО в
+   писмото до регионалните и общата група (extra.audience 'office'),
+   27.11.2026. Блокът е reportChecklistResponsesHtml от report.js — същият
+   като в неделния отчет (текст / „няма становище" / „след срока" / сив ред
+   за неизпратена M), не копие; синхронът му с едж функцията го пази
+   report-edge-sync.test.js. Обхват — extra.gapStores (регионалният —
+   своите, общата група — всички). Данните са от checklistLoadEmailExtra;
+   провалена заявка (extra.prevOk ≠ true) → без блока, както в отчета. */
+function checklistEmailPrevResponsesHtml(year, weekNumber, metrics, extra) {
+  if (!extra || extra.audience !== 'office' || extra.prevOk !== true) return '';
+  if (typeof reportChecklistResponsesHtml !== 'function') return '';
+  var stores = Array.isArray(extra.gapStores) ? extra.gapStores : [];
+  var prev = checklistPrevIsoWeek(year, weekNumber);
+  var inScope = function (x) { return x && stores.indexOf(x.store_name) >= 0; };
+  var inM = function (x) { return Number(x.year) === prev.year && Number(x.week_number) === prev.week; };
+  var hist = (Array.isArray(extra.history) ? extra.history : []).filter(inScope);
+  return reportChecklistResponsesHtml({ checklist: { metrics: metrics || [], stores: stores, prev: {
+    year: prev.year, week: prev.week, sent: extra.prevSent === true,
+    rows: hist.filter(inM), history: hist,
+    responses: (Array.isArray(extra.prevResponses) ? extra.prevResponses : []).filter(function (x) { return inScope(x) && inM(x); })
+  } } });
+}
+
 /* Готовото писмо за една седмица.
    extra (етап 3Б, незадължителен): { history, prevResponses } — редовете от
    седмиците преди показаната (за поредиците) и становищата за предходната.
@@ -2546,19 +2616,21 @@ function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, no
 
   var cellCss = 'padding:6px 8px;border:1px solid #E5E9F0;font-size:12px;';
   var body = checklistEmailVersionBanner(version, note);
+  /* Поредиците („не" за оцветяването, пропуските в брой) — един източник:
+     редовете на седмицата + историята от checklistLoadEmailExtra. */
+  var all = rows.concat((extra && Array.isArray(extra.history)) ? extra.history : []);
+  var streakCtx = { rows: all, year: year, week: weekNumber };
   /* Писмо ДО ОБЕКТ (extra.gapStore) → неговите пропуски най-горе.
      Писмо до регионален / общата група (extra.gapStores + gapMode, 26.11.2026)
      → блоковете на няколко обекта (checklistEmailGapsMultiHtml). */
   if (extra && Array.isArray(extra.gapStores) && extra.gapMode) {
     body += checklistEmailGapsMultiHtml(extra.gapStores, extra.gapMode, weekNumber,
-      rows, metrics, extra.gapDays || null);
+      rows, metrics, extra.gapDays || null, streakCtx);
   } else if (extra && extra.gapStore) {
     body += checklistEmailGapsHtml(extra.gapStore, weekNumber,
-      checklistStoreGaps(extra.gapStore, rows, metrics, extra.gapDays || null));
+      checklistStoreGaps(extra.gapStore, rows, metrics, extra.gapDays || null, streakCtx));
   }
 
-  /* Поредиците „не" за оцветяването — същият източник като „Изисква становище". */
-  var all = rows.concat((extra && Array.isArray(extra.history)) ? extra.history : []);
   var allMetrics = metrics;
   /* Само колоните с поне една непразна клетка за обектите в писмото. */
   metrics = metrics.filter(function (m) {
@@ -2601,6 +2673,7 @@ function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, no
   }
 
   body += checklistEmailResponsesHtml(year, weekNumber, rows, allMetrics, stores, extra);
+  body += checklistEmailPrevResponsesHtml(year, weekNumber, allMetrics, extra);
   body += checklistEmailCommentsHtml(rows, allMetrics, stores);
   /* Легендата „ДА / НЕ / НЯМАТ" е за колоната „преоценка" — само ако е сред
      показаните (metrics тук е вече филтрираният списък). */
@@ -2861,27 +2934,39 @@ function closeChecklistSendModal() {
   if (ov) ov.remove();
 }
 
-/* За секцията „Изисква становище" (етап 3Б): редовете от 7-те седмици преди
+/* За секцията „Изисква становище" (етап 3Б): редовете от 8-те седмици преди
    показаната (поредиците) и становищата за предходната. На страници —
-   7 седмици × 18 обекта × 12 колони минават 1000 реда. Провал на която и да
+   8 седмици × 18 обекта × 12 колони минават 1000 реда. Провал на която и да
    е → [] за нея: писмото тръгва, само поредицата е по-къса или без цитат. */
-var CHECKLIST_HISTORY_WEEKS = 7;
+/* 27.11.2026: 8 седмици (беше 7) — блокът „Становища за седмица M" смята
+   поредицата на M от M и 7-те преди нея, колкото и неделният отчет; плюс
+   изпратена ли е M (weekly_checklist_sends). prevOk = и трите заявки за M
+   минаха — иначе блокът отпада, писмото тръгва. */
+var CHECKLIST_HISTORY_WEEKS = 8;
 function checklistLoadEmailExtra(year, week) {
   var weeks = checklistPrevWeeks(year, week, CHECKLIST_HISTORY_WEEKS);
   var orQ = 'or=(' + weeks.map(function (w) {
     return 'and(year.eq.' + w.year + ',week_number.eq.' + w.week + ')';
   }).join(',') + ')';
   var prev = weeks[0];
+  var histOk = true;
   return Promise.all([
     checklistGetAll('weekly_checklist',
       orQ + '&select=id,year,week_number,store_name,metric_key,portal_value,control_value,control_num')
-      .catch(function () { return []; }),
-    Promise.resolve(sbGet('weekly_checklist_responses',
+      .catch(function () { histOk = false; return []; }),
+    Promise.resolve(sbGetOk('weekly_checklist_responses',
       'year=eq.' + prev.year + '&week_number=eq.' + prev.week +
-      '&select=year,week_number,store_name,metric_key,text,updated_at', true))
-      .catch(function () { return []; })
+      '&select=year,week_number,store_name,metric_key,text,created_at,updated_at'))
+      .catch(function () { return null; }),
+    Promise.resolve(sbGetOk('weekly_checklist_sends',
+      'year=eq.' + prev.year + '&week_number=eq.' + prev.week + '&select=version&limit=1'))
+      .catch(function () { return null; })
   ]).then(function (r) {
-    return { history: Array.isArray(r[0]) ? r[0] : [], prevResponses: Array.isArray(r[1]) ? r[1] : [] };
+    var resp = r[1], sends = r[2];
+    var respOk = !!(resp && resp.ok && Array.isArray(resp.rows));
+    var sendsOk = !!(sends && sends.ok && Array.isArray(sends.rows));
+    return { history: Array.isArray(r[0]) ? r[0] : [], prevResponses: respOk ? resp.rows : [],
+             prevOk: histOk && respOk && sendsOk, prevSent: sendsOk && sends.rows.length > 0 };
   });
 }
 
@@ -2957,7 +3042,8 @@ function submitChecklistSend() {
       if (typeof sendEmail !== 'function') {
         return Promise.resolve({ email: r.email, kind: kind, ok: false });
       }
-      var opt = { history: extra.history, prevResponses: extra.prevResponses, gapDays: gapDays };
+      var opt = { history: extra.history, prevResponses: extra.prevResponses, gapDays: gapDays,
+                  prevOk: extra.prevOk, prevSent: extra.prevSent };
       if (kind === 'store' && (r.gapStores || [r.store]).length === 1) opt.gapStore = r.store;
       else {
         opt.gapStores = r.gapStores;
