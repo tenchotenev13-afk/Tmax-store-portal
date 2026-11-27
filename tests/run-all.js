@@ -176,6 +176,7 @@ const TESTS = [
   'sd-compact-table.test.js',
   'sd-table-scroll.test.js',
   'sd-store-missing-lock.test.js',
+  'razliki-vrashtane-edno-myasto.test.js',
   'sd-move-direction.test.js',
   'sd-return-create-fail.test.js',
   'sd-swap-notify.test.js',

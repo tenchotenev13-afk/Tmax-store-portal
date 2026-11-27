@@ -1,0 +1,4 @@
+-- rollback за 20261126214233_razliki_return_sync_data (16 реда, id-тата от лога)
+update public.stock_differences set status = 'pending', completed_by = null, completed_at = null
+ where completed_by = 'За връщане (изравняване 26.11)'
+   and id in ('12b86de2-8d0f-49a1-845a-f8f970ae8697','150fc953-1aeb-42a0-92c4-73735a2412a2','18699dcb-9f0b-4933-8e80-559fa1d2636f','372bdb47-5bed-4787-beb6-4feb8fa819cd','41da145c-b39d-48d5-af46-ebc7c9d6299e','46ca6151-02f9-4a26-8f79-155dfde1fb68','4742a6e9-59c3-4513-a7fd-d8180f01ff16','4d1cc051-4bb7-466e-a626-24ca2779f710','8e843759-42e6-40e2-b7fd-0cc3fce198df','914fcf3c-922b-493b-a13d-58527b2cb328','a91bf016-e5f0-48f6-8403-30fd3c7bd47d','c20adc74-17da-436f-86e8-0710eaee75e9','d1f2a08a-d63b-4b09-abc0-fd346622c336','d8fd3eff-66f8-48a0-ac81-e7d26f0c5157','e2eda72f-6471-43bf-aae2-2274c4d2a7a4','f2113934-fcb6-4911-b68b-b81c79bfd940');

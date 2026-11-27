@@ -665,7 +665,7 @@ function renderStockDiff() {
             '<div><span style="'+LB+'">За връщ.</span>'+(r.return_order_number?esc(r.return_order_number):DASH)+'</div>'+
             '<div><span style="'+LB+'">Потвърд.</span>'+(r.confirmed_date?fmtDate(r.confirmed_date):DASH)+'</div>'+
           '</td>'+
-          '<td class="sd-c-status" style="padding:7px 10px;"><div class="sd-st">'+statusBadge+'</div>'+(creditCell?'<div class="sd-credit" style="margin-top:4px;">'+creditCell+'</div>':'')+'</td>'+
+          '<td class="sd-c-status" style="padding:7px 10px;"><div class="sd-st">'+statusBadge+'</div>'+sdReturnSyncedHtml(r)+(creditCell?'<div class="sd-credit" style="margin-top:4px;">'+creditCell+'</div>':'')+'</td>'+
           /* Снимките са прикачени на ниво БЛАНКА (differences_reports.photos), не
              на реда - затова не се виждаха тук, след като редът бъде решен и
              излезе от секцията "Нови подадени бланки" (напр. при директно
@@ -699,7 +699,11 @@ function renderStockDiff() {
         /* Приключен ред няма „✅ Върната" - един клик би го върнал в „Взета". */
         /* Условието е sdRowAwaitsMark — същото, по което обектът вижда реда
            (sdStoreMustAct, етап 2). */
-        if (canEdit && sdRowAwaitsMark(r) && !sdStoreLockedMissing(r)) {
+        /* „Връщане" със запис в „За връщане": обектът отбелязва ТАМ, редът
+           тук го следва сам (тригер razliki-return-sync, 26.11.2026). */
+        if (canEdit && sdRowAwaitsMark(r) && sdReturnMarkElsewhere(r)) {
+          h += '<button data-id="'+r.id+'" data-return-link="1" onclick="sdOpenReturnFor(this.dataset.id)" title="Връщането се отбелязва в „За връщане → По разлики“ — редът тук се обновява сам" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;white-space:nowrap;">↪ Отбележете във „За връщане“</button>';
+        } else if (canEdit && sdRowAwaitsMark(r) && !sdStoreLockedMissing(r)) {
           var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : r.type==='not_invoiced' ? '🧾 Приключена' : '✅ Приета';
           h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
         }
@@ -868,8 +872,11 @@ function sdIsTaken(r){ return r.status==='taken' || r.status==='capitalized'; }
    sdIsTaken: чиповете „Невзета"/„Взета" при тип „Връщане"/„Липса" не я
    включват, тя си има свой чип. В сборните изгледи
    (всички типове), където думата е неутрална „Приключени", влиза заедно с
-   'taken' (виж sdTableRows и картите). Статусът не се синхронизира със
-   „За връщане" - и 'taken' не се синхронизира днес. */
+   'taken' (виж sdTableRows и картите). 'completed' НЕ се синхронизира със
+   „За връщане". От 26.11.2026 'taken' се синхронизира в една посока: „Взета" /
+   „Приключена" там → 'taken' тук (тригер razliki_return_sync, само от
+   'pending'); връщане на „Невзета" там връща реда, ако completed_by започва
+   с „За връщане". Обратната посока (Разлики → За връщане) — няма. */
 function sdIsCompleted(r){ return !!r && r.status==='completed'; }
 /* Типовете с трето състояние „Приключена": „Връщане" (29.09.2026) и „Липса"
    (Цвети, 21.10.2026 - само редовете, които тя е маркирала като осчетоводени;
@@ -2438,6 +2445,36 @@ function sdLoadReturnLinks(){
     sdReturnLinked = m;
   });
 }
+/* ВРЪЩАНЕТО СЕ ОТБЕЛЯЗВА НА ЕДНО МЯСТО (решение на Тенчо 26.11.2026 по
+   предложение на склад Раднево): обектът отмята „✅ Взета" в „За връщане →
+   По разлики", а тригерът razliki_return_sync в базата отбелязва реда тук.
+   Само за ОБЕКТА (sdStoreHintsOn) и само при ПРОЧЕТЕНА връзка: ред без запис
+   в „За връщане" пази „✅ Върната" (иначе няма как да се приключи), а при
+   паднала заявка (sdReturnLinked null) старият бутон остава — контрол не се
+   крие заради грешка; грешката вече е в console.error от sdLoadReturnLinks.
+   Офисът — без промяна. */
+function sdReturnMarkElsewhere(l){
+  return !!l && l.type==='return' && sdStoreHintsOn() && !!sdReturnLinked && !!sdReturnLinked[l.id];
+}
+/* Бутонът-връзка: „За връщане", под-таб „По разлики", търсене по SAP кода.
+   Филтрите се чистят, за да е редът видим в какъвто и статус да е. И двата
+   таба четат данните наново при showModule — след „✅ Взета" там Разлики
+   показват новия статус при следващото отваряне. */
+function sdOpenReturnFor(id){
+  var l = sdData.find(function(x){ return String(x.id)===String(id); });
+  if(!l) return;
+  srTab = 'diff'; srEditId = null; srStoreFilter = ''; srSupplierFilter = ''; srFilter = 'all';
+  srSearch = String(l.material_code == null ? '' : l.material_code).trim();
+  if(typeof showModule === 'function') showModule('stock-returns');
+}
+/* Отбелязан от синхрона: completed_by започва с „За връщане" (тригерът пише
+   'За връщане', изравняването — 'За връщане (изравняване 26.11)'). */
+function sdReturnSyncedHtml(r){
+  if(!r || r.type!=='return' || !sdIsTaken(r)) return '';
+  if(String(r.completed_by||'').indexOf('За връщане')!==0) return '';
+  return '<div data-return-synced="1" style="margin-top:3px;font-size:10.5px;color:#16a34a;font-weight:600;white-space:nowrap;">✓ Върната'+
+    (r.completed_at ? ' '+sdFmtDayMonth(r.completed_at) : '')+' · от „За връщане“</div>';
+}
 function sdReturnMissing(l){
   return !!l && l.type==='return' && !!sdReturnLinked && !sdReturnLinked[l.id];
 }
@@ -2606,6 +2643,7 @@ function sdToggleCreditNote(id){
 function sdMarkTaken(id) {
   var line=sdData.find(function(x){return String(x.id)===String(id);});
   if (sdStoreLockedMissing(line)) { toast('Липсите се изписват от Цветелина','#dc2626'); return; }
+  if (sdReturnMarkElsewhere(line)) { toast('Отбележете връщането във „За връщане → По разлики“ — редът тук се обновява сам','#d97706'); return; }
   if (!confirm('Маркирай стоката като ВЗЕТА?')) return;
   sbPatch('stock_differences','id=eq.'+id,{status:'taken',completed_by:sdActor(),completed_at:new Date().toISOString()}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
@@ -3281,12 +3319,15 @@ function sdModalHtml() {
   var sdCompletedLocked = isEdit && sdIsCompleted(r) && !sdCanComplete;
   var sdShowCompleted = (sdTypeHasCompleted(r.type) && sdCanComplete) || sdIsCompleted(r);
   var sdMissingLocked = isEdit && sdStoreLockedMissing(r);
+  /* „Връщане" със запис в „За връщане" — обектът отбелязва там и в двете
+     посоки (26.11.2026); ✏️ не бива да е заобиколен път. */
+  var sdReturnLocked = isEdit && sdReturnMarkElsewhere(r);
   /* Коментарът по реда: след решение магазинът само го чете (Цвети,
      30.09.2026). При подаване на бланката той се пише от магазина - този път
      е submitDiffReport и не минава оттук. */
   var sdCommentLocked = isResolved && !canReview;
   h += '<label class="fl">Статус</label>'+
-    '<select class="fi" id="sd-status"'+((sdNoTypeYet||sdCompletedLocked||sdMissingLocked)?' disabled':'')+'>'+
+    '<select class="fi" id="sd-status"'+((sdNoTypeYet||sdCompletedLocked||sdMissingLocked||sdReturnLocked)?' disabled':'')+'>'+
     (sdNoTypeYet||sdStatusIsNew
       ? '<option value="new"'+(sdStatusIsNew?' selected':'')+'>'+SD_STATUS_NEW_LABEL+'</option>'
       : '')+
@@ -3300,6 +3341,9 @@ function sdModalHtml() {
       : '')+
     (sdNoTypeYet
       ? '<div style="font-size:11px;color:#94a3b8;margin-top:-6px;margin-bottom:8px;">Статусът се отключва, след като бъде зададен тип на решение.</div>'
+      : '')+
+    (sdReturnLocked && !sdCompletedLocked
+      ? '<div data-return-locked="1" style="font-size:11px;color:#94a3b8;margin-top:-6px;margin-bottom:8px;">Връщането се отбелязва във „За връщане → По разлики“ — статусът тук се обновява сам.</div>'
       : '')+
     (sdMissingLocked && !sdCompletedLocked
       ? '<div style="font-size:11px;color:#94a3b8;margin-top:-6px;margin-bottom:8px;">Липсите се изписват от Цветелина.</div>'
@@ -3666,7 +3710,7 @@ function submitSD(sync) {
   if(origRecord && origRecord.type && !canReviewDiff()){
     delete data.comment;
   }
-  if(sdStoreLockedMissing(origRecord)){
+  if(sdStoreLockedMissing(origRecord) || sdReturnMarkElsewhere(origRecord)){
     delete data.status;
   } else if(origRecord && sdIsCompleted(origRecord) && !canCompleteSR()){
     delete data.status;
