@@ -5,4 +5,4 @@
 - Становища за седмица M — само до регионалните (своите обекти) и общата група (всички): `checklistEmailPrevResponsesHtml` вика `reportChecklistResponsesHtml` от report.js (не е копие). `checklistLoadEmailExtra`: 8 седмици история (беше 7), `sbGetOk` за становищата + нова заявка `weekly_checklist_sends` за M; провал → без блока.
 - Тест: `tests/checklist-gap-streak.test.js` (27 проверки, истински клик по „Изпрати“); мутанти М1–М5 — и петте exit 1.
 - Без схема → без миграция, без ред за Живко.
-- SHA: (попълва се след push)
+- SHA `eca5f35` (rebase върху `c24f26a`; пълен пакет върху `a5e3f0a` — 545 теста, exit 0; след него влезе само claude/log → smoke + тестовете на чек листа). Сверката на Pages — в отчета на сесията.
