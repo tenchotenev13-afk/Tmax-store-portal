@@ -14,6 +14,12 @@
 
 ## Чака изпращане
 
+(grafik-zashtita-schema.sql — миграция grafik_zashtita, версия 20261127095555, приложена 27.11.2026; grafik-access-roles-schema.sql — ОЩЕ НЕ Е ПРИЛОЖЕНА; „Работен график“ не е в огледалото — редовете са само за записа)
+- 27.11 · grafik_access.can_reset_pin — boolean, NOT NULL, default false
+- 27.11 · grafik_access.list — нови стойности 'view' и 'edit' (стойността 'beta' изчезва — става 'edit')
+- 27.11 · нова таблица grafik_pin — user_id uuid NOT NULL (PK, → users.id), pin_hash text NOT NULL, fails int NOT NULL default 0, locked_until timestamptz NULL, blocked boolean NOT NULL default false, set_at timestamptz NOT NULL default now(), last_ok_at timestamptz NULL, last_try_at timestamptz NULL
+- 27.11 · нова таблица grafik_audit — id bigint NOT NULL (identity, PK), at timestamptz NOT NULL default now(), event text NOT NULL, user_email text NULL, user_role text NULL, grafik_kind text NULL, store_name text NULL, month text NULL, success boolean NOT NULL default true, details jsonb NULL, dedup_key text NULL
+
 (в базата от миграцията revaluation_unit_prefix, revaluation-unit-prefix-schema.sql — версия 20261127084126, приложена 27.11.2026)
 - 27.11 · stores.unit_prefix — text, NULL, без default (две латински букви, напр. GB; mirror_reader има select на колоната — добави я в COLS за stores)
 

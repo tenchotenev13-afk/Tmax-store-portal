@@ -2,11 +2,16 @@
 // Repo на grafik-api върху supabase-js със service ключа. Отделно от index.ts,
 // за да се пуска и от repo.live-test.ts (без Deno.serve при импорт).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { HttpError, type AccessRow, type AdminTable, type ChangeRow, type Repo, type RowRec, type Sector, type Staff, type Vtr } from "./handler.ts";
+import { hashSync, genSaltSync, compareSync } from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
+import { HttpError, type AccessRow, type AdminTable, type ChangeRow, type PinState, type Repo, type RowRec, type Sector, type Staff, type Vtr } from "./handler.ts";
 
 // Само безопасни колони — никога password_hash / history_pin_hash.
 const USER_COLS = "id,email,display_name,store_name,role,is_regional,assigned_stores,active";
-const MONTH_COLS = "id,store_name,month,status,submitted_at,submitted_by,submitted_by_name,snapshot,updated_at,approved_at,approved_by,approved_by_name,return_comment,returned_at,returned_by_name";   // approved_* / return* — етап Б (миграция grafik_approve)
+// can_reset_pin — миграция grafik_zashtita (27.11.2026); прилага се ПРЕДИ деплоя.
+const ACCESS_COLS = "id,list,email,note,can_reset_pin,created_at,created_by";
+// grafik_pin без хеша (той — само в pinReserve, през функцията grafik_pin_reserve).
+const PIN_COLS = "fails,locked_until,blocked,set_at,last_ok_at";
+const MONTH_COLS ="id,store_name,month,status,submitted_at,submitted_by,submitted_by_name,snapshot,updated_at,approved_at,approved_by,approved_by_name,return_comment,returned_at,returned_by_name";   // approved_* / return* — етап Б (миграция grafik_approve)
 
 // deno-lint-ignore no-explicit-any
 type R = { data: any; error: { message: string; code?: string } | null };
@@ -47,10 +52,13 @@ export function makeRepo(): Repo {
       return rows.length > 0;
     },
     async listAccess() {
-      return ok<AccessRow[]>(await db.from("grafik_access").select("id,list,email,note,created_at,created_by").order("list").order("email"));
+      return ok<AccessRow[]>(await db.from("grafik_access").select(ACCESS_COLS).order("list").order("email"));
     },
     async insertAccess(fields) {
-      return ok<AccessRow>(await db.from("grafik_access").insert(fields).select("id,list,email,note,created_at,created_by").single());
+      return ok<AccessRow>(await db.from("grafik_access").insert(fields).select(ACCESS_COLS).single());
+    },
+    async updateAccess(id, fields) {
+      return ok<AccessRow | null>(await db.from("grafik_access").update(fields).eq("id", id).select(ACCESS_COLS).maybeSingle());
     },
     async deleteAccess(id) {
       const rows = ok<unknown[]>(await db.from("grafik_access").delete().eq("id", id).select("id"));
@@ -175,5 +183,49 @@ export function makeRepo(): Repo {
     async audit(e) {
       await db.from("audit_log").insert({ ...e, success: true });
     },
+    // ── Етап В: grafik_audit (повторното четене в същите 10 мин — dedup_key, on conflict do nothing).
+    async gAudit(e) {
+      if (e.dedup_key) ok(await db.from("grafik_audit").upsert(e, { onConflict: "dedup_key", ignoreDuplicates: true }));
+      else ok(await db.from("grafik_audit").insert(e));
+    },
+    async auditList(q) {
+      let x = db.from("grafik_audit").select("id,at,event,user_email,user_role,grafik_kind,store_name,month,success,details").gte("at", q.since);
+      if (q.email) x = x.eq("user_email", q.email);
+      if (q.store) x = x.eq("store_name", q.store);
+      return ok(await x.order("at", { ascending: false }).limit(q.limit));
+    },
+    // ── Етап Б: grafik_pin. Хешът се чете само в pinReserve (за сравнението).
+    async pinGet(userId) {
+      return ok(await db.from("grafik_pin").select(PIN_COLS).eq("user_id", userId).maybeSingle());
+    },
+    async pinStates() {
+      const rows = ok<(PinState & { user_id: string })[]>(await db.from("grafik_pin").select("user_id," + PIN_COLS));
+      if (!rows.length) return [];
+      const us = ok<{ id: string; email: string | null }[]>(await db.from("users").select("id,email").in("id", rows.map((r) => r.user_id)));
+      const em: Record<string, string | null> = {};
+      us.forEach((u) => { em[u.id] = u.email; });
+      return rows.map((r) => ({ ...r, email: em[r.user_id] || null }));
+    },
+    async pinCreate(userId, hash) {
+      ok(await db.from("grafik_pin").insert({ user_id: userId, pin_hash: hash }));
+    },
+    async pinReserve(userId) {
+      const rows = ok<{ granted: boolean; pin_hash: string | null; fails: number; locked_until: string | null; blocked: boolean }[]>(
+        await db.rpc("grafik_pin_reserve", { p_user: userId }));
+      return rows && rows.length ? rows[0] : null;
+    },
+    async pinOk(userId) {
+      ok(await db.from("grafik_pin").update({ fails: 0, locked_until: null, blocked: false, last_ok_at: new Date().toISOString() }).eq("user_id", userId));
+    },
+    async pinUpdateHash(userId, hash) {
+      ok(await db.from("grafik_pin").update({ pin_hash: hash, set_at: new Date().toISOString() }).eq("user_id", userId));
+    },
+    async pinDelete(userId) {
+      const rows = ok<unknown[]>(await db.from("grafik_pin").delete().eq("user_id", userId).select("user_id"));
+      return rows.length > 0;
+    },
+    // bcrypt — същата библиотека като set-history-pin / auth-set-password; цена 10 (~100 ms).
+    async hashPin(pin) { return hashSync(pin, genSaltSync(10)); },
+    async checkPin(pin, hash) { try { return !!hash && compareSync(pin, hash); } catch { return false; } },
   };
 }

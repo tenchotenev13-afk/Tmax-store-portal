@@ -1,8 +1,8 @@
 /* grafik.js — Работен график (етап 1г, 02.11.2026): месечният график на обекта и
-   персоналът. Модулът е в разработка: табът се вижда само от имейлите в списъка
-   beta (grafik_access, от 04.11.2026 — до тогава app_settings.grafik_beta_users;
-   HIDDEN-FEATURES.md) — браузърът го научава от grafik-api „me“, защото списъкът не
-   е публичен; данните са само през grafik-api (таблиците grafik_* са без права за anon).
+   персоналът. Модулът е в разработка: табът се вижда само от имейлите с роля в
+   grafik_access (view / trz / edit от 27.11.2026; преди — beta; HIDDEN-FEATURES.md) —
+   браузърът го научава от grafik-api „me“, защото списъкът не е публичен; данните са
+   само през grafik-api (таблиците grafik_* са без права за anon) и само след личния ПИН.
    Изчисленията — в grafik-engine.js (GrafikEngine), общи с файла за ТРЗ (1д).
 
    Въвеждане: само клавиатура — буква / число 1–12, стрелки, Tab, Enter, Delete;
@@ -26,6 +26,7 @@ var GR_LATIN = {a:'А',b:'Б',v:'В',w:'В',g:'Г',d:'Д',e:'Е',z:'З',i:'И',k
 
 var grTabOk = false, grTabRes = null, grUsersSeq = 0, grLoadSeq = 0;
 var grMe = null;            // отговорът на action "me"
+var grStarted = false;      // първото отваряне на таба в тази сесия („преглед“ започва от обзора)
 var grStore = '', grMonth = '';
 var grView = 'grid';        // 'grid' | 'staff' | 'overview' | 'changes'
 var grOverview = null;      // action "overview" за grMonth (етап 1е-1)
@@ -80,9 +81,14 @@ function grLoadUsers(maxAgeMs){
 }
 
 /* ─── grafik-api ───────────────────────────────────────── */
-/* Връща {ok, status, data}. 401 → „влез отново“ (пропускът е 12 ч. и само в паметта). */
+/* Връща {ok, status, data}. 401 → „влез отново“ (пропускът е 12 ч. и само в паметта).
+   Етап Б (27.11.2026): всяка заявка носи и ключа за графика (pin_token) след верен ПИН; всеки
+   отговор връща нов (плъзгащ се срок 15 мин). 401 pin_required → ключът е изтекъл: екранът се
+   заключва (grPinLock) и обещанието остава висящо — повикващият не рисува грешка върху ПИН-а. */
+var GR_PIN_FREE = ['me', 'pin_set', 'pin_unlock'];
 function grApi(action, payload){
   var body = { action: action, session: (typeof currentSession !== 'undefined' ? currentSession : null) };
+  if(grPin.tok) body.pin_token = grPin.tok;
   for(var k in (payload || {})) if(Object.prototype.hasOwnProperty.call(payload, k)) body[k] = payload[k];
   return fetch(SB_URL + '/functions/v1/grafik-api', {
     method: 'POST',
@@ -94,12 +100,125 @@ function grApi(action, payload){
     });
   }).catch(function(e){
     return { ok: false, status: 0, data: { reason: 'network', message: 'Няма връзка със сървъра.' } };
+  }).then(function(res){
+    if(res.data && typeof res.data.pin_token === 'string') grPinSave(res.data.pin_token, res.data.pin_exp);
+    if(res.status === 401 && res.data && res.data.reason === 'pin_required'){
+      grPinClear();
+      if(GR_PIN_FREE.indexOf(action) < 0){ grPinLock(); return new Promise(function(){}); }
+    }
+    return res;
   });
 }
 function grErrText(res){
   var d = res && res.data || {};
-  if(res && res.status === 401) return 'Сесията е изтекла — излез и влез отново.';
+  if(res && res.status === 401 && d.reason !== 'pin_required') return 'Сесията е изтекла — излез и влез отново.';
   return d.message || ('Грешка ' + (res ? res.status : ''));
+}
+
+/* ─── ПИН за графика (етап Б, решение на Тенчо 27.11.2026) ──────────────────
+   Личен ПИН 4–6 цифри при отваряне на таба; важи до затваряне на браузъра (sessionStorage —
+   новият таб и новото влизане питат пак), заключва се след 15 мин без действие. Истинската
+   защита е на сървъра (ключът изтича 15 мин след последната заявка; без него grafik-api не дава
+   данни) — тук само се чисти екранът. Първия път човекът го задава сам; забравен — нулира
+   администратор (роля „редакция“) или Теодор (can_reset_pin). */
+var GR_IDLE_MS = 15 * 60 * 1000;
+var grPin = { tok: null, exp: 0, at: 0 };   // ключът, срокът му (сек.) и кога е получен (мс)
+var grLastAct = Date.now();
+(function(){
+  try {
+    var s = JSON.parse(sessionStorage.getItem('gr-pin') || 'null');
+    if(s && typeof s.tok === 'string' && s.exp * 1000 > Date.now()) grPin = { tok: s.tok, exp: s.exp, at: Date.now() };
+  } catch(e){}
+})();
+function grPinSave(tok, exp){
+  grPin = { tok: tok, exp: +exp || 0, at: Date.now() };
+  try { sessionStorage.setItem('gr-pin', JSON.stringify({ tok: tok, exp: grPin.exp })); } catch(e){}
+}
+function grPinClear(){
+  grPin = { tok: null, exp: 0, at: 0 };
+  try { sessionStorage.removeItem('gr-pin'); } catch(e){}
+}
+function grActivity(){ grLastAct = Date.now(); }
+['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach(function(t){
+  try { document.addEventListener(t, grActivity, { capture: true, passive: true }); } catch(e){}
+});
+/* На всеки 30 сек.: 15 мин без действие (или изтекъл ключ) → заключване; има действие след
+   последната заявка, а ключът изтича до 3 мин → „pin_touch“ (само подновява срока). */
+function grIdleTick(now){
+  now = now || Date.now();
+  if(!grPin.tok) return;
+  if(now - grLastAct >= GR_IDLE_MS || grPin.exp * 1000 <= now){ grPinClear(); grPinLock(); return; }
+  if(grPin.exp * 1000 - now < 3 * 60 * 1000 && grLastAct > grPin.at) grApi('pin_touch', {});
+}
+setInterval(function(){ grIdleTick(); }, 30000);
+
+/* Заключване: ключът е махнат; данните на графика излизат от паметта и от екрана (табът и
+   картата в Администрация) — на тяхно място е формулярът за ПИН. */
+function grPinLock(){
+  grData = null; grRows = {}; grCalc = null; grOverview = null; grPrev = null; grChanges = null; grDirty = {};
+  grMeAt = 0;
+  if(grMe){ grMe.unlocked = false; grMe.stores = []; if(grMe.pin && grMe.pin.state === 'none') grMe.pin.state = 'set'; }
+  var el = document.getElementById('mod-grafik');
+  if(el && el.innerHTML) el.innerHTML = grTitle() + grPinFormHtml('mod', grMe && grMe.pin, '🔒 Графикът е заключен — въведи ПИН-а, за да продължиш.');
+  var card = document.getElementById('gr-admin-card');
+  if(card) card.innerHTML = '<div class="card-title">📆 График</div>' + grPinFormHtml('adm', grMe && grMe.pin, '🔒 Въведи ПИН-а за графика.');
+}
+/* Без ПИН ли е „me“ (сървър от етап Б)? Стар сървър — без поле pin → както досега. */
+function grNeedsPin(me){ return !!me && !!me.pin && me.unlocked === false; }
+function grPinFormHtml(ctx, pin, lead){
+  var st = (pin && pin.state) || 'set', id = function(n){ return 'gr-pin-' + ctx + '-' + n; };
+  var box = function(n, ph){ return '<input class="fi" type="password" inputmode="numeric" autocomplete="off" maxlength="6" id="' + id(n) + '" placeholder="' + ph + '" style="max-width:140px;letter-spacing:4px;" onkeydown="if(event.key===\'Enter\')grPinSubmit(\'' + ctx + '\')">'; };
+  var h = '<div class="card" id="gr-pin-' + ctx + '" data-state="' + st + '" style="max-width:420px;">';
+  if(st === 'blocked'){
+    h += '<div style="font-weight:600;color:#dc2626;">🔒 ПИН-ът за графика е заключен след 10 грешни опита.</div>' +
+      '<div style="font-size:12px;color:#64748b;margin-top:6px;">Помоли администратор да го нулира — после задаваш нов.</div>';
+    return h + '</div>';
+  }
+  if(st === 'none'){
+    h += '<div style="font-weight:600;">🔑 Задай личен ПИН за графика</div>' +
+      '<div style="font-size:12px;color:#64748b;margin:4px 0 8px;">4–6 цифри, само твой. Ще го въвеждаш при всяко отваряне на таба; след 15 мин без действие графикът се заключва. Без еднакви или поредни цифри (1111, 1234).</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + box(1, 'ПИН') + box(2, 'още веднъж') +
+      '<button class="btn btn-green" onclick="grPinSubmit(\'' + ctx + '\')">Задай</button></div>';
+  } else {
+    h += '<div style="font-weight:600;">' + escVal(lead || '🔑 Въведи ПИН-а за графика') + '</div>' +
+      (st === 'locked' && pin.locked_until ? '<div style="font-size:12px;color:#dc2626;margin-top:4px;">Твърде много грешни опити — опитай пак след ' + escVal(grFmtAt(pin.locked_until)) + '.</div>' : '') +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;">' + box(1, 'ПИН') +
+      '<button class="btn btn-green" onclick="grPinSubmit(\'' + ctx + '\')">Отключи</button></div>' +
+      '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Забравен ПИН — нулира администратор.</div>';
+  }
+  return h + '<div id="gr-pin-' + ctx + '-msg" style="font-size:12px;color:#dc2626;margin-top:6px;"></div></div>';
+}
+function grPinSubmit(ctx){
+  var box = document.getElementById('gr-pin-' + ctx), msg = document.getElementById('gr-pin-' + ctx + '-msg');
+  if(!box) return;
+  var a = String(v('gr-pin-' + ctx + '-1') || '').trim(), setting = box.getAttribute('data-state') === 'none';
+  var say = function(t){ if(msg) msg.textContent = t; };
+  if(!/^[0-9]{4,6}$/.test(a)){ say('ПИН-ът е от 4 до 6 цифри.'); return; }
+  if(setting && a !== String(v('gr-pin-' + ctx + '-2') || '').trim()){ say('Двата ПИН-а не съвпадат.'); return; }
+  say('');
+  return grApi(setting ? 'pin_set' : 'pin_unlock', { pin: a }).then(function(res){
+    if(!res.ok){
+      var d = res.data || {};
+      var f = document.getElementById('gr-pin-' + ctx + '-1'); if(f) f.value = '';
+      if(d.reason === 'pin_blocked' || d.reason === 'pin_exists' || d.reason === 'pin_not_set'){ grMeAt = 0; grPinReload(); }
+      say(grErrText(res));
+      return;
+    }
+    grActivity();
+    if(typeof toast === 'function') toast(setting ? '🔑 ПИН-ът е зададен.' : '🔓 Графикът е отключен.');
+    grPinReload();
+  });
+}
+/* След отключване (или смяна на състоянието) — наново „me“ и каквото е отворено. */
+function grPinReload(){
+  grMeAt = 0; grTabRes = null;
+  var el = document.getElementById('mod-grafik');
+  var p = el && el.innerHTML ? loadGrafik() : grLoadUsers();
+  return Promise.resolve(p).then(function(){ if(document.getElementById('gr-admin-card')) return grAdminLoad(); });
+}
+/* Печат и файлове — в одита (етап В): кой, кой обект, кой месец. Без да чака отговора. */
+function grLogOut(what){
+  if(grStore && grMonth) grApi('log', { what: what, store: grStore, month: grMonth });
 }
 
 /* ─── Помощни ──────────────────────────────────────────── */
@@ -211,13 +330,16 @@ function loadGrafik(){
         : '<div class="card" id="gr-error" style="color:#dc2626;">' + escVal(grErrText(res)) + '</div>');
       return;
     }
+    /* Етап Б: без отключен ПИН — само формулярът (задаване първия път / въвеждане). */
+    if(grNeedsPin(grMe)){ el.innerHTML = grTitle() + grPinFormHtml('mod', grMe.pin); return; }
     var names = (grMe.stores || []).map(function(s){ return s.name; });
     if(!grStore || names.indexOf(grStore) < 0){
       grStore = (currentUser && names.indexOf(currentUser.store_name) >= 0) ? currentUser.store_name : (names[0] || '');
     }
-    /* ТРЗ започват от обзора (виждат само подадените); регионалният и admin — от своя график. */
-    if(grMe.kind === 'trz') grView = 'overview';
+    /* ТРЗ и „преглед“ (view, 27.11.2026) започват от обзора; регионалният и admin — от своя график. */
+    if(grMe.kind === 'trz' || (grMe.kind === 'view' && !grStarted)) grView = 'overview';
     else if(grView === 'overview' && !grCanOverview()) grView = 'grid';
+    grStarted = true;
     if(grView === 'overview') return grLoadOverview(seq);
     if(!grStore){ el.innerHTML = grTitle() + '<div class="card" id="gr-nostore">Няма обект, чийто график да виждаш.</div>'; return; }
     return grLoadMonth(seq);
@@ -249,7 +371,7 @@ function grLoadMonth(seq){
    admin — всички обекти с ВТР; регионален — своите; ТРЗ — само подадените. Обхватът и правата
    са на сървъра (grafik-api overview). „Извън нормата“ — само за подадените (от снимката);
    за черновите — последната промяна (кой, кога). */
-function grCanOverview(){ return !!grMe && (grMe.kind === 'admin' || grMe.kind === 'regional' || grMe.kind === 'trz'); }
+function grCanOverview(){ return !!grMe && (grMe.kind === 'admin' || grMe.kind === 'regional' || grMe.kind === 'trz' || grMe.kind === 'view'); }
 function grLoadOverview(seq){
   seq = seq || ++grLoadSeq;
   grOverview = null;
@@ -1852,6 +1974,7 @@ function grPrintChanges(){
         '<div class="grc-sign"><div id="grc-made">Изготвил: ………………………… (ръководител обект)</div><div id="grc-appr">Утвърдил: ' + escVal(H.approver || '') + ' ………………………… (управител)</div></div>' +
       '</div>' +
     '</div>';
+  grLogOut('print_changes');
   showModule('print');
 }
 
@@ -1933,6 +2056,7 @@ function grPrintPresence(){
         '<div id="grq-foot">' + escVal(GR_PRESENCE_LEGEND) + '</div>' +
       '</div>' +
     '</div>';
+  grLogOut('print_presence');
   showModule('print');
 }
 /* Excel за ТРЗ — като файла на графика: без защита, формулите в реда, празният ден е празна клетка. */
@@ -2008,7 +2132,7 @@ function grExportPresence(){
   if(!m || grPresenceBlocked(m)) return;
   return grWithExcelJS().then(function(X){
     var wb = grBuildPresenceWorkbook(m, X);
-    return wb.xlsx.writeBuffer().then(function(buf){ grDownload(buf, grPresenceFileName(m)); toast('📥 ' + grPresenceFileName(m)); });
+    return wb.xlsx.writeBuffer().then(function(buf){ grDownload(buf, grPresenceFileName(m)); grLogOut('export_presence'); toast('📥 ' + grPresenceFileName(m)); });
   }).catch(function(e){ toast('Файлът не се направи: ' + (e && e.message ? e.message : e), '#dc2626'); });
 }
 /* ПРОВЕРКА L / M / N — реално (присъствената): реални часове, реално − норма, макс. дни в 7,
@@ -2377,6 +2501,7 @@ function grExportTrz(){
     var wb = grBuildTrzWorkbook(m, X);
     return wb.xlsx.writeBuffer().then(function(buf){
       grDownload(buf, grTrzFileName(m));
+      grLogOut('export_trz');
       toast('📥 ' + grTrzFileName(m));
     });
   }).catch(function(e){ toast('Файлът не се направи: ' + (e && e.message ? e.message : e), '#dc2626'); });
@@ -2456,6 +2581,7 @@ function grPrintGrafik(){
         '</div>' +
       '</div>' +
     '</div>';
+  grLogOut('print_grafik');
   showModule('print');
 }
 
@@ -2486,13 +2612,83 @@ function grAdminLoad(){
   if(!card){ card = document.createElement('div'); card.className = 'card'; card.id = 'gr-admin-card'; mod.appendChild(card); }
   card.innerHTML = '<div class="card-title">📆 График</div><div style="padding:12px;color:#94a3b8;font-size:12px;">⏳ Зареждане...</div>';
   return grApi('me', {}).then(function(me){
-    if(!me.ok || !me.data || !me.data.can_admin){ if(card.parentNode) card.parentNode.removeChild(card); return; }
+    /* Картата — за admin (роля „редакция“); само частта „ПИН-ове“ — за упълномощения да нулира (Теодор). */
+    if(!me.ok || !me.data || !(me.data.can_admin || me.data.can_reset_pin)){ if(card.parentNode) card.parentNode.removeChild(card); return; }
     grAdmEmail = String(me.data.email || '').toLowerCase();
-    return Promise.all([grApi('access_list', {}), grApi('admin_get', {})]).then(function(r){
+    if(grNeedsPin(me.data)){ card.innerHTML = '<div class="card-title">📆 График</div>' + grPinFormHtml('adm', me.data.pin, '🔑 Въведи ПИН-а за графика, за да видиш тази карта.'); return; }
+    var full = !!me.data.can_admin;
+    return Promise.all([grApi('access_list', {}), full ? grApi('admin_get', {}) : Promise.resolve({ ok: true, data: null })]).then(function(r){
       if(!r[0].ok || !r[1].ok){ card.innerHTML = '<div class="card-title">📆 График</div><div id="gr-adm-error" style="color:#dc2626;">' + escVal(grErrText(r[0].ok ? r[1] : r[0])) + '</div>'; return; }
-      grAdm = { access: r[0].data.rows || [], data: r[1].data };
+      grAdm = { access: r[0].data.rows || [], pins: r[0].data.pins || [], data: r[1].data, full: full };
       grAdminRender();
     });
+  });
+}
+/* ПИН-ът на ред от списъка (по имейл): състояние + „↺ Нулирай“ (не за себе си). */
+var GR_PIN_LABEL = { none: '— няма', set: '✔ зададен', locked: '⏳ заключен 15 мин', blocked: '🔒 заключен' };
+function grAdmPinOf(email){
+  var e = String(email || '').toLowerCase();
+  return ((grAdm && grAdm.pins) || []).filter(function(p){ return p.email === e; })[0] || null;
+}
+function grAdmPinCell(a){
+  var p = grAdmPinOf(a.email), st = p ? p.state : 'none';
+  var self = String(a.email || '').toLowerCase() === grAdmEmail;
+  return '<span class="gr-adm-pin" data-state="' + st + '"' + (st === 'blocked' || st === 'locked' ? ' style="color:#dc2626;"' : '') + '>' + escVal(GR_PIN_LABEL[st] || st) + '</span>' +
+    (p && !self ? ' <button class="btn-sm" onclick="grAdmPinReset(\'' + escAttrVal(p.user_id) + '\')" title="Махни ПИН-а — при следващото отваряне човекът задава нов">↺ Нулирай</button>' : '');
+}
+function grAdmPinReset(uid){
+  var p = ((grAdm && grAdm.pins) || []).filter(function(x){ return x.user_id === uid; })[0];
+  if(!p || !confirm('Да нулирам ПИН-а за графика на ' + (p.email || 'този човек') + '? При следващото отваряне задава нов.')) return;
+  return grApi('pin_reset', { user_id: uid }).then(function(res){
+    if(!res.ok){ toast('ПИН-ът не е нулиран: ' + grErrText(res), '#dc2626'); return; }
+    toast('✔ ПИН-ът на ' + (res.data.email || p.email) + ' е нулиран.');
+    return grAdminLoad();
+  });
+}
+/* „🔑 Смени моя ПИН“ — сегашният (брои се като опит) и новият два пъти. */
+function grPinChangeHtml(){
+  var box = function(id, ph){ return '<input class="fi" type="password" inputmode="numeric" autocomplete="off" maxlength="6" id="' + id + '" placeholder="' + ph + '" style="max-width:120px;">'; };
+  return '<div style="margin:12px 0 4px;font-weight:600;">🔑 Смени моя ПИН</div><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+    box('gr-pinch-old', 'сегашен') + box('gr-pinch-new', 'нов') + box('gr-pinch-new2', 'нов още веднъж') +
+    '<button class="btn-sm" onclick="grPinChange()">Смени</button></div>';
+}
+function grPinChange(){
+  var o = String(v('gr-pinch-old') || '').trim(), n = String(v('gr-pinch-new') || '').trim(), n2 = String(v('gr-pinch-new2') || '').trim();
+  if(!/^[0-9]{4,6}$/.test(o) || !/^[0-9]{4,6}$/.test(n)){ toast('ПИН-ът е от 4 до 6 цифри.', '#dc2626'); return; }
+  if(n !== n2){ toast('Новите ПИН-ове не съвпадат.', '#dc2626'); return; }
+  return grApi('pin_change', { old: o, pin: n }).then(function(res){
+    ['gr-pinch-old', 'gr-pinch-new', 'gr-pinch-new2'].forEach(function(id){ var f = document.getElementById(id); if(f) f.value = ''; });
+    if(!res.ok){ toast('ПИН-ът не е сменен: ' + grErrText(res), '#dc2626'); if(res.data && res.data.reason === 'pin_blocked') grPinLock(); return; }
+    toast('🔑 ПИН-ът е сменен.');
+  });
+}
+/* „📜 Кой отваря“ (етап В) — grafik_audit, само admin; зарежда се при натискане. */
+var GR_AUDIT_LABEL = {
+  grafik_unlock: '🔓 отключи', grafik_view_month: '👁 график', grafik_view_overview: '👁 обзор', grafik_view_staff: '👁 персонал', grafik_view_changes: '👁 промени',
+  grafik_print: '🖨 печат', grafik_print_presence: '🖨 присъствена', grafik_print_changes: '🖨 промени', grafik_export_trz: '📥 файл за ТРЗ', grafik_export_presence: '📥 присъствена',
+  grafik_pin_set: '🔑 зададе ПИН', grafik_pin_fail: '✕ грешен ПИН', grafik_pin_change: '🔑 смени ПИН', grafik_pin_change_fail: '✕ грешен ПИН (смяна)', grafik_pin_reset: '↺ нулира ПИН'
+};
+function grAdmAuditHtml(){
+  return '<div style="margin:16px 0 4px;font-weight:600;">📜 Кой отваря графика</div>' +
+    '<div style="font-size:11px;color:#64748b;margin-bottom:4px;">Кой, кога, кой обект и месец — без съдържанието. Едно и също отваряне се записва веднъж на 10 мин. Пази се 2 години.</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' +
+      '<input class="fi" id="gr-aud-email" placeholder="имейл (по избор)" style="flex:2;min-width:160px;">' +
+      '<input class="fi" id="gr-aud-store" placeholder="обект (по избор)" style="flex:1;min-width:120px;">' +
+      '<select class="fi" id="gr-aud-days" style="flex:0 0 auto;"><option value="1">1 ден</option><option value="7">7 дни</option><option value="30" selected>30 дни</option><option value="90">90 дни</option></select>' +
+      '<button class="btn-sm" onclick="grAdmAuditLoad()">Покажи</button></div><div id="gr-aud-out"></div>';
+}
+function grAdmAuditLoad(){
+  var out = document.getElementById('gr-aud-out');
+  if(!out) return;
+  out.innerHTML = '<div style="color:#94a3b8;font-size:12px;padding:6px;">⏳</div>';
+  return grApi('audit_list', { email: v('gr-aud-email') || '', store: v('gr-aud-store') || '', days: +v('gr-aud-days') || 30 }).then(function(res){
+    if(!res.ok){ out.innerHTML = '<div style="color:#dc2626;">' + escVal(grErrText(res)) + '</div>'; return; }
+    var rows = (res.data.rows || []).map(function(e){
+      return '<tr' + (e.success === false ? ' style="color:#dc2626;"' : '') + '><td style="white-space:nowrap;">' + escVal(grFmtAt(e.at)) + '</td><td>' + escVal(e.user_email || '') + '</td><td>' + escVal(e.grafik_kind || '') + '</td>' +
+        '<td>' + escVal(GR_AUDIT_LABEL[e.event] || e.event) + (e.success === false ? ' — отказ' : '') + '</td><td>' + escVal(e.store_name || '') + '</td><td>' + escVal(e.month || '') + '</td></tr>';
+    });
+    out.innerHTML = '<div style="font-size:11px;color:#64748b;margin:4px 0;">' + rows.length + ' записа за ' + res.data.days + ' дни' + (rows.length >= 1000 ? ' (първите 1000)' : '') + '</div>' +
+      grAdmTable('gr-aud-tbl', ['Кога', 'Кой', 'Роля', 'Какво', 'Обект', 'Месец'], rows);
   });
 }
 function grAdmCompany(id){ var c = (grAdm.data.companies || []).filter(function(x){ return x.id === id; })[0]; return c ? c.name : '—'; }
@@ -2508,23 +2704,22 @@ function grAdminRender(){
   var card = document.getElementById('gr-admin-card');
   if(!card || !grAdm) return;
   var d = grAdm.data;
-  var lists = ['beta', 'trz'].map(function(l){
-    var rows = grAdm.access.filter(function(a){ return a.list === l; }).map(function(a){
-      return '<tr><td>' + escVal(a.email) + '</td><td>' + escVal(a.note || '') + '</td><td style="font-size:11px;color:#64748b;">' + escVal(a.created_by || '') + (a.created_at ? ' · ' + escVal(grFmtAt(a.created_at)) : '') + '</td>' +
-        '<td>' + (String(a.email || '').toLowerCase() === grAdmEmail ? '<span style="font-size:11px;color:#94a3b8;" title="Собствения си имейл не променяш оттук">ти</span>'
-          : '<button class="btn-sm" onclick="grAdmAccessRemove(\'' + escAttrVal(a.id) + '\')">✕ Махни</button>') + '</td></tr>';
-    });
-    return '<div style="margin:10px 0 4px;font-weight:600;">' + (l === 'beta' ? '👁 Beta — кой вижда таба „График“' : '🧾 ТРЗ — само подадените графици, без редакция (не е нужно и в beta; има предимство пред admin)') + '</div>' +
-      grAdmTable('gr-adm-' + l, ['Имейл', 'Бележка', 'Добавен', ''], rows);
-  }).join('');
+  /* Упълномощеният да нулира ПИН (без admin) — само списъкът с ПИН-овете и „Смени моя ПИН“. */
+  if(!grAdm.full){
+    card.innerHTML = '<div class="card-title">📆 График — ПИН-ове</div>' +
+      '<div style="font-size:12px;color:#64748b;">Можеш да нулираш ПИН-а за графика на колега, който го е забравил или заключил. Всяко нулиране се записва в одита.</div>' +
+      grAdmAccessHtml(true) + grPinChangeHtml();
+    return;
+  }
   var h = '<div class="card-title">📆 График</div>' +
     '<div style="font-size:12px;color:#64748b;">Работен график (в разработка). Всяка промяна минава през grafik-api и се записва в одита. Собствения си имейл не променяш оттук.</div>' +
-    lists +
+    grAdmAccessHtml(false) +
     '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;">' +
       '<input class="fi" id="gr-adm-email" placeholder="имейл" style="flex:2;min-width:180px;">' +
-      '<select class="fi" id="gr-adm-list" style="flex:0 0 auto;"><option value="beta">Beta</option><option value="trz">ТРЗ</option></select>' +
+      '<select class="fi" id="gr-adm-role" style="flex:0 0 auto;">' + GR_ROLES.map(function(r){ return '<option value="' + r + '">' + escVal(GR_ROLE_LABEL[r]) + '</option>'; }).join('') + '</select>' +
       '<input class="fi" id="gr-adm-note" placeholder="бележка (по избор)" style="flex:2;min-width:140px;">' +
-      '<button class="btn btn-green" onclick="grAdmAccessAdd()">➕ Добави</button></div>';
+      '<button class="btn btn-green" onclick="grAdmAccessAdd()">➕ Добави</button></div>' +
+    grPinChangeHtml() + grAdmAuditHtml();
   h += '<div style="margin:16px 0 4px;font-weight:600;">🏢 Дружества <button class="btn-sm" onclick="grAdmEdit(\'companies\')">➕ Дружество</button></div>' +
     grAdmTable('gr-adm-companies', ['Име', 'ЕИК', 'МОЛ', 'Адрес', ''], (d.companies || []).map(function(c){
       return '<tr><td>' + escVal(c.name || '') + '</td><td>' + escVal(c.eik || '') + '</td><td>' + escVal(c.mol || '') + '</td><td' + (c.addr ? '' : ' style="color:#dc2626;"') + '>' + escVal(c.addr || 'липсва') + '</td><td>' + grAdmEditBtn('companies', c.id) + '</td></tr>';
@@ -2546,18 +2741,62 @@ function grAdminRender(){
     }));
   card.innerHTML = h;
 }
+/* Ролите (27.11.2026): една роля на имейл — „преглед“ (всички обекти, само четене), „ТРЗ“
+   (подадените, одобрява), „редакция“ (пише по правата си в портала). Ролята в графика има
+   предимство пред портала. „beta“ (преди миграцията grafik_access_roles) = редакция. */
+var GR_ROLES = ['view', 'trz', 'edit'];
+var GR_ROLE_LABEL = { view: '👁 Преглед', trz: '🧾 ТРЗ', edit: '✏️ Редакция' };
+var GR_ROLE_HINT = { view: 'всички обекти и месеци, само четене (и черновите, и персонала)', trz: 'само подадените графици, одобрява, без редакция', edit: 'пише по правата си в портала (admin — всичко, регионален — своите, ръководител — своя)' };
+function grAdmRole(a){ return a.list === 'beta' ? 'edit' : a.list; }
+function grAdmAccessHtml(readOnly){
+  var rows = grAdm.access.slice().sort(function(a, b){
+    return GR_ROLES.indexOf(grAdmRole(a)) - GR_ROLES.indexOf(grAdmRole(b)) || String(a.email).localeCompare(String(b.email));
+  }).map(function(a){
+    var self = String(a.email || '').toLowerCase() === grAdmEmail, role = grAdmRole(a);
+    var label = escVal(GR_ROLE_LABEL[role] || role);
+    if(readOnly) return '<tr data-email="' + escAttrVal(a.email) + '"><td>' + escVal(a.email) + '</td><td>' + label + '</td><td>' + grAdmPinCell(a) + '</td></tr>';
+    var sel = self ? '<span title="Собствената си роля не сменяш оттук">' + label + '</span>'
+      : '<select class="fi gr-adm-role-sel" style="padding:2px 4px;" onchange="grAdmAccessSet(\'' + escAttrVal(a.id) + '\',this.value)">' +
+        GR_ROLES.map(function(r){ return '<option value="' + r + '"' + (r === role ? ' selected' : '') + '>' + escVal(GR_ROLE_LABEL[r]) + '</option>'; }).join('') + '</select>' +
+        /* Може да нулира ПИН-а на други (решение 27.11.2026: Теодор, въпреки че е „Преглед“). Admin с „Редакция“ го може и без отметката. */
+        ' <label style="font-size:11px;white-space:nowrap;" title="Може да нулира ПИН-а за графика на другите"><input type="checkbox" class="gr-adm-reset-cb"' + (a.can_reset_pin ? ' checked' : '') +
+        ' onchange="grAdmResetFlag(\'' + escAttrVal(a.id) + '\',this.checked)"> нулира ПИН</label>';
+    return '<tr data-email="' + escAttrVal(a.email) + '"><td>' + escVal(a.email) + '</td><td>' + sel + '</td><td>' + grAdmPinCell(a) + '</td><td>' + escVal(a.note || '') + '</td><td style="font-size:11px;color:#64748b;">' + escVal(a.created_by || '') + (a.created_at ? ' · ' + escVal(grFmtAt(a.created_at)) : '') + '</td>' +
+      '<td>' + (self ? '<span style="font-size:11px;color:#94a3b8;" title="Собствения си имейл не променяш оттук">ти</span>'
+        : '<button class="btn-sm" onclick="grAdmAccessRemove(\'' + escAttrVal(a.id) + '\')">✕ Махни</button>') + '</td></tr>';
+  });
+  return '<div style="margin:10px 0 4px;font-weight:600;">👥 Кой вижда таба „График“ и с каква роля</div>' +
+    (readOnly ? '' : '<div style="font-size:11px;color:#64748b;margin-bottom:4px;">' + GR_ROLES.map(function(r){ return '<b>' + escVal(GR_ROLE_LABEL[r]) + '</b> — ' + escVal(GR_ROLE_HINT[r]); }).join(' · ') +
+    '. Ролята в графика има предимство пред портала: admin с „Преглед“ не пише.</div>') +
+    grAdmTable('gr-adm-access', readOnly ? ['Имейл', 'Роля', 'ПИН'] : ['Имейл', 'Роля', 'ПИН', 'Бележка', 'Добавен', ''], rows);
+}
+function grAdmResetFlag(id, on){
+  return grApi('access_set', { id: id, can_reset_pin: !!on }).then(function(res){
+    if(!res.ok) toast('Не е сменено: ' + grErrText(res), '#dc2626');
+    return grAdminLoad();
+  });
+}
 function grAdmAccessAdd(){
-  var email = String(v('gr-adm-email') || '').trim().toLowerCase(), list = v('gr-adm-list'), note = v('gr-adm-note');
+  var email = String(v('gr-adm-email') || '').trim().toLowerCase(), role = v('gr-adm-role'), note = v('gr-adm-note');
   if(!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(email)){ toast('Невалиден имейл.', '#dc2626'); return; }
-  return grApi('access_add', { list: list, email: email, note: note }).then(function(res){
+  return grApi('access_add', { role: role, email: email, note: note }).then(function(res){
     if(!res.ok){ toast('Не е добавен: ' + grErrText(res), '#dc2626'); return; }
-    toast('✔ ' + email + ' е добавен в ' + (list === 'trz' ? 'ТРЗ' : 'beta') + '.');
+    toast('✔ ' + email + ' — ' + (GR_ROLE_LABEL[role] || role) + '.');
+    return grAdminLoad();
+  });
+}
+function grAdmAccessSet(id, role){
+  var a = ((grAdm && grAdm.access) || []).filter(function(x){ return x.id === id; })[0];
+  if(!a) return;
+  return grApi('access_set', { id: id, role: role }).then(function(res){
+    if(!res.ok){ toast('Ролята не е сменена: ' + grErrText(res), '#dc2626'); return grAdminLoad(); }
+    toast('✔ ' + a.email + ' — ' + (GR_ROLE_LABEL[role] || role) + '.');
     return grAdminLoad();
   });
 }
 function grAdmAccessRemove(id){
   var a = ((grAdm && grAdm.access) || []).filter(function(x){ return x.id === id; })[0];
-  if(!a || !confirm('Да махна ' + a.email + ' от ' + (a.list === 'trz' ? 'ТРЗ' : 'beta') + '?')) return;
+  if(!a || !confirm('Да махна ' + a.email + ' (' + (GR_ROLE_LABEL[grAdmRole(a)] || a.list) + ') — без достъп до „График“?')) return;
   return grApi('access_remove', { id: id }).then(function(res){
     if(!res.ok){ toast('Не е махнат: ' + grErrText(res), '#dc2626'); return; }
     toast('✔ ' + a.email + ' е махнат.');

@@ -8,23 +8,28 @@
 //   1) подписан пропуск от auth-login (verifySession) — иначе 401 session_expired;
 //   2) редът от users по uid от пропуска — роля, обект, is_regional,
 //      assigned_stores и active идват от базата, не от пропуска;
-//   3) имейлът е в grafik_access (list = beta; до 04.11.2026 — app_settings.grafik_beta_users) —
-//      иначе 403 not_beta (така браузърът знае и дали да покаже таба);
-//   4) вид достъп: ТРЗ (grafik_access list = trz, има предимство пред admin) → чете
-//      всички, само подадени месеци, не пише; admin → всичко; регионален
-//      (is_regional + assigned_stores) → своите обекти; manager → своя обект;
+//   3) имейлът има роля в grafik_access (list = view / trz / edit; „beta“ = edit до миграцията
+//      grafik_access_roles) — иначе 403 not_beta (така браузърът знае и дали да покаже таба);
+//   4) вид достъп — ролята в графика има предимство пред портала (27.11.2026):
+//      trz → чете всички, само подадени месеци, одобрява, не пише; view → чете всички
+//      (и черновите, и персонала), не пише нищо; edit → по портала: admin → всичко;
+//      регионален (is_regional + assigned_stores) → своите обекти; manager → своя обект;
 //      останалите → чете своя обект.
 import { verifySession } from "../_shared/session.ts";
+import { signPinToken, verifyPinToken } from "./pin-token.ts";
 
 // ── Типове ────────────────────────────────────────────────────────────────
 export type User = {
   id: string; email: string; display_name: string | null; store_name: string | null;
   role: string | null; is_regional: boolean | null; assigned_stores: string[] | null; active: boolean | null;
 };
-export type Kind = "trz" | "admin" | "regional" | "manager" | "viewer";
+export type Kind = "trz" | "view" | "admin" | "regional" | "manager" | "viewer";
 export type Access = {
-  kind: Kind; email: string; name: string; role: string;
+  uid?: string; kind: Kind; email: string; name: string; role: string;
   readAll: boolean; read: string[]; edit: string[] | "all"; canAdmin: boolean; canReopen: boolean;
+  // Нулира ПИН-а за графика на друг: admin с роля edit (canAdmin) или изричното
+  // grafik_access.can_reset_pin (Теодор, решение 27.11.2026 — въпреки че е view).
+  canResetPin?: boolean;
 };
 export type Dated = { valid_from: string | null; valid_to: string | null };
 export type MonthRow = {
@@ -43,9 +48,12 @@ export type ChangeRow = {
   actual: string; reason: string; created_at?: string; created_by?: string | null; updated_at?: string; updated_by?: string | null;
   trz_done: boolean; trz_done_at?: string | null; trz_done_by?: string | null;
 };
-// Списъците за модула (grafik_access): beta — кой вижда таба; trz — чете само подадените.
-export type AccessList = "beta" | "trz";
-export type AccessRow = { id: string; list: AccessList; email: string; note: string | null; created_at?: string; created_by?: string | null };
+// Ролята в модула (grafik_access.list, решение на Тенчо 27.11.2026): view — всички обекти, само четене;
+// trz — подадените, одобрява; edit — пише по правата си в портала. „beta“ — старото име на edit
+// (до миграцията grafik_access_roles; чете се като edit, за да може деплоят да е преди нея).
+export type AccessList = "beta" | "view" | "trz" | "edit";
+export type GrafikRole = "view" | "trz" | "edit";
+export type AccessRow = { id: string; list: AccessList; email: string; note: string | null; can_reset_pin?: boolean; created_at?: string; created_by?: string | null };
 export type Vtr = { id: string; name: string };
 // По месец: колко реда има и последната промяна по тях (кой, кога) — за обзора.
 export type RowStat = { rows: number; last_at: string | null; last_by: string | null };
@@ -70,6 +78,7 @@ export interface Repo {
   deleteChange(id: string): Promise<boolean>;
   listAccess(): Promise<AccessRow[]>;
   insertAccess(fields: Record<string, unknown>): Promise<AccessRow>;
+  updateAccess(id: string, fields: Record<string, unknown>): Promise<AccessRow | null>;
   deleteAccess(id: string): Promise<boolean>;
   vtrList(): Promise<Vtr[]>;
   storeNames(): Promise<string[]>;
@@ -99,7 +108,29 @@ export interface Repo {
   adminDelete(table: AdminTable, id: string): Promise<boolean>;
   setStoreCompanyRef(store: string, companyId: string | null): Promise<void>;
   audit(entry: { event: string; user_email: string; user_role: string; store_name: string | null; details: unknown }): Promise<void>;
+  // Етап В (27.11.2026): grafik_audit — и четенето; без права за anon (audit_log е четим с публичния ключ).
+  gAudit(entry: GAuditEntry): Promise<void>;
+  auditList(q: { since: string; email: string | null; store: string | null; limit: number }): Promise<GAuditRow[]>;
+  // Етап Б (27.11.2026): ПИН за графика (grafik_pin, без права за anon). Хешът не излиза от repo
+  // освен в pinReserve — за сравнението в handler-а.
+  pinGet(userId: string): Promise<PinState | null>;
+  pinStates(): Promise<(PinState & { user_id: string; email: string | null })[]>;
+  pinCreate(userId: string, hash: string): Promise<void>;
+  // Атомарно ЗАПАЗВА опит преди сравнението (fails + 1, заключва на 5-ия и 10-ия) — паралелни
+  // заявки не могат да пробват повече от позволеното. null — няма ПИН.
+  pinReserve(userId: string): Promise<{ granted: boolean; pin_hash: string | null; fails: number; locked_until: string | null; blocked: boolean } | null>;
+  pinOk(userId: string): Promise<void>;
+  pinUpdateHash(userId: string, hash: string): Promise<void>;
+  pinDelete(userId: string): Promise<boolean>;
+  hashPin(pin: string): Promise<string>;
+  checkPin(pin: string, hash: string): Promise<boolean>;
 }
+export type GAuditEntry = {
+  event: string; user_email: string; user_role: string; grafik_kind: string; store_name: string | null;
+  month: string | null; success: boolean; details: unknown; dedup_key: string | null;
+};
+export type GAuditRow = GAuditEntry & { id: number; at: string };
+export type PinState = { fails: number; locked_until: string | null; blocked: boolean; set_at?: string | null; last_ok_at?: string | null };
 
 export class HttpError extends Error {
   constructor(public status: number, public reason: string, message: string, public extra?: Record<string, unknown>) { super(message); }
@@ -109,23 +140,45 @@ export class HttpError extends Error {
 export function accessEmails(rows: AccessRow[], list: AccessList): string[] {
   return rows.filter((r) => r.list === list).map((r) => String(r.email).trim().toLowerCase());
 }
+export const ROLE_LABEL: Record<GrafikRole, string> = { view: "преглед", trz: "ТРЗ", edit: "редакция" };
+function needRole(v: unknown): GrafikRole {
+  if (v === "view" || v === "trz" || v === "edit") return v;
+  throw new HttpError(400, "bad_request", "Ролята е view, trz или edit.");
+}
 // Имейл за списъците: малки букви, без интервали, точно едно „@“ и точка в домейна.
 export const ACCESS_EMAIL_RE = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
 
-export function resolveAccess(u: User, beta: string[], trz: string[]): Access | HttpError {
+// Ролята на имейла по редовете на grafik_access. След миграцията имейлът е в точно един ред;
+// дотогава (и ако все пак има два) печели по-тясната: trz > view > edit (beta = edit).
+export function roleOf(rows: AccessRow[], email: string): GrafikRole | null {
+  const e = String(email || "").trim().toLowerCase();
+  const mine = rows.filter((r) => String(r.email || "").trim().toLowerCase() === e).map((r) => r.list);
+  if (!e || !mine.length) return null;
+  if (mine.indexOf("trz") >= 0) return "trz";
+  if (mine.indexOf("view") >= 0) return "view";
+  if (mine.indexOf("edit") >= 0 || mine.indexOf("beta") >= 0) return "edit";
+  return null;
+}
+export function canResetPinOf(rows: AccessRow[], email: string): boolean {
+  const e = String(email || "").trim().toLowerCase();
+  return rows.some((r) => String(r.email || "").trim().toLowerCase() === e && r.can_reset_pin === true);
+}
+
+// Ролята в графика има предимство пред ролята в портала: admin с „view“ не пише и не администрира.
+export function resolveAccess(u: User, grole: GrafikRole | null, canResetPin = false): Access | HttpError {
   const email = String(u.email || "").trim().toLowerCase();
   if (u.active === false) return new HttpError(403, "inactive", "Акаунтът е неактивен.");
-  // ТРЗ списъкът е достатъчен сам (04.11.2026): картата в „Администрация“ добавя ТРЗ с един ред —
-  // не трябва да се помни, че е нужен и beta (trz@temax.bg от 01.11 беше само в ТРЗ и не влизаше).
-  if (!email || (beta.indexOf(email) < 0 && trz.indexOf(email) < 0)) return new HttpError(403, "not_beta", "Модулът „Работен график“ още не е отворен за този акаунт.");
-  const base = { email, name: u.display_name || email, role: u.role || "" };
-  if (trz.indexOf(email) >= 0) return { ...base, kind: "trz", readAll: true, read: [], edit: [], canAdmin: false, canReopen: false };
-  if (u.role === "admin") return { ...base, kind: "admin", readAll: true, read: [], edit: "all", canAdmin: true, canReopen: true };
+  if (!email || !grole) return new HttpError(403, "not_beta", "Модулът „Работен график“ още не е отворен за този акаунт.");
+  const base = { uid: u.id, email, name: u.display_name || email, role: u.role || "" };
+  if (grole === "trz") return { ...base, kind: "trz", readAll: true, read: [], edit: [], canAdmin: false, canReopen: false, canResetPin };
+  if (grole === "view") return { ...base, kind: "view", readAll: true, read: [], edit: [], canAdmin: false, canReopen: false, canResetPin };
+  // edit — по правата в портала, както досега.
+  if (u.role === "admin") return { ...base, kind: "admin", readAll: true, read: [], edit: "all", canAdmin: true, canReopen: true, canResetPin: true };
   const assigned = Array.isArray(u.assigned_stores) ? u.assigned_stores.filter((s) => typeof s === "string" && s) : [];
-  if (u.is_regional && assigned.length) return { ...base, kind: "regional", readAll: false, read: assigned, edit: assigned, canAdmin: false, canReopen: true };
+  if (u.is_regional && assigned.length) return { ...base, kind: "regional", readAll: false, read: assigned, edit: assigned, canAdmin: false, canReopen: true, canResetPin };
   const own = u.store_name ? [u.store_name] : [];
-  if (u.role === "manager") return { ...base, kind: "manager", readAll: false, read: own, edit: own, canAdmin: false, canReopen: false };
-  return { ...base, kind: "viewer", readAll: false, read: own, edit: [], canAdmin: false, canReopen: false };
+  if (u.role === "manager") return { ...base, kind: "manager", readAll: false, read: own, edit: own, canAdmin: false, canReopen: false, canResetPin };
+  return { ...base, kind: "viewer", readAll: false, read: own, edit: [], canAdmin: false, canReopen: false, canResetPin };
 }
 
 export const canRead = (a: Access, store: string) => a.readAll || a.read.indexOf(store) >= 0;
@@ -482,25 +535,162 @@ export async function handleGrafik(req: Request, getRepo: () => Repo, now?: numb
   const sess = await verifySession(body.session, now);
   if (!sess) return json({ ok: false, reason: "session_expired", message: "Сесията е изтекла — влез отново." }, 401);
 
+  const action = String(body.action || "");
+  const nowS = Math.floor(now ?? Date.now() / 1000);
+  let repo: Repo | null = null, acc: Access | null = null;
   try {
-    const repo = getRepo();
+    repo = getRepo();
     // 2) + 3) Актуалният потребител и списъците (grafik_access) — едновременно (v11, 11.11.2026:
     // двете заявки са независими, а всяка последователна стъпка към базата е ~80–90 ms).
     const [user, lists] = await Promise.all([repo.getUser(String(sess.uid)), repo.listAccess()]);
     if (!user) return json({ ok: false, reason: "forbidden", message: "Потребителят не е намерен." }, 403);
     // 4) Видът достъп.
-    const acc = resolveAccess(user, accessEmails(lists, "beta"), accessEmails(lists, "trz"));
-    if (acc instanceof HttpError) return json({ ok: false, reason: acc.reason, message: acc.message }, acc.status);
+    const a = resolveAccess(user, roleOf(lists, user.email), canResetPinOf(lists, user.email));
+    if (a instanceof HttpError) return json({ ok: false, reason: a.reason, message: a.message }, a.status);
+    acc = a;
+    // 5) ПИН за графика (етап Б): без отключен ПИН — само me (без данни) и pin_set / pin_unlock.
+    const unlocked = await verifyPinToken(body.pin_token, String(sess.uid), sess.iat, nowS);
+    if (!unlocked && PIN_FREE.indexOf(action) < 0) throw new HttpError(401, "pin_required", "Въведи ПИН-а за графика.");
     const t0 = Date.now();
-    const result = await dispatch(repo, acc, body);
+    const result = PIN_ACTIONS.indexOf(action) >= 0 ? await pinDispatch(repo, acc, body, nowS, sess.iat) : await dispatch(repo, acc, body, unlocked, nowS);
     // За измерване по логовете (function_logs): действие и време в dispatch — без лични данни.
-    console.log(JSON.stringify({ grafik_api: String(body.action || ""), dispatch_ms: Date.now() - t0 }));
+    console.log(JSON.stringify({ grafik_api: action, dispatch_ms: Date.now() - t0 }));
+    // Етап В: кой какво е отворил (без съдържанието) — след успешно четене.
+    if (READ_EVENTS[action]) await later(readLog(repo, acc, READ_EVENTS[action], body, true, nowS));
+    // Плъзгащият се срок: всяка заявка с валиден ключ връща нов за още 15 мин.
+    if (unlocked && !result.pin_token) {
+      const t = await signPinToken(String(sess.uid), sess.iat, nowS);
+      result.pin_token = t.token; result.pin_exp = t.exp;
+    }
     return json({ ok: true, ...result }, 200);
   } catch (e) {
-    if (e instanceof HttpError) return json({ ok: false, reason: e.reason, message: e.message, ...(e.extra || {}) }, e.status);
+    if (e instanceof HttpError) {
+      // Отказаното четене (чужд обект) — също в одита, без съвпадение по 10 мин.
+      if (repo && acc && e.status === 403 && READ_EVENTS[action]) await later(readLog(repo, acc, READ_EVENTS[action], body, false, nowS, e.reason));
+      return json({ ok: false, reason: e.reason, message: e.message, ...(e.extra || {}) }, e.status);
+    }
     console.error("grafik-api error:", e);
     return json({ ok: false, reason: "internal", message: "Вътрешна грешка." }, 500);
   }
+}
+
+// ── Одит на четенето (етап В, решение на Тенчо 27.11.2026) ───────────────────
+// Кой, роля, обект, месец, действие и кога — без съдържанието. Едно и също четене от един човек
+// се пише веднъж на 10 мин (dedup_key, unique в базата; повторът е „on conflict do nothing“).
+export const READ_EVENTS: Record<string, string> = {
+  load_month: "grafik_view_month", overview: "grafik_view_overview", staff_list: "grafik_view_staff", changes_list: "grafik_view_changes",
+};
+// Печат и файлове — браузърът казва какво е направил (log), сървърът пише кой и за кой обект.
+export const LOG_WHAT: Record<string, string> = {
+  print_grafik: "grafik_print", print_presence: "grafik_print_presence", print_changes: "grafik_print_changes",
+  export_trz: "grafik_export_trz", export_presence: "grafik_export_presence",
+};
+export const DEDUP_SECONDS = 600;
+function monthKey(v: unknown): string | null { return parseMonth(v) ? String(v) : null; }
+function gEntry(acc: Access, event: string, store: string | null, month: string | null, success: boolean, details: unknown, dedup_key: string | null): GAuditEntry {
+  return { event, user_email: acc.email, user_role: acc.role, grafik_kind: acc.kind, store_name: store, month, success, details, dedup_key };
+}
+function readLog(repo: Repo, acc: Access, event: string, b: Record<string, unknown>, success: boolean, nowS: number, reason?: string): Promise<void> {
+  const store = typeof b.store === "string" && b.store ? b.store.slice(0, 100) : null;
+  const month = monthKey(b.month);
+  const key = success ? [acc.email, event, store || "", month || "", Math.floor(nowS / DEDUP_SECONDS)].join("|") : null;
+  return repo.gAudit(gEntry(acc, event, store, month, success, reason ? { reason } : null, key)).catch(() => {});
+}
+// Записът в одита не бива да бави отговора: в Supabase — EdgeRuntime.waitUntil; в тестовете — изчаква се.
+function later(p: Promise<unknown>): Promise<unknown> {
+  const er = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  if (er && typeof er.waitUntil === "function") { er.waitUntil(p); return Promise.resolve(); }
+  return p;
+}
+
+// ── ПИН за графика (етап Б, решение на Тенчо 27.11.2026) ────────────────────
+// Личен, 4–6 цифри; първия път го задава човекът сам; 5 грешни → 15 мин; 10 поредни → до
+// нулиране (admin с роля edit или grafik_access.can_reset_pin). Хеш bcrypt в grafik_pin.
+export const PIN_FREE = ["me", "pin_set", "pin_unlock"];
+const PIN_ACTIONS = ["pin_set", "pin_unlock", "pin_change", "pin_reset", "pin_touch"];
+export const PIN_LOCK_AT = 5, PIN_BLOCK_AT = 10;
+export function weakPin(pin: string): boolean {
+  if (/^(\d)\1+$/.test(pin)) return true;                         // 0000, 111111
+  const d = pin.split("").map(Number);
+  const step = d[1] - d[0];
+  return (step === 1 || step === -1) && d.every((x, i) => i === 0 || x - d[i - 1] === step);   // 1234, 98765
+}
+function needPin(v: unknown, label = "ПИН-ът"): string {
+  const pin = typeof v === "string" ? v.trim() : "";
+  if (!/^[0-9]{4,6}$/.test(pin)) throw new HttpError(400, "pin_format", label + " е от 4 до 6 цифри.");
+  return pin;
+}
+export function pinStateOf(p: PinState | null, nowS: number): "none" | "set" | "locked" | "blocked" {
+  if (!p) return "none";
+  if (p.blocked) return "blocked";
+  if (p.locked_until && Date.parse(p.locked_until) / 1000 > nowS) return "locked";
+  return "set";
+}
+function hhmm(iso: string): string {
+  return new Date(iso).toLocaleTimeString("bg-BG", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Sofia" });
+}
+const gaudit = (repo: Repo, acc: Access, event: string, details: unknown, success = true) =>
+  repo.gAudit(gEntry(acc, event, null, null, success, details, null)).catch(() => {});
+
+// Проверка на ПИН с изразходване на опит; връща нищо при успех, хвърля при грешен / заключен.
+async function spendPin(repo: Repo, acc: Access, pin: string, nowS: number, event: string): Promise<void> {
+  const r = await repo.pinReserve(acc.uid!);
+  if (!r) throw new HttpError(409, "pin_not_set", "Още нямаш ПИН за графика — задай го.");
+  if (!r.granted) {
+    if (r.blocked) throw new HttpError(423, "pin_blocked", "ПИН-ът е заключен след " + PIN_BLOCK_AT + " грешни опита — помоли администратор да го нулира.");
+    throw new HttpError(423, "pin_locked", "Твърде много грешни опити — опитай пак след " + (r.locked_until ? hhmm(r.locked_until) : "15 мин") + ".", { locked_until: r.locked_until });
+  }
+  if (await repo.checkPin(pin, r.pin_hash || "")) { await repo.pinOk(acc.uid!); return; }
+  await gaudit(repo, acc, event + "_fail", { fails: r.fails }, false);
+  if (r.blocked) throw new HttpError(423, "pin_blocked", "Грешен ПИН — " + PIN_BLOCK_AT + " грешни опита подред, ПИН-ът е заключен. Помоли администратор да го нулира.");
+  if (r.locked_until && Date.parse(r.locked_until) / 1000 > nowS) {
+    throw new HttpError(423, "pin_locked", "Грешен ПИН — " + PIN_LOCK_AT + " грешни опита, опитай пак след " + hhmm(r.locked_until) + ".", { locked_until: r.locked_until });
+  }
+  const left = r.fails < PIN_LOCK_AT ? PIN_LOCK_AT - r.fails : PIN_BLOCK_AT - r.fails;
+  throw new HttpError(403, "pin_wrong", "Грешен ПИН. Остават " + left + " опита" + (r.fails < PIN_LOCK_AT ? " до 15 мин заключване." : " до пълно заключване."), { left });
+}
+
+async function pinDispatch(repo: Repo, acc: Access, b: Record<string, unknown>, nowS: number, si: number): Promise<Record<string, unknown>> {
+  const issue = async () => { const t = await signPinToken(acc.uid!, si, nowS); return { pin_token: t.token, pin_exp: t.exp }; };
+  switch (b.action) {
+    case "pin_set": {
+      const pin = needPin(b.pin);
+      if (weakPin(pin)) throw new HttpError(400, "pin_weak", "Твърде лесен ПИН (еднакви или поредни цифри) — избери друг.");
+      if (await repo.pinGet(acc.uid!)) throw new HttpError(409, "pin_exists", "ПИН-ът вече е зададен — въведи го. Забравен ПИН нулира администратор.");
+      try { await repo.pinCreate(acc.uid!, await repo.hashPin(pin)); }
+      catch (e) { if (e instanceof HttpError && e.reason === "db_constraint") throw new HttpError(409, "pin_exists", "ПИН-ът вече е зададен — въведи го."); throw e; }
+      await gaudit(repo, acc, "grafik_pin_set", null);
+      return { pin_state: "set", ...(await issue()) };
+    }
+    case "pin_unlock": {
+      const pin = needPin(b.pin);                                    // лош формат — без изразходван опит
+      await spendPin(repo, acc, pin, nowS, "grafik_pin");
+      await gaudit(repo, acc, "grafik_unlock", null);
+      return { pin_state: "set", ...(await issue()) };
+    }
+    case "pin_change": {
+      const old = needPin(b.old, "Сегашният ПИН"), pin = needPin(b.pin, "Новият ПИН");
+      if (weakPin(pin)) throw new HttpError(400, "pin_weak", "Твърде лесен ПИН (еднакви или поредни цифри) — избери друг.");
+      if (pin === old) throw new HttpError(400, "pin_same", "Новият ПИН е същият като сегашния.");
+      await spendPin(repo, acc, old, nowS, "grafik_pin_change");
+      await repo.pinUpdateHash(acc.uid!, await repo.hashPin(pin));
+      await gaudit(repo, acc, "grafik_pin_change", null);
+      return { pin_state: "set" };
+    }
+    case "pin_reset": {
+      if (!acc.canResetPin) throw new HttpError(403, "forbidden", "ПИН нулират администратор (роля „редакция“) и упълномощените.");
+      const uid = uuid(b.user_id, "user_id");
+      if (uid === acc.uid) throw new HttpError(409, "self", "Собствения си ПИН сменяш с „Смени ПИН“, не с нулиране.");
+      const target = await repo.getUser(uid);
+      if (!target) throw new HttpError(404, "not_found", "Потребителят не е намерен.");
+      const had = await repo.pinDelete(uid);
+      await gaudit(repo, acc, "grafik_pin_reset", { email: String(target.email || "").toLowerCase(), had });
+      return { reset: had, email: String(target.email || "").toLowerCase() };
+    }
+    case "pin_touch":
+      return {};
+  }
+  throw new HttpError(400, "bad_request", "Непознато действие.");
 }
 
 async function needStore(repo: Repo, acc: Access, v: unknown, mode: "read" | "edit"): Promise<string> {
@@ -518,18 +708,50 @@ function needMonth(v: unknown) {
   if (!m) throw new HttpError(400, "bad_request", "Невалиден месец (очаква се ГГГГ-ММ).");
   return m;
 }
-const audit = (repo: Repo, acc: Access, event: string, store: string | null, details: unknown) =>
-  repo.audit({ event, user_email: acc.email, user_role: acc.role, store_name: store, details }).catch(() => {});
+// Промените — в audit_log (както досега) И в grafik_audit (етап В: целият одит на графика на едно
+// място, без права за anon). Месецът — от details.month („ГГГГ-ММ-01“ → „ГГГГ-ММ“).
+const audit = (repo: Repo, acc: Access, event: string, store: string | null, details: unknown) => {
+  const m = isObj(details) && typeof details.month === "string" ? details.month.slice(0, 7) : null;
+  return Promise.all([
+    repo.audit({ event, user_email: acc.email, user_role: acc.role, store_name: store, details }).catch(() => {}),
+    repo.gAudit(gEntry(acc, event, store, m, true, details, null)).catch(() => {}),
+  ]);
+};
 
-async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unlocked = true, nowS = Math.floor(Date.now() / 1000)): Promise<Record<string, unknown>> {
   switch (b.action) {
     case "me": {
+      // Без отключен ПИН: видът и състоянието на ПИН-а (за таба и екрана), но не и обектите.
+      const pin = await repo.pinGet(acc.uid!);
+      const base = {
+        kind: acc.kind, email: acc.email, name: acc.name, can_admin: acc.canAdmin, can_reopen: acc.canReopen, can_approve: canApprove(acc),
+        can_reset_pin: !!acc.canResetPin, unlocked,
+        pin: { state: pinStateOf(pin, nowS), locked_until: pin && pin.locked_until && Date.parse(pin.locked_until) / 1000 > nowS ? pin.locked_until : null },
+      };
+      if (!unlocked) return { ...base, stores: [] };
       const names = await repo.storeNames();
       const visible = acc.readAll ? names : names.filter((n) => acc.read.indexOf(n) >= 0);
-      return {
-        kind: acc.kind, email: acc.email, name: acc.name, can_admin: acc.canAdmin, can_reopen: acc.canReopen, can_approve: canApprove(acc),
-        stores: visible.map((n) => ({ name: n, can_edit: canEdit(acc, n) })),
-      };
+      return { ...base, stores: visible.map((n) => ({ name: n, can_edit: canEdit(acc, n) })) };
+    }
+
+    // ── Етап В: печат / файл (браузърът казва какво), одит — кой и за кой обект.
+    case "log": {
+      const ev = typeof b.what === "string" ? LOG_WHAT[b.what] : undefined;
+      if (!ev) throw new HttpError(400, "bad_request", "Непознато действие за одита.");
+      const store = await needStore(repo, acc, b.store, "read");
+      const month = monthKey(b.month);
+      await repo.gAudit(gEntry(acc, ev, store, month, true, null, [acc.email, ev, store, month || "", Math.floor(nowS / DEDUP_SECONDS)].join("|"))).catch(() => {});
+      return {};
+    }
+
+    case "audit_list": {
+      // „📜 Кой отваря“ — само admin (роля „редакция“). Последните N дни (по подразбиране 30, до 90).
+      if (!acc.canAdmin) throw new HttpError(403, "forbidden", "Само admin.");
+      const days = typeof b.days === "number" && Number.isInteger(b.days) && b.days >= 1 && b.days <= 90 ? b.days : 30;
+      const email = typeof b.email === "string" && b.email.trim() ? b.email.trim().toLowerCase().slice(0, 200) : null;
+      const store = typeof b.store === "string" && b.store.trim() ? b.store.trim().slice(0, 100) : null;
+      const since = new Date((nowS - days * 86400) * 1000).toISOString();
+      return { days, rows: await repo.auditList({ since, email, store, limit: 1000 }) };
     }
 
     case "load_month": {
@@ -942,26 +1164,53 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       return { deleted: 1 };
     }
 
-    // ── Списъците beta / ТРЗ (grafik_access, етап 1е-3) — само admin, всяка промяна в одита.
-    // Собственият имейл не се пипа: махнат от beta — admin губи модула; добавен в ТРЗ — губи
-    // администрацията (ТРЗ има предимство пред admin) и не може да го махне сам.
+    // ── Ролите (grafik_access: view / trz / edit, 27.11.2026) — само admin, всяка промяна в одита.
+    // Собственият имейл не се пипа: махнат — admin губи модула; сменен на view / trz — губи
+    // администрацията (ролята в графика има предимство) и не може да го върне сам.
     case "access_list": {
-      if (!acc.canAdmin) throw new HttpError(403, "forbidden", "Само admin.");
-      return { rows: await repo.listAccess() };
+      // Списъкът и състоянието на ПИН-овете — admin и който може да нулира ПИН (Теодор, view).
+      if (!acc.canAdmin && !acc.canResetPin) throw new HttpError(403, "forbidden", "Само admin.");
+      const [rows, pins] = await Promise.all([repo.listAccess(), repo.pinStates()]);
+      return {
+        rows,
+        pins: pins.map((p) => ({ user_id: p.user_id, email: p.email ? p.email.toLowerCase() : null, state: pinStateOf(p, nowS), fails: p.fails,
+          locked_until: p.locked_until, set_at: p.set_at || null, last_ok_at: p.last_ok_at || null })),
+      };
     }
 
     case "access_add": {
       if (!acc.canAdmin) throw new HttpError(403, "forbidden", "Само admin.");
-      const list = b.list;
-      if (list !== "beta" && list !== "trz") throw new HttpError(400, "bad_request", "Списъкът е beta или trz.");
+      // role — от 27.11.2026; list: beta / trz — старата карта (браузър отпреди пуша), beta = edit.
+      const role = needRole(b.role !== undefined ? b.role : b.list === "beta" ? "edit" : b.list);
       const email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
       if (!ACCESS_EMAIL_RE.test(email)) throw new HttpError(400, "bad_email", "Невалиден имейл.");
       if (email === acc.email) throw new HttpError(409, "self", "Собствения си имейл не променяш оттук — би загубил достъпа до администрацията.");
       const rows = await repo.listAccess();
-      if (rows.some((r) => r.list === list && r.email === email)) throw new HttpError(409, "duplicate", "Имейлът вече е в списъка.");
+      const had = roleOf(rows, email);
+      if (had) throw new HttpError(409, "duplicate", "Имейлът вече има роля (" + ROLE_LABEL[had] + ") — смени я в реда му.");
       const note = typeof b.note === "string" && b.note.trim() ? b.note.trim().slice(0, 200) : null;
-      const row = await repo.insertAccess({ list, email, note, created_by: acc.email });
-      await audit(repo, acc, "grafik_access_add", null, { list, email, note });
+      const row = await repo.insertAccess({ list: role, email, note, created_by: acc.email });
+      await audit(repo, acc, "grafik_access_add", null, { list: role, email, note });
+      return { row };
+    }
+
+    case "access_set": {
+      // Смяна на ролята на един ред (и „може да нулира ПИН“) — само admin; своя ред — не.
+      if (!acc.canAdmin) throw new HttpError(403, "forbidden", "Само admin.");
+      const id = uuid(b.id, "id");
+      const cur = (await repo.listAccess()).filter((r) => r.id === id)[0];
+      if (!cur) throw new HttpError(404, "not_found", "Записът не е намерен.");
+      if (cur.email === acc.email) throw new HttpError(409, "self", "Собствения си имейл не променяш оттук — би загубил достъпа до администрацията.");
+      const fields: Record<string, unknown> = {};
+      if (b.role !== undefined) fields.list = needRole(b.role);
+      if (b.can_reset_pin !== undefined) {
+        if (typeof b.can_reset_pin !== "boolean") throw new HttpError(400, "bad_request", "can_reset_pin е true или false.");
+        fields.can_reset_pin = b.can_reset_pin;
+      }
+      if (!Object.keys(fields).length) throw new HttpError(400, "bad_request", "Няма какво да се смени.");
+      const row = await repo.updateAccess(id, fields);
+      if (!row) throw new HttpError(404, "not_found", "Записът не е намерен.");
+      await audit(repo, acc, "grafik_access_set", null, { email: cur.email, was: { list: cur.list, can_reset_pin: cur.can_reset_pin === true }, set: fields });
       return { row };
     }
 

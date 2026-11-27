@@ -4,10 +4,12 @@
 // свой/чужд обект, пропуска, beta/ТРЗ списъците, клетките, снимката и валидността по дати.
 import {
   handleGrafik, HttpError, accessEmails, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
-  snapshotOffNorm, sameAsPlanned, staleChanges,
+  snapshotOffNorm, sameAsPlanned, staleChanges, roleOf,
   type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector, type RowStat, type AccessRow, type ChangeRow,
+  type GAuditEntry, type PinState,
 } from "./handler.ts";
 import { signSession } from "../_shared/session.ts";
+import { signPinToken } from "./pin-token.ts";
 
 Deno.env.set("PORTAL_SESSION_SECRET", "test-secret-" + "x".repeat(48));
 
@@ -80,6 +82,7 @@ class MemRepo implements Repo {
   async deleteChange(id: string) { const n = this.changes.length; this.changes = this.changes.filter((c) => c.id !== id); return this.changes.length < n; }
   async listAccess() { return this.access.slice(); }
   async insertAccess(f: Record<string, unknown>) { const r = { id: nid(), note: null, ...f } as AccessRow; this.access.push(r); return r; }
+  async updateAccess(id: string, f: Record<string, unknown>) { const x = this.access.filter((a) => a.id === id)[0]; if (!x) return null; Object.assign(x, f); return { ...x }; }
   async deleteAccess(id: string) { const n = this.access.length; this.access = this.access.filter((r) => r.id !== id); return this.access.length < n; }
   async vtrList() { return this.vtrs.slice(); }
   async storeNames() { return this.stores.slice(); }
@@ -152,13 +155,47 @@ class MemRepo implements Repo {
   async adminDelete(t: AdminTable, id: string) { const n = this.admin[t].length; this.admin[t] = this.admin[t].filter((x) => x.id !== id); return this.admin[t].length < n; }
   async setStoreCompanyRef(store: string, c: string | null) { this.storeRef[store] = c; }
   async audit(e: { event: string; store_name: string | null }) { this.audits.push(e); }
+  // ── Етап В: grafik_audit (dedup_key — като unique индекса в базата).
+  gaudits: (GAuditEntry & { at: string })[] = [];
+  async gAudit(e: GAuditEntry) { if (e.dedup_key && this.gaudits.some((x) => x.dedup_key === e.dedup_key)) return; this.gaudits.push({ ...e, at: new Date().toISOString() }); }
+  async auditList(q: { since: string; email: string | null; store: string | null; limit: number }) {
+    return this.gaudits.filter((e) => e.at >= q.since && (!q.email || e.user_email === q.email) && (!q.store || e.store_name === q.store))
+      .slice().reverse().slice(0, q.limit).map((e, i) => ({ ...e, id: i + 1 }));
+  }
+  // ── Етап Б: grafik_pin. pinReserve повтаря логиката на SQL функцията grafik_pin_reserve.
+  pins: Record<string, PinState & { hash: string }> = {};
+  async pinGet(u: string) { const p = this.pins[u]; if (!p) return null; const { hash: _h, ...rest } = p; return { ...rest }; }
+  async pinStates() { return Object.keys(this.pins).map((u) => { const { hash: _h, ...rest } = this.pins[u]; return { ...rest, user_id: u, email: (this.users.filter((x) => x.id === u)[0] || { email: null }).email }; }); }
+  async pinCreate(u: string, hash: string) {
+    if (this.pins[u]) throw new HttpError(400, "db_constraint", "duplicate key value violates unique constraint");
+    this.pins[u] = { hash, fails: 0, locked_until: null, blocked: false, set_at: new Date().toISOString(), last_ok_at: null };
+  }
+  async pinReserve(u: string) {
+    const p = this.pins[u]; if (!p) return null;
+    if (p.blocked || (p.locked_until && Date.parse(p.locked_until) > Date.now())) return { granted: false, pin_hash: null, fails: p.fails, locked_until: p.locked_until, blocked: p.blocked };
+    p.fails++; p.blocked = p.fails >= 10;
+    if (p.fails === 5) p.locked_until = new Date(Date.now() + 15 * 60000).toISOString();
+    return { granted: true, pin_hash: p.hash, fails: p.fails, locked_until: p.locked_until, blocked: p.blocked };
+  }
+  async pinOk(u: string) { const p = this.pins[u]; if (p) Object.assign(p, { fails: 0, locked_until: null, blocked: false, last_ok_at: new Date().toISOString() }); }
+  async pinUpdateHash(u: string, hash: string) { const p = this.pins[u]; if (p) Object.assign(p, { hash, set_at: new Date().toISOString() }); }
+  async pinDelete(u: string) { const had = !!this.pins[u]; delete this.pins[u]; return had; }
+  async hashPin(pin: string) { return "h:" + pin; }
+  async checkPin(pin: string, hash: string) { return hash === "h:" + pin; }
 }
 
-async function call(repo: MemRepo, who: User | null, body: Record<string, unknown>, opts: { session?: unknown; method?: string; now?: number } = {}) {
+// По подразбиране заявката носи и валиден ключ за ПИН-а (етап Б) за същото влизане — за да
+// тестват старите проверки правата, не ПИН-а. pin: false — без ключ; pin: "низ" — точно този.
+const iatOf = (tok: string) => JSON.parse(atob(tok.split(".")[0].replace(/-/g, "+").replace(/_/g, "/"))).iat as number;
+async function call(repo: MemRepo, who: User | null, body: Record<string, unknown>, opts: { session?: unknown; method?: string; now?: number; pin?: boolean | string } = {}) {
   const session = "session" in opts ? opts.session : who ? await signSession({ uid: who.id, role: who.role || "", email: who.email }) : undefined;
+  const nowS = opts.now ?? Math.floor(Date.now() / 1000);
+  const pin_token = typeof opts.pin === "string" ? opts.pin
+    : opts.pin === false || !who || typeof session !== "string" ? undefined
+    : (await signPinToken(who.id, iatOf(session), nowS)).token;
   const req = new Request("http://x/grafik-api", {
     method: opts.method || "POST", headers: { "Content-Type": "application/json" },
-    body: (opts.method || "POST") === "POST" ? JSON.stringify({ ...body, session }) : undefined,
+    body: (opts.method || "POST") === "POST" ? JSON.stringify({ ...body, session, ...(pin_token ? { pin_token } : {}) }) : undefined,
   });
   const res = await handleGrafik(req, () => { repo.opened++; return repo; }, opts.now);
   return { status: res.status, body: res.status === 200 && (opts.method === "OPTIONS") ? null : await res.json().catch(() => null) };
@@ -690,23 +727,103 @@ Deno.test("access_*: само admin; добавяне, дубликат, нев�
   for (const u of [U.mgrK, U.trz, U.regSh]) eq((await call(r, u, { action: "access_list" })).status, 403, "не-admin — " + u.email);
   const l = await call(r, U.admin, { action: "access_list" });
   eq(l.body.rows.map((x: AccessRow) => x.list + ":" + x.email).sort().slice(0, 2), ["beta:off@temax.bg", "beta:sklad.k@temax.bg"], "списъкът");
-  const add = await call(r, U.admin, { action: "access_add", list: "beta", email: "  Drug@Temax.bg ", note: " Регионален Юг " });
-  eq([add.status, add.body.row.email, add.body.row.note, add.body.row.created_by], [200, "drug@temax.bg", "Регионален Юг", "ten.tenev@temax.bg"], "добавен (малки букви, без интервали)");
-  eq((await call(r, U.outside, { action: "me" })).body.kind, "manager", "…и веднага има достъп");
-  eq((await call(r, U.admin, { action: "access_add", list: "beta", email: "drug@temax.bg" })).body.reason, "duplicate", "втори път — 409");
-  eq((await call(r, U.admin, { action: "access_add", list: "trz", email: "drug@temax.bg" })).status, 200, "същият имейл в другия списък — може");
-  eq((await call(r, U.outside, { action: "me" })).body.kind, "trz", "…и става ТРЗ (предимство)");
-  for (const bad of ["", "без-маймунка", "a@b", "a b@c.bg", "a,b@c.bg"]) eq((await call(r, U.admin, { action: "access_add", list: "beta", email: bad })).body.reason, "bad_email", "лош имейл: " + bad);
-  eq((await call(r, U.admin, { action: "access_add", list: "admin", email: "x@temax.bg" })).body.reason, "bad_request", "непознат списък");
-  eq((await call(r, U.admin, { action: "access_add", list: "trz", email: "Ten.Tenev@temax.bg" })).body.reason, "self", "собственият имейл в ТРЗ — не");
+  const add = await call(r, U.admin, { action: "access_add", role: "edit", email: "  Drug@Temax.bg ", note: " Регионален Юг " });
+  eq([add.status, add.body.row.list, add.body.row.email, add.body.row.note, add.body.row.created_by], [200, "edit", "drug@temax.bg", "Регионален Юг", "ten.tenev@temax.bg"], "добавен (малки букви, без интервали)");
+  eq((await call(r, U.outside, { action: "me" })).body.kind, "manager", "…и веднага има достъп (edit → по портала)");
+  eq((await call(r, U.admin, { action: "access_add", role: "edit", email: "drug@temax.bg" })).body.reason, "duplicate", "втори път — 409");
+  eq((await call(r, U.admin, { action: "access_add", role: "trz", email: "drug@temax.bg" })).body.reason, "duplicate", "една роля на имейл — втора не се добавя, а се сменя");
+  const dr = r.access.filter((x) => x.email === "drug@temax.bg")[0];
+  const set = await call(r, U.admin, { action: "access_set", id: dr.id, role: "trz" });
+  eq([set.status, set.body.row.list], [200, "trz"], "смяна на ролята");
+  eq((await call(r, U.outside, { action: "me" })).body.kind, "trz", "…и става ТРЗ");
+  for (const bad of ["", "без-маймунка", "a@b", "a b@c.bg", "a,b@c.bg"]) eq((await call(r, U.admin, { action: "access_add", role: "view", email: bad })).body.reason, "bad_email", "лош имейл: " + bad);
+  eq((await call(r, U.admin, { action: "access_add", role: "admin", email: "x@temax.bg" })).body.reason, "bad_request", "непозната роля");
+  eq((await call(r, U.admin, { action: "access_add", list: "beta", email: "old.card@temax.bg" })).body.row.list, "edit", "старата карта (list: beta) → edit");
+  eq((await call(r, U.admin, { action: "access_add", role: "trz", email: "Ten.Tenev@temax.bg" })).body.reason, "self", "собственият имейл — не");
   const own = r.access.filter((x) => x.email === "ten.tenev@temax.bg")[0];
-  eq((await call(r, U.admin, { action: "access_remove", id: own.id })).body.reason, "self", "собственият от beta — не");
-  const tz = r.access.filter((x) => x.list === "trz" && x.email === "drug@temax.bg")[0];
-  eq((await call(r, U.admin, { action: "access_remove", id: tz.id })).body.deleted, 1, "махнат");
-  eq((await call(r, U.outside, { action: "me" })).body.kind, "manager", "…и вече не е ТРЗ");
-  eq((await call(r, U.admin, { action: "access_remove", id: tz.id })).status, 404, "втори път — 404");
+  eq((await call(r, U.admin, { action: "access_remove", id: own.id })).body.reason, "self", "собственият — не се маха");
+  eq((await call(r, U.admin, { action: "access_set", id: own.id, role: "view" })).body.reason, "self", "собственият — не се сменя");
+  eq((await call(r, U.admin, { action: "access_set", id: dr.id, role: "boss" })).body.reason, "bad_request", "access_set: непозната роля");
+  eq((await call(r, U.admin, { action: "access_set", id: dr.id })).body.reason, "bad_request", "access_set: нищо за смяна");
+  eq((await call(r, U.admin, { action: "access_set", id: dr.id, can_reset_pin: "да" })).body.reason, "bad_request", "can_reset_pin — само boolean");
+  eq((await call(r, U.mgrK, { action: "access_set", id: dr.id, role: "view" })).status, 403, "access_set — само admin");
+  eq((await call(r, U.admin, { action: "access_remove", id: dr.id })).body.deleted, 1, "махнат");
+  eq((await call(r, U.outside, { action: "me" })).body.reason, "not_beta", "…и вече няма достъп");
+  eq((await call(r, U.admin, { action: "access_remove", id: dr.id })).status, 404, "втори път — 404");
+  eq((await call(r, U.admin, { action: "access_set", id: dr.id, role: "view" })).status, 404, "access_set на махнат — 404");
   eq((await call(r, U.admin, { action: "access_remove", id: "не-uuid" })).body.reason, "bad_request", "лош id");
-  eq(r.audits.map((a) => a.event), ["grafik_access_add", "grafik_access_add", "grafik_access_remove"], "одит — само успешните промени");
+  eq(r.audits.filter((a) => a.event.indexOf("grafik_access") === 0).map((a) => a.event), ["grafik_access_add", "grafik_access_set", "grafik_access_add", "grafik_access_remove"], "одит — само успешните промени");
+});
+
+// ── Роли view / trz / edit (27.11.2026) ─────────────────────────────────────
+Deno.test("roleOf: trz > view > edit; beta = edit; главни букви", () => {
+  const row = (list: string, email: string) => ({ id: nid(), list, email, note: null }) as AccessRow;
+  eq(roleOf([row("beta", "a@x.bg")], "A@x.bg "), "edit", "beta → edit");
+  eq(roleOf([row("edit", "a@x.bg"), row("view", "a@x.bg")], "a@x.bg"), "view", "view бие edit");
+  eq(roleOf([row("view", "a@x.bg"), row("trz", "a@x.bg")], "a@x.bg"), "trz", "trz бие view");
+  eq(roleOf([row("view", "b@x.bg")], "a@x.bg"), null, "друг имейл");
+  eq(roleOf([], ""), null, "празно");
+});
+
+Deno.test("view: всички обекти и черновите, персонала; нищо не пише; admin с view не администрира", async () => {
+  const r = new MemRepo();
+  // Теодор: admin в портала, „преглед“ в графика.
+  r.access = r.access.filter((x) => x.email !== "ten.tenev@temax.bg").concat([{ id: nid(), list: "view", email: "ten.tenev@temax.bg", note: null }]);
+  const own = { ...U.admin };
+  const me = (await call(r, own, { action: "me" })).body;
+  eq([me.kind, me.stores.length, me.can_admin, me.can_reopen, me.can_approve, me.stores.some((s: { can_edit: boolean }) => s.can_edit)], ["view", 4, false, false, false, false], "me: всички 4 обекта, нищо за писане");
+  await filled(r, "Кърджали", U.mgrK);                       // чернова с редове от ръководителя
+  const lm = (await call(r, own, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  eq([lm.status, lm.can_edit, lm.can_reopen, lm.can_approve, lm.can_return, lm.rows.length > 0, lm.staff.length], ["draft", false, false, false, false, true, 2], "вижда черновата с редовете");
+  eq((await call(r, own, { action: "load_month", store: "Раднево", month: "2026-11" })).status, 200, "чужд обект — чете");
+  eq((await call(r, own, { action: "staff_list", store: "Шумен" })).status, 200, "„👥 Персонал“ — чете");
+  eq((await call(r, own, { action: "overview", month: "2026-11" })).status, 200, "обзор");
+  const sid = kStaff(r)[0], sec = r.sectors[0].id;
+  const writes: [string, Record<string, unknown>][] = [
+    ["save_rows", { store: "Кърджали", month: "2026-11", rows: [{ staff_id: sid, letters: L30(["П"]) }] }],
+    ["submit", { store: "Кърджали", month: "2026-11", snapshot: { rows: [] } }],
+    ["reopen", { store: "Кърджали", month: "2026-11" }],
+    ["return", { store: "Кърджали", month: "2026-11", comment: "x" }],
+    ["approve", { store: "Кърджали", month: "2026-11" }],
+    ["staff_save", { store: "Кърджали", fields: { short_name: "НОВ", full_name: "Нов Човек" } }],
+    ["staff_save", { store: "Кърджали", id: sid, fields: { short_name: "ПРОМЕНЕН" } }],
+    ["staff_move", { id: sid, to_store: "Шумен", date: "2026-12-01" }],
+    ["changes_save", { store: "Кърджали", month: "2026-11", staff_id: sid, day: 3, actual: "Б", reason: "x" }],
+    ["changes_delete", { store: "Кърджали", month: "2026-11", id: sid }],
+    ["changes_trz", { store: "Кърджали", month: "2026-11", id: sid, done: true }],
+    ["sector_save", { store: "Кърджали", name: "Нов сектор" }],
+    ["sector_update", { store: "Кърджали", id: sec, track_coverage: false }],
+    ["admin_get", {}], ["admin_save", { table: "companies", fields: { name: "X" } }], ["admin_delete", { table: "grafik_extra_days", id: sid }],
+    ["access_list", {}], ["access_add", { role: "edit", email: "x@temax.bg" }], ["access_set", { id: r.access[0].id, role: "edit" }], ["access_remove", { id: r.access[0].id }],
+  ];
+  const before = JSON.stringify([r.rows, r.staff, r.months, r.changes, r.sectors, r.admin, r.access]);
+  for (const [action, body] of writes) {
+    const x = await call(r, own, { action, ...body });
+    assert(x.status === 403 || x.status === 409, action + ": view получи " + x.status + " " + JSON.stringify(x.body));
+  }
+  eq(JSON.stringify([r.rows, r.staff, r.months, r.changes, r.sectors, r.admin, r.access]), before, "базата — непокътната");
+  eq(r.audits.filter((a) => a.event.indexOf("grafik_") === 0 && a.event !== "grafik_view").length, 0, "одит на промени — нула");
+});
+
+Deno.test("view: подаден месец — вижда, но не одобрява, не връща, не отмята", async () => {
+  const r = new MemRepo();
+  r.access.push({ id: nid(), list: "view", email: "t.tenev@temax.bg", note: null });
+  const teo: User = { id: nid(), email: "t.tenev@temax.bg", display_name: "Теодор Тенев", store_name: "Централен офис", role: "admin", is_regional: false, assigned_stores: null, active: true };
+  r.users.push(teo);
+  await submittedK(r);
+  const lm = (await call(r, teo, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  eq([lm.status, lm.can_approve, lm.can_return, lm.can_reopen], ["submitted", false, false, false], "подаден — само чете");
+  eq((await call(r, teo, { action: "changes_list", store: "Кърджали", month: "2026-11" })).status, 200, "промените — чете");
+  const ov = (await call(r, teo, { action: "overview", month: "2026-11" })).body;
+  eq(ov.stores.filter((s: { can_approve: boolean; can_return: boolean; can_edit: boolean }) => s.can_approve || s.can_return || s.can_edit).length, 0, "обзор — без бутони");
+  // На подаден месец отказът е заради правата (403), не заради статуса.
+  eq((await call(r, teo, { action: "approve", store: "Кърджали", month: "2026-11" })).status, 403, "approve на подаден — 403");
+  eq((await call(r, teo, { action: "return", store: "Кърджали", month: "2026-11", comment: "поправи" })).status, 403, "return на подаден — 403");
+  eq((await call(r, teo, { action: "reopen", store: "Кърджали", month: "2026-11" })).status, 403, "reopen на подаден — 403");
+  const ch = (await call(r, U.mgrK, { action: "changes_save", store: "Кърджали", month: "2026-11", staff_id: kStaff(r)[0], day: 2, actual: "Б", reason: "болничен" })).body.row;
+  eq((await call(r, teo, { action: "changes_trz", store: "Кърджали", month: "2026-11", id: ch.id, done: true })).status, 403, "„Отразено в ТРЗ“ — 403");
+  eq((await call(r, teo, { action: "changes_delete", store: "Кърджали", month: "2026-11", id: ch.id })).status, 403, "трие промяна — 403");
+  eq([r.months[0].status, r.changes.length, r.changes[0].trz_done], ["submitted", 1, false], "нищо не е сменено");
 });
 
 Deno.test("ТРЗ списъкът е достатъчен сам — без beta (04.11.2026)", async () => {
@@ -1097,4 +1214,201 @@ Deno.test("return: коментар задължителен; одобрен —
   eq((await ret(U.trz, "Шумен", "провери Шумен")).status, 200, "ТРЗ връща одобрения Шумен");
   await call(r, U.regSh, { action: "submit", store: "Шумен", month: "2026-11", snapshot: snap(sh) });
   eq((await ret(U.regSh, "Шумен", "сам си го връщам")).status, 200, "регионален — свой подаден, с коментар");
+});
+
+// ── Етап Б: ПИН за графика (27.11.2026) ────────────────────────────────────
+const TEO: User = { id: nid(), email: "t.tenev@temax.bg", display_name: "Теодор Тенев", store_name: "Централен офис", role: "admin", is_regional: false, assigned_stores: null, active: true };
+function withTeo(r: MemRepo, canReset: boolean) {
+  r.users.push(TEO);
+  r.access.push({ id: nid(), list: "view", email: TEO.email, note: null, can_reset_pin: canReset });
+}
+const pinCall = (r: MemRepo, who: User, action: string, f: Record<string, unknown> = {}, opts: { pin?: boolean | string; now?: number } = {}) =>
+  call(r, who, { action, ...f }, { pin: false, ...opts });
+
+Deno.test("ПИН: без ключ — me без обекти, всичко друго 401 pin_required, базата непокътната", async () => {
+  const r = new MemRepo();
+  await filled(r);                                                  // (с ключ — помощникът)
+  const me = await pinCall(r, U.mgrK, "me");
+  eq([me.status, me.body.unlocked, me.body.stores, me.body.pin.state, me.body.kind], [200, false, [], "none", "manager"], "me без ключ");
+  assert(!("pin_token" in me.body), "me без ключ не издава ключ");
+  const before = JSON.stringify([r.rows, r.staff, r.months, r.access]);
+  const nAud = r.gaudits.length;
+  for (const action of ["load_month", "overview", "staff_list", "changes_list", "save_rows", "submit", "staff_save", "access_list", "access_add", "audit_list", "log", "pin_reset", "pin_change", "pin_touch", "admin_get", "nyama_takova"]) {
+    const x = await pinCall(r, U.admin, action, { store: "Кърджали", month: "2026-11" });
+    eq([x.status, x.body.reason], [401, "pin_required"], action + " без ключ");
+  }
+  eq(JSON.stringify([r.rows, r.staff, r.months, r.access]), before, "нищо не е записано");
+  eq(r.gaudits.length, nAud, "отказите без ключ не се пишат като четене");
+});
+
+Deno.test("ПИН: pin_set — формат, лесни, задаване, втори път 409; ключът отваря данните", async () => {
+  const r = new MemRepo();
+  for (const bad of ["", "abc", "123", "1234567", "12 34", 1234]) eq((await pinCall(r, U.mgrK, "pin_set", { pin: bad })).body.reason, "pin_format", "формат: " + String(bad));
+  for (const weak of ["0000", "1111", "1234", "4321", "123456", "98765", "666666"]) eq((await pinCall(r, U.mgrK, "pin_set", { pin: weak })).body.reason, "pin_weak", "лесен: " + weak);
+  eq(r.pins[U.mgrK.id], undefined, "нищо не е записано при отказ");
+  const s = await pinCall(r, U.mgrK, "pin_set", { pin: " 2580 " });
+  eq([s.status, s.body.pin_state, typeof s.body.pin_token, typeof s.body.pin_exp], [200, "set", "string", "number"], "зададен, с ключ");
+  eq(r.pins[U.mgrK.id].hash, "h:2580", "записан е хешът (repo.hashPin), не самият ПИН");
+  eq((await pinCall(r, U.mgrK, "pin_set", { pin: "3690" })).body.reason, "pin_exists", "втори път — 409, не се презаписва");
+  eq(r.pins[U.mgrK.id].hash, "h:2580", "…и хешът е старият");
+  eq(r.gaudits.filter((e) => e.event === "grafik_pin_set").length, 1, "grafik_pin_set — в grafik_audit");
+  eq(r.audits.filter((e) => e.event.indexOf("pin") >= 0).length, 0, "ПИН събитията НЕ отиват в audit_log (четим с публичния ключ)");
+});
+
+Deno.test("ПИН: ключът — за същия човек, същото влизане, 15 мин, подновява се; не е пропуск", async () => {
+  const r = new MemRepo();
+  const sess = await signSession({ uid: U.mgrK.id, role: "manager", email: U.mgrK.email });
+  const t0 = Math.floor(Date.now() / 1000);
+  const tok = (await signPinToken(U.mgrK.id, iatOf(sess), t0)).token;
+  const lm = (o: { session?: unknown; pin?: string; now?: number }) => call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" }, { session: sess, ...o });
+  const ok1 = await lm({ pin: tok, now: t0 + 14 * 60 });
+  eq(ok1.status, 200, "след 14 мин — още важи");
+  eq(ok1.body.pin_exp, t0 + 14 * 60 + 900, "…и отговорът носи нов ключ за още 15 мин от сега");
+  eq((await lm({ pin: ok1.body.pin_token, now: t0 + 28 * 60 })).status, 200, "новият ключ важи след 28 мин от първия (плъзгащ се срок)");
+  eq((await lm({ pin: tok, now: t0 + 15 * 60 })).body.reason, "pin_required", "старият — точно на 15-ата минута изтича");
+  const other = (await signPinToken(U.sklK.id, iatOf(sess), t0)).token;
+  eq((await lm({ pin: other })).body.reason, "pin_required", "чужд ключ (друг uid)");
+  const sess2 = await signSession({ uid: U.mgrK.id, role: "manager", email: U.mgrK.email }, t0 + 5);
+  eq((await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" }, { session: sess2, pin: tok })).body.reason, "pin_required", "ново влизане → нов ПИН");
+  eq((await lm({ pin: tok.split(".")[0] + "." + "A".repeat(43) })).body.reason, "pin_required", "подправен подпис");
+  eq((await lm({ pin: sess })).body.reason, "pin_required", "пропускът на портала не е ключ за графика");
+  eq((await call(r, null, { action: "me" }, { session: tok })).status, 401, "ключът за графика не е пропуск за портала");
+});
+
+Deno.test("ПИН: грешни опити — 5 → 15 мин, 10 поредни → до нулиране; верен нулира брояча", async () => {
+  const r = new MemRepo();
+  await pinCall(r, U.mgrK, "pin_set", { pin: "2580" });
+  const un = (pin: string) => pinCall(r, U.mgrK, "pin_unlock", { pin });
+  eq([(await un("1111")).body.left, (await un("1112")).body.left], [4, 3], "остават 4, 3");
+  const good = await un("2580");
+  eq([good.status, typeof good.body.pin_token, r.pins[U.mgrK.id].fails], [200, "string", 0], "верен → ключ, броячът — 0");
+  eq((await un("12")).body.reason, "pin_format", "лош формат…");
+  eq(r.pins[U.mgrK.id].fails, 0, "…не изразходва опит");
+  for (let i = 1; i <= 4; i++) eq((await un("1111")).body.reason, "pin_wrong", "грешен " + i);
+  const fifth = await un("1111");
+  eq([fifth.status, fifth.body.reason, typeof fifth.body.locked_until], [423, "pin_locked", "string"], "5-и грешен → заключен за 15 мин");
+  const lockedGood = await un("2580");
+  eq([lockedGood.status, lockedGood.body.reason, r.pins[U.mgrK.id].fails], [423, "pin_locked", 5], "заключен: и верният не минава и не се брои");
+  eq((await pinCall(r, U.mgrK, "me")).body.pin.state, "locked", "me: locked");
+  r.pins[U.mgrK.id].locked_until = new Date(Date.now() - 1000).toISOString();     // минали са 15 мин
+  for (let i = 6; i <= 9; i++) { const x = await un("1111"); eq([x.status, x.body.left], [403, 10 - i], "грешен " + i + " — остават " + (10 - i)); }
+  const tenth = await un("1111");
+  eq([tenth.status, tenth.body.reason], [423, "pin_blocked"], "10-и поред → заключен до нулиране");
+  eq((await un("2580")).body.reason, "pin_blocked", "и верният — не");
+  eq((await pinCall(r, U.mgrK, "me")).body.pin.state, "blocked", "me: blocked");
+  eq(r.gaudits.filter((e) => e.event === "grafik_pin_fail" && e.success === false).length, 12, "всеки изразходван грешен опит — в одита (2 + 4 + 1 + 4 + 1)");
+  // Нулиране от admin → задава нов.
+  const rs = await call(r, U.admin, { action: "pin_reset", user_id: U.mgrK.id });
+  eq([rs.status, rs.body.reset, rs.body.email], [200, true, "tencho.tenev13@gmail.com"], "admin нулира");
+  eq((await pinCall(r, U.mgrK, "me")).body.pin.state, "none", "след нулиране — няма ПИН");
+  eq((await pinCall(r, U.mgrK, "pin_set", { pin: "3690" })).status, 200, "задава нов");
+  eq((await un("3690")).status, 200, "новият работи");
+});
+
+Deno.test("ПИН: pin_reset — admin (edit) и упълномощеният view; другите не; себе си — не", async () => {
+  const r = new MemRepo();
+  withTeo(r, false);
+  r.pins[U.mgrK.id] = { hash: "h:2580", fails: 0, locked_until: null, blocked: false };
+  const rs = (who: User, uid: unknown) => call(r, who, { action: "pin_reset", user_id: uid });
+  eq((await rs(U.mgrK, U.sklK.id)).status, 403, "manager — не");
+  eq((await rs(U.trz, U.mgrK.id)).status, 403, "ТРЗ — не");
+  eq((await rs(U.regSh, U.mgrK.id)).status, 403, "регионален — не");
+  eq((await rs(TEO, U.mgrK.id)).status, 403, "Теодор без can_reset_pin — не");
+  r.access.filter((a) => a.email === TEO.email)[0].can_reset_pin = true;
+  eq((await rs(TEO, U.mgrK.id)).body.reset, true, "Теодор с can_reset_pin — да (въпреки view)");
+  eq((await rs(TEO, U.mgrK.id)).body.reset, false, "втори път — нямаше ПИН (200, reset false)");
+  eq((await rs(TEO, TEO.id)).body.reason, "self", "себе си — не");
+  eq((await rs(U.admin, U.admin.id)).body.reason, "self", "admin себе си — не");
+  eq((await rs(U.admin, "не-uuid")).body.reason, "bad_request", "лош id");
+  eq((await rs(U.admin, "99999999-0000-4000-8000-000000000000")).status, 404, "няма такъв");
+  // Admin с роля „view“ не нулира (ролята в графика има предимство).
+  r.access = r.access.filter((a) => a.email !== U.admin.email).concat([{ id: nid(), list: "view", email: U.admin.email, note: null }]);
+  eq((await rs(U.admin, U.mgrK.id)).status, 403, "admin с view — не");
+  eq(r.gaudits.filter((e) => e.event === "grafik_pin_reset").map((e) => (e.details as { email: string }).email), ["tencho.tenev13@gmail.com", "tencho.tenev13@gmail.com"], "одит — кого е нулирал");
+});
+
+Deno.test("ПИН: pin_change — сегашният се проверява (и се брои), новият — формат и не същият", async () => {
+  const r = new MemRepo();
+  r.pins[U.mgrK.id] = { hash: "h:2580", fails: 0, locked_until: null, blocked: false };
+  const ch = (old: string, pin: string) => call(r, U.mgrK, { action: "pin_change", old, pin });
+  eq((await ch("2580", "2580")).body.reason, "pin_same", "същият");
+  eq((await ch("2580", "1234")).body.reason, "pin_weak", "лесен");
+  eq((await ch("9999", "3690")).body.reason, "pin_wrong", "грешен сегашен");
+  eq(r.pins[U.mgrK.id].fails, 1, "…и е изразходван опит");
+  eq((await ch("2580", "3690")).status, 200, "сменен");
+  eq([r.pins[U.mgrK.id].hash, r.pins[U.mgrK.id].fails], ["h:3690", 0], "новият хеш, броячът — 0");
+  eq((await pinCall(r, U.mgrK, "pin_unlock", { pin: "2580" })).body.reason, "pin_wrong", "старият вече не отключва");
+});
+
+Deno.test("ПИН: access_list носи състоянието; Теодор (view + can_reset_pin) го вижда, но не пише", async () => {
+  const r = new MemRepo();
+  withTeo(r, true);
+  r.pins[U.mgrK.id] = { hash: "h:2580", fails: 10, locked_until: null, blocked: true };
+  r.pins[U.sklK.id] = { hash: "h:2580", fails: 5, locked_until: new Date(Date.now() + 600000).toISOString(), blocked: false };
+  r.pins[U.regSh.id] = { hash: "h:2580", fails: 0, locked_until: null, blocked: false };
+  const l = await call(r, TEO, { action: "access_list" });
+  const st: Record<string, string> = {};
+  (l.body.pins as { email: string; state: string }[]).forEach((p) => { st[p.email] = p.state; });
+  eq([l.status, st["tencho.tenev13@gmail.com"], st["sklad.k@temax.bg"], st["t.ivanova@temax.bg"]], [200, "blocked", "locked", "set"], "състоянията");
+  assert(!JSON.stringify(l.body).includes("h:2580"), "хешът не излиза");
+  const me = (await call(r, TEO, { action: "me" })).body;
+  eq([me.kind, me.can_admin, me.can_reset_pin], ["view", false, true], "me: view, без admin, може да нулира");
+  for (const action of ["access_add", "access_set", "access_remove", "admin_get", "audit_list"]) {
+    eq((await call(r, TEO, { action, role: "edit", email: "x@temax.bg", id: r.access[0].id })).status, 403, action + " — не");
+  }
+});
+
+// ── Етап В: одит и на четенето (27.11.2026) ───────────────────────────────────
+Deno.test("одит на четенето: кой, роля, обект, месец; веднъж на 10 мин; отказаното — също", async () => {
+  const r = new MemRepo();
+  const t0 = Math.floor(Date.now() / 1000 / 600) * 600 + 30;   // началото на 10-минутка — без да падне на границата
+  const lm = (who: User, store: string, month = "2026-11", now = t0) => call(r, who, { action: "load_month", store, month }, { now });
+  await lm(U.mgrK, "Кърджали");
+  await lm(U.mgrK, "Кърджали", "2026-11", t0 + 60);
+  const v = r.gaudits.filter((e) => e.event === "grafik_view_month");
+  eq(v.length, 1, "същото до 10 мин — един ред");
+  eq([v[0].user_email, v[0].user_role, v[0].grafik_kind, v[0].store_name, v[0].month, v[0].success], ["tencho.tenev13@gmail.com", "manager", "manager", "Кърджали", "2026-11", true], "полетата");
+  assert(v[0].details === null, "без съдържание (details null)");
+  await lm(U.mgrK, "Кърджали", "2026-12", t0 + 60);
+  await lm(U.mgrK, "Кърджали", "2026-11", t0 + 700);
+  eq(r.gaudits.filter((e) => e.event === "grafik_view_month").length, 3, "друг месец и след 10 мин — нови редове");
+  const deny = await lm(U.mgrK, "Шумен");
+  eq(deny.status, 403, "чужд обект — отказ");
+  const d = r.gaudits.filter((e) => e.event === "grafik_view_month" && !e.success);
+  eq([d.length, d[0].store_name, (d[0].details as { reason: string }).reason, d[0].dedup_key], [1, "Шумен", "forbidden_store", null], "отказаното — записано, без съвпадение");
+  await call(r, U.admin, { action: "overview", month: "2026-11" });
+  await call(r, U.admin, { action: "staff_list", store: "Раднево" });
+  const ev = r.gaudits.map((e) => e.event);
+  assert(ev.indexOf("grafik_view_overview") >= 0 && ev.indexOf("grafik_view_staff") >= 0, "обзор и персонал — в одита: " + ev.join(","));
+  await call(r, U.admin, { action: "me" });
+  assert(r.gaudits.every((e) => e.event !== "grafik_me"), "me (при влизане в портала) не се брои за отваряне");
+});
+
+Deno.test("одит: печат / файл (log) и промените — и в grafik_audit с месеца", async () => {
+  const r = new MemRepo();
+  eq((await call(r, U.mgrK, { action: "log", what: "export_trz", store: "Кърджали", month: "2026-11" })).status, 200, "log");
+  eq((await call(r, U.mgrK, { action: "log", what: "print_grafik", store: "Кърджали", month: "2026-11" })).status, 200, "log печат");
+  eq((await call(r, U.mgrK, { action: "log", what: "rm -rf", store: "Кърджали", month: "2026-11" })).body.reason, "bad_request", "непознато");
+  eq((await call(r, U.mgrK, { action: "log", what: "export_trz", store: "Шумен", month: "2026-11" })).status, 403, "чужд обект");
+  const x = r.gaudits.filter((e) => e.event === "grafik_export_trz")[0];
+  eq([x.store_name, x.month, x.grafik_kind], ["Кърджали", "2026-11", "manager"], "файлът за ТРЗ — кой, обект, месец");
+  assert(r.gaudits.some((e) => e.event === "grafik_print"), "печатът");
+  await submittedK(r);
+  const s = r.gaudits.filter((e) => e.event === "grafik_submit")[0];
+  eq([!!s, s && s.month, s && s.store_name, r.audits.some((e) => e.event === "grafik_submit")], [true, "2026-11", "Кърджали", true], "подаването — и в двата одита");
+});
+
+Deno.test("audit_list: само admin (edit); филтри; дни 1–90", async () => {
+  const r = new MemRepo();
+  await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" });
+  await call(r, U.regSh, { action: "load_month", store: "Шумен", month: "2026-11" });
+  for (const u of [U.mgrK, U.trz, U.regSh]) eq((await call(r, u, { action: "audit_list" })).status, 403, "не-admin — " + u.email);
+  const all = (await call(r, U.admin, { action: "audit_list" })).body;
+  eq([all.days, all.rows.length >= 2], [30, true], "по подразбиране 30 дни");
+  const byE = (await call(r, U.admin, { action: "audit_list", email: " T.Ivanova@temax.bg " })).body.rows;
+  eq(byE.map((e: GAuditEntry) => e.store_name), ["Шумен"], "по имейл (малки букви)");
+  const byS = (await call(r, U.admin, { action: "audit_list", store: "Кърджали" })).body.rows;
+  eq(byS.map((e: GAuditEntry) => e.user_email), ["tencho.tenev13@gmail.com"], "по обект");
+  eq((await call(r, U.admin, { action: "audit_list", days: 500 })).body.days, 30, "извън 1–90 → 30");
+  eq((await call(r, U.admin, { action: "audit_list", days: 7 })).body.days, 7, "7 дни");
 });

@@ -32,14 +32,16 @@ console.log("ПРЕДИ:", JSON.stringify(before));
 const created: { staff: string[]; month: string | null } = { staff: [], month: null };
 try {
   const acc0 = await repo.listAccess();
-  check(acc0.some((r) => r.list === "beta") && acc0.some((r) => r.list === "trz") && acc0.every((r) => r.email === r.email.toLowerCase()), "listAccess — beta и trz, малки букви", acc0.length);
-  const ins = await repo.insertAccess({ list: "beta", email: "repo.live-test@nikoj.bg", note: MARK, created_by: "repo.live-test" });
+  check(acc0.some((r) => r.list === "edit" || r.list === "beta") && acc0.some((r) => r.list === "trz") && acc0.every((r) => r.email === r.email.toLowerCase() && typeof r.can_reset_pin === "boolean"), "listAccess — роли, малки букви, can_reset_pin", acc0.length);
+  const ins = await repo.insertAccess({ list: "view", email: "repo.live-test@nikoj.bg", note: MARK, created_by: "repo.live-test" });
   check(!!ins.id && ins.email === "repo.live-test@nikoj.bg", "insertAccess");
   let dup = "";
-  try { await repo.insertAccess({ list: "beta", email: "repo.live-test@nikoj.bg" }); } catch (e) { dup = (e as { reason?: string }).reason || String(e); }
-  check(dup === "db_constraint", "insertAccess — дубликат → db_constraint (уникален индекс)", dup);
+  try { await repo.insertAccess({ list: "edit", email: "repo.live-test@nikoj.bg" }); } catch (e) { dup = (e as { reason?: string }).reason || String(e); }
+  check(dup === "db_constraint", "insertAccess — втора роля за същия имейл → db_constraint (уникален индекс по имейл)", dup);
+  const updA = await repo.updateAccess(ins.id, { list: "trz", can_reset_pin: true });
+  check(!!updA && updA.list === "trz" && updA.can_reset_pin === true, "updateAccess — роля и can_reset_pin");
   let upper = "";
-  try { await repo.insertAccess({ list: "beta", email: "Repo.Live-Test2@nikoj.bg" }); } catch (e) { upper = (e as { reason?: string }).reason || String(e); }
+  try { await repo.insertAccess({ list: "edit", email: "Repo.Live-Test2@nikoj.bg" }); } catch (e) { upper = (e as { reason?: string }).reason || String(e); }
   check(upper === "db_constraint", "insertAccess — главни букви → db_constraint (CHECK)", upper);
   check(await repo.deleteAccess(ins.id) && !(await repo.deleteAccess(ins.id)), "deleteAccess — веднъж true, после false");
   const vtrs = await repo.vtrList();

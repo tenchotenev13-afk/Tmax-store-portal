@@ -37,6 +37,11 @@ const ALLOWED = {
     `inp.type=inp.type==='password'?'text':'password';`,
     `if(eye)eye.textContent=inp.type==='password'?'👁':'🙈';`,
   ],
+  'grafik.js': [
+    // полетата за ПИН-а на графика (етап Б, 27.11.2026) — тип на полето, не колона
+    `var box = function(n, ph){ return '<input class="fi" type="password" inputmode="numeric" autocomplete="off" maxlength="6" id="' + id(n) + '" placeholder="' + ph + '" style="max-width:140px;letter-spacing:4px;" onkeydown="if(event.key===\\'Enter\\')grPinSubmit(\\'' + ctx + '\\')">'; };`,
+    `var box = function(id, ph){ return '<input class="fi" type="password" inputmode="numeric" autocomplete="off" maxlength="6" id="' + id + '" placeholder="' + ph + '" style="max-width:120px;">'; };`,
+  ],
   'shared.js': [
     // тялото към auth-login, не колона
     `body:JSON.stringify({email:email,password:pass})`,

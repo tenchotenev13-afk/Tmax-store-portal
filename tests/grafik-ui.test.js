@@ -189,14 +189,21 @@ function makeServer(opt) {
         S.changes.push(c);
         return { status: 200, body: { ok: true, row: c } };
       }
-      case 'access_list': case 'admin_get': case 'access_add': case 'access_remove': case 'admin_save': case 'admin_delete': {
+      case 'access_list': case 'admin_get': case 'access_add': case 'access_set': case 'access_remove': case 'admin_save': case 'admin_delete': {
         if (M.kind !== 'admin') return { status: 403, body: { ok: false, reason: 'forbidden', message: 'Само admin.' } };
         if (b.action === 'access_list') return { status: 200, body: { ok: true, rows: S.access.concat((S.beta || []).map((e, i) => ({ id: 'b' + i, list: 'beta', email: e, note: null }))) } };
         if (b.action === 'admin_get') return { status: 200, body: Object.assign({ ok: true }, JSON.parse(JSON.stringify(S.adm))) };
         if (b.action === 'access_add') {
           if (b.email === String(u.email).toLowerCase()) return { status: 409, body: { ok: false, reason: 'self', message: 'Собствения си имейл не променяш оттук — би загубил достъпа до администрацията.' } };
-          if (b.list === 'beta') S.beta.push(b.email); else S.access.push({ id: 'a' + (++S.seq), list: b.list, email: b.email, note: b.note || null });
+          S.access.push({ id: 'acc-' + (++S.seq), list: b.role || (b.list === 'beta' ? 'edit' : b.list), email: b.email, note: b.note || null });
           return { status: 200, body: { ok: true, row: { email: b.email } } };
+        }
+        if (b.action === 'access_set') {
+          const x = S.access.filter(a => a.id === b.id)[0];
+          if (!x) return { status: 404, body: { ok: false, reason: 'not_found', message: 'Записът не е намерен.' } };
+          if (b.role) x.list = b.role;
+          if (typeof b.can_reset_pin === 'boolean') x.can_reset_pin = b.can_reset_pin;
+          return { status: 200, body: { ok: true, row: x } };
         }
         if (b.action === 'access_remove') {
           if (/^b\d+$/.test(b.id)) S.beta.splice(+b.id.slice(1), 1); else S.access = S.access.filter(a => a.id !== b.id);
@@ -957,38 +964,49 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     await a.w.grAdminLoad(); await ticks(6);
     const c = card(a);
     ok('admin: картата „📆 График“ е в Администрация', !!c && c.parentNode === a.doc.getElementById('mod-admin') && /📆 График/.test(c.textContent));
-    const beta = Array.from(a.doc.querySelectorAll('#gr-adm-beta tbody tr')).map(r => r.cells[0].textContent);
-    const trz = Array.from(a.doc.querySelectorAll('#gr-adm-trz tbody tr')).map(r => r.cells[0].textContent);
-    ok('списъците beta и ТРЗ — от grafik-api', beta.indexOf('ten.tenev@temax.bg') >= 0 && beta.indexOf('trz@temax.bg') >= 0 && JSON.stringify(trz) === '["trz@temax.bg"]', beta.join(',') + ' / ' + trz.join(','));
+    // Ролите (27.11.2026): една таблица, ролята — падащ списък; „beta“ се показва като „Редакция“.
+    const accRows = (x) => Array.from(x.doc.querySelectorAll('#gr-adm-access tbody tr')).map(r => ({ email: r.cells[0].textContent, role: (r.querySelector('select') || {}).value || r.cells[1].textContent, tr: r }));
+    const ar0 = accRows(a);
+    ok('ролите — от grafik-api, в една таблица', ar0.some(r => r.email === 'trz@temax.bg' && r.role === 'trz') && ar0.some(r => r.email === 'ten.tenev@temax.bg'), ar0.map(r => r.email + ':' + r.role).join(','));
+    ok('beta (преди миграцията) → „Редакция“ в падащия списък', ar0.length > 2 && ar0.filter(r => r.email !== 'ten.tenev@temax.bg' && r.role !== 'trz').every(r => r.role === 'edit'), ar0.map(r => r.email + ':' + r.role).join(','));
+    const selfRow = ar0.filter(r => r.email === 'ten.tenev@temax.bg')[0];
+    ok('своят ред — без падащ списък и без „✕ Махни“', !selfRow.tr.querySelector('select') && !/Махни/.test(selfRow.tr.textContent) && /ти/.test(selfRow.tr.textContent));
+    ok('легендата обяснява трите роли и предимството', /Преглед/.test(c.textContent) && /Редакция/.test(c.textContent) && /admin с „Преглед“ не пише/.test(c.textContent));
     ok('дружество без адрес — „липсва“ в червено', /липсва/.test(a.doc.querySelector('#gr-adm-companies tbody tr:nth-child(2)').textContent) && /dc2626/.test(a.doc.querySelector('#gr-adm-companies tbody tr:nth-child(2) td:nth-child(4)').getAttribute('style') || ''));
     ok('ВТР — с името, не с id; утвърдил и период', /ВТР ТЦД 3 \/ ТЦД 4 \/ Темакс Юг/.test(a.doc.getElementById('gr-adm-terms').textContent) && /Теодор Тенев/.test(a.doc.getElementById('gr-adm-terms').textContent) && /01\.11\.2026 – …/.test(a.doc.getElementById('gr-adm-terms').textContent));
     ok('обект → дружество — името на дружеството', /"ТЕМАКС ТЦД 3" ЕООД/.test(a.doc.getElementById('gr-adm-store-company').textContent));
 
     // Добавяне в списък.
     a.doc.getElementById('gr-adm-email').value = '  Nov.Regionalen@Temax.bg ';
-    a.doc.getElementById('gr-adm-list').value = 'beta';
+    a.doc.getElementById('gr-adm-role').value = 'view';
     realClick(a.w, btn(card(a), 'Добави')); await ticks(8);
     const add = calls(a, 'access_add').slice(-1)[0];
-    ok('➕ Добави → access_add с малки букви и без интервали', !!add && add.email === 'nov.regionalen@temax.bg' && add.list === 'beta', JSON.stringify(add));
-    ok('…и списъкът е презареден с новия', Array.from(a.doc.querySelectorAll('#gr-adm-beta tbody tr')).some(r => r.cells[0].textContent === 'nov.regionalen@temax.bg'));
+    ok('➕ Добави → access_add с роля, малки букви и без интервали', !!add && add.email === 'nov.regionalen@temax.bg' && add.role === 'view' && add.list === undefined, JSON.stringify(add));
+    ok('…и списъкът е презареден с новия (Преглед)', accRows(a).some(r => r.email === 'nov.regionalen@temax.bg' && r.role === 'view'));
+    // Смяна на ролята — падащият списък в реда.
+    const nrSel = accRows(a).filter(r => r.email === 'nov.regionalen@temax.bg')[0].tr.querySelector('select');
+    nrSel.value = 'edit'; H.fire(a.w, nrSel, 'change'); await ticks(8);
+    const st = calls(a, 'access_set').slice(-1)[0];
+    ok('смяна в падащия списък → access_set { id, role }', !!st && st.role === 'edit' && !!st.id && st.can_reset_pin === undefined, JSON.stringify(st));
+    ok('…и редът е презареден с новата роля', accRows(a).some(r => r.email === 'nov.regionalen@temax.bg' && r.role === 'edit'));
     const nAdd = calls(a, 'access_add').length;
     a.doc.getElementById('gr-adm-email').value = 'без-маймунка';
     realClick(a.w, btn(card(a), 'Добави')); await ticks(4);
     ok('невалиден имейл → съобщение, без заявка', calls(a, 'access_add').length === nAdd && a.calls.toast.some(t => /Невалиден имейл/.test(t)));
-    a.doc.getElementById('gr-adm-email').value = 'ten.tenev@temax.bg'; a.doc.getElementById('gr-adm-list').value = 'trz';
+    a.doc.getElementById('gr-adm-email').value = 'ten.tenev@temax.bg'; a.doc.getElementById('gr-adm-role').value = 'trz';
     realClick(a.w, btn(card(a), 'Добави')); await ticks(6);
     ok('собственият имейл → отказ от сървъра, показан в съобщението', a.calls.toast.some(t => /Собствения си имейл/.test(t)));
     // Махане: отказано потвърждение → нищо.
     const no = env(ADM, { server: S, confirm: false });
     await no.w.grAdminLoad(); await ticks(6);
     const nRem = calls(no, 'access_remove').length;
-    realClick(no.w, btn(no.doc.querySelector('#gr-adm-trz tbody tr'), 'Махни')); await ticks(6);
-    ok('✕ Махни, потвърждението отказано → без access_remove', calls(no, 'access_remove').length === nRem && no.calls.confirm.some(m => /Да махна trz@temax.bg от ТРЗ/.test(m)));
+    realClick(no.w, btn(accRows(no).filter(r => r.role === 'trz')[0].tr, 'Махни')); await ticks(6);
+    ok('✕ Махни, потвърждението отказано → без access_remove', calls(no, 'access_remove').length === nRem && no.calls.confirm.some(m => /Да махна trz@temax.bg \(🧾 ТРЗ\)/.test(m)), no.calls.confirm.join(' | '));
     no.doc.getElementById('gr-admin-card').remove();
     // Махане.
-    const trzRow = a.doc.querySelector('#gr-adm-trz tbody tr');
+    const trzRow = accRows(a).filter(r => r.role === 'trz')[0].tr;
     realClick(a.w, btn(trzRow, 'Махни')); await ticks(8);
-    ok('✕ Махни (с потвърждение) → access_remove; ТРЗ списъкът е празен', calls(a, 'access_remove').length === 1 && /няма/.test(a.doc.querySelector('#gr-adm-trz tbody').textContent));
+    ok('✕ Махни (с потвърждение) → access_remove; ред с роля ТРЗ вече няма', calls(a, 'access_remove').length === 1 && !accRows(a).some(r => r.role === 'trz'));
 
     // Дружество: редакция.
     realClick(a.w, btn(a.doc.querySelector('#gr-adm-companies tbody tr:nth-child(2)'), '✏️')); await ticks(2);
@@ -1047,7 +1065,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
       return orig.apply(this, arguments);
     };
     await guard('loadAdmin() не хвърля', () => h.w.loadAdmin()); await ticks(10);
-    ok('admin.js loadAdmin() → картата „📆 График“ се появява', !!h.doc.getElementById('gr-admin-card') && !!h.doc.getElementById('gr-adm-beta'));
+    ok('admin.js loadAdmin() → картата „📆 График“ се появява', !!h.doc.getElementById('gr-admin-card') && !!h.doc.getElementById('gr-adm-access'));
   }
 
   section('17. 05.11.2026: дневни сборове, ЛД в неделя, цветове, колона AO, дублирано име');
