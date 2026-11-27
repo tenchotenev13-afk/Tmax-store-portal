@@ -6,4 +6,5 @@
 - Функции в `reference.js`: 43 → 44 (− `refTemplatePickerHtml`, + `refTplNoSectorHtml`, `refTplNoSectorSync`; анонимният слушател — махнат). smoke: неочаквани предефиниции — няма.
 - Тест: `tests/reference-template-picker.test.js` изтрит (и редът в `TESTS`); `tests/reference-sectors.test.js` — 101 проверки; мутанти М4 (менюто остава), М5 (няма предупреждение), М6 (стар размер) — и трите exit 1.
 - Без схема → без миграция, без rollback SQL, без ред за Живко.
-- SHA: виж `git log` за „Рекламации: без менюто“ (дописва се след push).
+- SHA `a971cb0` (push 27.11 11:03, по SHA, върху `bf7014d` след пълен пакет: 540 теста, 30562 проверки, exit 0). Живият Pages сверен в 11:03:31: `reference.js` байт по байт = `a971cb0` (62432 байта; маркер `refTplNoSectorSync` — 0 в старата версия, 3 в новата).
+- Не е минато на живо: менюто го няма, vrati.pdf през „Строителство“, жълтото „Без сектор“ при отметка — за чата (`claude/open/24-11-reklamacii-sektori.md`).
