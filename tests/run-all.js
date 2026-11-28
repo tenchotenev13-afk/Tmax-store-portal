@@ -96,6 +96,7 @@ const TESTS = [
   'revaluation-diff-pct.test.js',
   'revaluation-teodor-2711.test.js',
   'revaluation-telefon.test.js',
+  'revaluation-email.test.js',
   'xlsx-real-datenf.test.js',
   'revision-schedule.test.js',
   'minusi.test.js',

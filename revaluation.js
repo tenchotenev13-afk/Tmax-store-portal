@@ -1618,14 +1618,82 @@ function rvPush(rec, text){
   return names.length && typeof pushToPeople === 'function' ? pushToPeople(names, 'Преоценка', text) : Promise.resolve({ ok: false });
 }
 function rvEmails(rec){ return rec.map(function(u){ return u.email; }).filter(Boolean); }
+/* Писмото при „Подай" / „Нямаме за преоценка" (28.11.2026, етап 1 — само
+   съдържанието): регионалният решава от писмото, без да отваря портала.
+   Чиста функция — без DOM и без заявки. Inline стилове, без класове (пощенските
+   програми режат <style>). Числата — с помощните функции на екрана (rvFmt,
+   rvFmtQty, rvSapUnit). Сбор по стара / предложена цена = кол. × цена; ред без
+   ст. цена или без предложение не влиза и се казва под сборовете. Адрес на
+   снимка извън http(s) не се показва. Етап 2 (бутони без вход) — отделно. */
+var RV_PORTAL_URL = 'https://tenchotenev13-afk.github.io/Tmax-store-portal/';
+function rvSubmitEmailHtml(ctx){
+  ctx = ctx || {};
+  var c = ctx.campaign || null, sub = ctx.sub || {}, items = ctx.items || [];
+  var hasReg = Array.isArray(ctx.regs) ? ctx.regs.length > 0 : !!ctx.regs;
+  var TD = 'padding:4px 8px;font-size:13px;color:#0f172a;vertical-align:top;';
+  var LBL = 'padding:4px 8px;font-size:12px;color:#64748b;vertical-align:top;white-space:nowrap;';
+  var pct = sub.default_pct != null ? Number(sub.default_pct) : (c && c.default_pct != null ? Number(c.default_pct) : null);
+  var kv = function(k, val){ return '<tr><td style="' + LBL + '">' + esc(k) + '</td><td style="' + TD + '">' + val + '</td></tr>'; };
+  var h = '<div style="max-width:640px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">';
+  h += '<div style="font-size:18px;font-weight:700;margin:0 0 8px;">Преоценка — ' + esc(ctx.store) + (ctx.storeNo ? ' <span style="color:#64748b;font-weight:400;">№ ' + esc(String(ctx.storeNo)) + '</span>' : '') + '</div>';
+  h += '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;max-width:640px;background:#f8fafc;border:1px solid #e2e8f0;margin-bottom:12px;">';
+  if(c) h += kv('Кампания', esc(c.title) + (c.starts_on || c.ends_on ? ' · ' + esc(fmtDate(c.starts_on)) + ' – ' + esc(fmtDate(c.ends_on)) : ''));
+  h += kv('Подаде', esc(ctx.by) + (ctx.at && rvFmtTs(ctx.at) ? ' · ' + esc(rvFmtTs(ctx.at)) : ''));
+  if(pct != null && isFinite(pct)) h += kv('% за бланката', esc(rvFmtQty(pct) + ' %'));
+  if(String(sub.store_note || '').trim()) h += kv('Коментар на обекта', esc(String(sub.store_note).trim()));
+  h += '</table>';
+  if(sub.no_items){
+    h += '<p style="font-size:14px;margin:0 0 12px;"><b>Обектът няма артикули за преоценка.</b></p>';
+  } else {
+    var sumStd = 0, sumNew = 0, noPrice = 0;
+    items.forEach(function(it){
+      var photos = rvPhotoList(it).filter(function(u){ return /^https?:\/\//i.test(String(u)); });
+      var left = photos.length ? photos.map(function(u){
+        return '<a href="' + escAttr(u) + '" target="_blank" style="display:block;margin-bottom:4px;"><img src="' + escAttr(u) + '" alt="снимка" width="90" style="display:block;width:90px;max-width:90px;height:auto;border:1px solid #e2e8f0;border-radius:4px;"></a>';
+      }).join('') : '<span style="font-size:11px;color:#94a3b8;">без снимка</span>';
+      var su = rvSapUnit(it.unit);
+      var pctTxt = it.discount_pct == null || it.discount_pct === '' ? '' : rvFmtQty(it.discount_pct) + ' %';
+      var right = '<div style="font-family:Consolas,monospace;font-size:14px;font-weight:700;">' + esc(it.sap_code) +
+        (rvIsRepeat(it.sap_code) ? ' <span style="background:#ede9fe;color:#5b21b6;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;font-family:Arial,sans-serif;">вече преоценен</span>' : '') + '</div>' +
+        '<div style="font-size:13px;margin:2px 0 6px;">' + esc(it.product_name) + '</div>' +
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">' +
+        kv('Количество', esc((rvFmtQty(it.qty) + ' ' + (su.unit || '')).trim())) +
+        kv('Ст. цена', esc(rvFmt(it.std_price))) +
+        kv('%', esc(pctTxt)) +
+        kv('Предложение', '<b>' + esc(rvFmt(it.proposed_price)) + '</b>') +
+        (String(it.store_comment || '').trim() ? kv('Коментар', esc(String(it.store_comment).trim())) : '') +
+        '</table>';
+      h += '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;max-width:640px;border:1px solid #cbd5e1;margin-bottom:8px;"><tr>' +
+        '<td width="100" style="width:100px;padding:6px;vertical-align:top;background:#f8fafc;">' + left + '</td>' +
+        '<td style="padding:6px;vertical-align:top;">' + right + '</td></tr></table>';
+      var std = it.std_price == null || it.std_price === '' ? null : Number(it.std_price);
+      var nw = it.proposed_price == null || it.proposed_price === '' ? null : Number(it.proposed_price);
+      if(std == null || nw == null || !isFinite(std) || !isFinite(nw)){ noPrice++; return; }
+      var q = Number(it.qty) || 0;
+      sumStd += q * std; sumNew += q * nw;
+    });
+    h += '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;max-width:640px;background:#f1f5f9;border:1px solid #cbd5e1;margin:4px 0 4px;">' +
+      kv('Редове', esc(String(items.length))) +
+      kv('Сбор по стара цена', esc(rvFmt(rvRound2(sumStd)))) +
+      kv('Сбор по предложена цена', esc(rvFmt(rvRound2(sumNew)))) +
+      kv('Разлика', '<b>' + esc(rvFmt(rvRound2(sumStd - sumNew))) + '</b>') +
+      '</table>';
+    if(noPrice) h += '<p style="font-size:12px;color:#b45309;margin:0 0 12px;">' + esc(noPrice + ' ' + (noPrice === 1 ? 'ред без цена не е в сбора' : 'реда без цена не са в сбора')) + '</p>';
+  }
+  if(hasReg){
+    h += '<p style="font-size:14px;margin:12px 0 4px;">Одобри или върни бланката в портала: Ревизии и преоценка → Преоценка.</p>' +
+      '<p style="margin:0 0 12px;"><a href="' + escAttr(RV_PORTAL_URL) + '" target="_blank" style="color:#1d4ed8;">Отвори портала →</a></p>';
+  }
+  return h + '</div>';
+}
 function rvNotify(what, route){
   var c = rvCampaign();
   var text = 'Преоценка · ' + rvStore + ' · ' + (c ? c.title : '') + ': ' + what + (route && route.regs.length ? ' — чака одобрение' : '');
   var warn = function(msg){ toast('Подадено, но ' + msg, '#d97706'); return false; };
   var rec = rvRecipients(route ? route.users : [], rvStore, rvApprovers);
   var emails = rvEmails(rec);
-  var html = '<p>' + esc(text) + '</p><p>Подаде: ' + esc(currentUser.display_name || currentUser.email) + '</p>' +
-    (route && route.regs.length ? '<p>Одобри или върни бланката в портала: Ревизии и преоценка → Преоценка.</p>' : '');
+  var html = rvSubmitEmailHtml({ store: rvStore, storeNo: rvStoreNo(rvStore), campaign: c, by: currentUser.display_name || currentUser.email,
+    at: rvSub && rvSub.submitted_at, sub: rvSub, items: rvItems, regs: route ? route.regs : [] });
   var jobs = rec.length ? [rvPush(rec, text),
     typeof sendEmail === 'function' && emails.length ? sendEmail(emails, text, html) : Promise.resolve({ ok: false })] : [];
   return rvNoticeResult(rec, jobs, warn).catch(function(e){ return warn('известието не тръгна (' + ((e && e.message) || e) + ')'); });
