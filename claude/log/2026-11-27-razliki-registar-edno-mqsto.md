@@ -5,3 +5,4 @@
 - „📄 Бланката“ — скок по `sdJumpToLine`, подчертан ред в „Решени редове“; изтрит ред → сив бутон.
 - „✅ Приключи реда с това указание“ — общ път с бутона (`sdRouteCloseApply`, изваден от `submitSDRouteClose`), отметка за всеки друг ред „грешен баркод“ със същия код в бланката.
 - Тест `tests/razliki-registar-edno-mqsto.test.js` (56 проверки), мутанти 13/13 убити; заварени — `razliki-etap7a` / `razliki-etap7b` (POST носи `photos`). Пълен пакет (TEST_JOBS=2) върху `312d0f4` — 548 теста, exit 0.
+- SHA: `6e146b2` (push 28.11 по SHA върху `d347f81`; след rebase — smoke, тестът 56/56 и handover-structure, exit 0; новите комити не пипат stock-differences.js / shared.js / harness.js). Pages сверен байт по байт в 11:32 — `stock-differences.js` 633 678 байта, маркер `sdRouteCloseApply` (0 в старата версия, 4 в живата).
