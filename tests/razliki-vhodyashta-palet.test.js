@@ -171,7 +171,9 @@ const FAIL_MSG = 'Списъкът с палети не се зареди — о
     if (ok('появява се падащо „Палет на“', !!ps)) {
       ok('надпис „Палет на *“', /Палет на \*/.test(r.querySelector('.di-pallet-wrap').textContent));
       const labels = Array.prototype.slice.call(ps.options, 1).map(o => o.textContent);
-      ok('етикетите от настройката, в реда ѝ', JSON.stringify(labels) === JSON.stringify(PALLETS.map(p => p.label)), labels.join(' | '));
+      ok('опциите са „<етикет> — <код>“, в реда на настройката', JSON.stringify(labels) === JSON.stringify(PALLETS.map(p => p.label + ' — ' + p.code)), labels.join(' | '));
+      ok('„Оргахим — 41247“ дословно', labels[0] === 'Оргахим — 41247', labels[0]);
+      ok('value на опциите е кодът', JSON.stringify(Array.prototype.slice.call(ps.options, 1).map(o => o.value)) === JSON.stringify(PALLETS.map(p => p.code)));
       ok('първата опция е празна', ps.options[0].value === '');
     }
     const sap = r.querySelector('.di-sap'), name = r.querySelector('.di-name'), qty = r.querySelector('.di-qty');
@@ -183,6 +185,7 @@ const FAIL_MSG = 'Списъкът с палети не се зареди — о
     ok('без подсказка за снимки / имейл', r.querySelector('.di-hint').innerHTML === '');
     await pick(h, r, '92373');
     ok('изборът попълва кода', sap.value === '92373', sap.value);
+    ok('кодът и името остават заключени след избора', sap.readOnly && name.readOnly);
     ok('изборът попълва името', name.value === 'ПАЛЕ БОРО 120Х80СМ', name.value);
     await pick(h, r, '41247');
     ok('друг избор — друг код и име', sap.value === '41247' && name.value === 'ПАЛЕТ ОРГАХИМ');
@@ -369,7 +372,7 @@ const FAIL_MSG = 'Списъкът с палети не се зареди — о
     const r = rows(h)[0];
     await setCat(h, r, 'pallet_inbound');
     const labels = Array.prototype.slice.call(r.querySelector('.di-pallet').options, 1).map(o => o.textContent);
-    ok('„Билка“ е в падащото', labels.indexOf('Билка') >= 0, labels.join(' | '));
+    ok('„Билка — 55501“ е в падащото (същият вид, без промяна в кода)', labels.indexOf('Билка — 55501') >= 0, labels.join(' | '));
     ok('елемент без етикет се пропуска', labels.length === 5, labels.length);
     await pick(h, r, '55501');
     ok('изборът попълва кода и името на новия', r.querySelector('.di-sap').value === '55501' && r.querySelector('.di-name').value === 'ПАЛЕТ БИЛКА');

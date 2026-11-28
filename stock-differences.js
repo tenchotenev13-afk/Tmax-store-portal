@@ -5314,7 +5314,7 @@ function sdPalletFieldHtml(code){
     '<div class="di-lbl" style="font-size:10.5px;line-height:1.25;color:#64748b;margin-bottom:2px;">Палет на *</div>'+
     '<select class="fi di-pallet" style="width:100%;" onchange="sdPalletPick(this)"><option value="">-- избери доставчик на палета --</option>'+
     (sdPalletList||[]).map(function(p){
-      return '<option value="'+escVal(p.code)+'"'+(p.code===code?' selected':'')+'>'+esc(p.label)+'</option>';
+      return '<option value="'+escVal(p.code)+'"'+(p.code===code?' selected':'')+'>'+esc(p.label)+' — '+esc(p.code)+'</option>';
     }).join('')+
     '</select></div>';
 }
