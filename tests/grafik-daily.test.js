@@ -20,11 +20,11 @@ const PEOPLE = () => [
 
 function makeServer(opt) {
   opt = opt || {};
-  const S = { calls: [], fail: opt.fail || {}, people: opt.people || PEOPLE(), daily: opt.daily || null };
+  const S = { calls: [], fail: opt.fail || {}, people: opt.people || PEOPLE(), daily: opt.daily || null, dailyFor: opt.dailyFor || null };
   S.view = (date) => Object.assign({
     store: 'Кърджали', month: '2026-11-01', date: date || '2026-11-27', today: '2026-11-27', status: 'submitted', filed: true,
     min_date: '2026-11-25', max_date: '2026-11-27', window_from: '2026-11-25', back_days: 2,
-    daily: S.daily, people: S.people, missing: [], can_mark: true, needs_reason: false, late: (date || '2026-11-27') < '2026-11-27', can_resolve: true,
+    daily: S.dailyFor ? S.dailyFor(date || '2026-11-27') : S.daily, people: S.people, missing: [], can_mark: true, needs_reason: false, late: (date || '2026-11-27') < '2026-11-27', can_resolve: true,
     trip_stores: ['Шумен', 'Раднево']
   }, opt.view || {});
   S.handle = (u, b) => {
@@ -75,6 +75,7 @@ function env(user, opt) {
   h.S = S;
   return h;
 }
+const hm = iso => { const x = new Date(iso), p = n => (n < 10 ? '0' : '') + n; return p(x.getHours()) + ':' + p(x.getMinutes()); };
 const acts = h => h.S.calls.map(c => c.action);
 const lastOf = (h, a) => h.S.calls.filter(c => c.action === a).slice(-1)[0];
 const row = (h, id) => h.doc.getElementById('gr-att-' + id);
@@ -340,11 +341,11 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     realClick(EW, q('s2', 'О')); await ticks(1);
     ok('промяна → пак „Запиши — 2 липсват“, активен', save().textContent === 'Запиши — 2 липсват' && !save().disabled && !save().hasAttribute('data-saved'));
     realClick(EW, btn(ed.getElementById('gr-att-save-box'), 'Откажи')); await ticks(1);
-    ok('„Откажи“ → връща записаното (без „Записано ✓“ — то беше свалено)', !EW.grAttEdit.s2 && chip(e, 's2') === '✓ дошъл' && save().textContent === 'Запиши — 1 липсва');
-    realClick(EW, save()); await ticks(4);
-    ok('пак запис → „Записано ✓“', /^Записано ✓/.test(save().textContent));
+    ok('„Откажи“ → връща записаното и пак сив „Записано ✓ ЧЧ:ММ“ (часът от базата)', !EW.grAttEdit.s2 && chip(e, 's2') === '✓ дошъл' && save().textContent === 'Записано ✓ ' + hm('2026-11-27T06:42:00.000Z') && save().disabled, save().textContent);
+    ok('…сивият бутон няма onclick — нищо за записване', !save().getAttribute('onclick'));
+    e.S.daily = null;   // 26.11 не е отбелязан
     realClick(EW, ed.querySelector('#gr-att-head button[onclick="grAttGo(-1)"]')); await ticks(4);
-    ok('друг ден → бутонът пак казва какво записва (не „Записано“)', lastOf(e, 'daily_get').date === '2026-11-26' && !/Записано/.test(save().textContent));
+    ok('друг (неотбелязан) ден → бутонът пак казва какво записва (не „Записано“)', lastOf(e, 'daily_get').date === '2026-11-26' && !/Записано/.test(save().textContent));
   }
   {
     const e = env(MGR, { mobile: true, fail: { daily_save: () => ({ status: 500, body: { ok: false, reason: 'internal', message: 'срив' } }) } });
@@ -359,6 +360,33 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     await load(e);
     ok('заключен ден: отсъствието — пак червеникаво и едро, без ✓ / ✕ и без „Запиши“; болничен извън смяна не се брои', /background:#fef2f2/.test(row(e, 's1').getAttribute('style')) && !!row(e, 's1').querySelector('.gr-att-big') &&
       !row(e, 's1').querySelector('.gr-att-yn') && !e.doc.getElementById('gr-att-save') && /1<\/b> липсва/.test(e.doc.getElementById('gr-att-count').innerHTML));
+  }
+
+  section('12. Вече отбелязан ден без промени — сив „Записано ✓ ЧЧ:ММ“ още при отваряне (28.11.2026)');
+  {
+    const D = {
+      '2026-11-27': { marked_by: 'm', marked_by_name: 'Управител', marked_at: '2026-11-27T05:10:00.000Z', updated_at: '2026-11-27T09:35:00.000Z', updated_by_name: 'Управител', late: false },
+      '2026-11-26': { marked_by: 'm', marked_by_name: 'Управител', marked_at: '2026-11-26T15:05:00.000Z', late: false },
+      '2026-11-25': null
+    };
+    const e = env(MGR, { mobile: true, dailyFor: d => D[d] || null });
+    await load(e);
+    const ed = e.doc, EW = e.w, save = () => ed.getElementById('gr-att-save');
+    const grey = () => save().disabled && save().getAttribute('data-saved') === '1' && !save().classList.contains('btn-green') && !save().getAttribute('onclick');
+    ok('при отваряне — „Записано ✓“ с часа на updated_at, сив, без onclick', save().textContent === 'Записано ✓ ' + hm(D['2026-11-27'].updated_at) && grey(), save().textContent);
+    ok('…няма „Откажи“', !btn(ed.getElementById('gr-att-save-box'), 'Откажи'));
+    realClick(EW, row(e, 's1').querySelector('.gr-att-no')); await ticks(1);
+    realClick(EW, row(e, 's1').querySelector('.gr-att-why button[data-r="Б"]')); await ticks(1);
+    ok('промяна → активен „Запиши — 1 липсва“', save().textContent === 'Запиши — 1 липсва' && !save().disabled && save().classList.contains('btn-green'));
+    realClick(EW, btn(ed.getElementById('gr-att-save-box'), 'Откажи')); await ticks(1);
+    ok('„Откажи“ → пак сив „Записано ✓“ с часа от базата', save().textContent === 'Записано ✓ ' + hm(D['2026-11-27'].updated_at) && grey(), save().textContent);
+    realClick(EW, ed.querySelector('#gr-att-head button[onclick="grAttGo(-1)"]')); await ticks(4);
+    ok('смяна на деня (26.11, без updated_at) → сив с часа на marked_at', lastOf(e, 'daily_get').date === '2026-11-26' && save().textContent === 'Записано ✓ ' + hm(D['2026-11-26'].marked_at) && grey(), save().textContent);
+    realClick(EW, ed.querySelector('#gr-att-head button[onclick="grAttGo(-1)"]')); await ticks(4);
+    ok('неотбелязан ден (25.11) → активен „✓ Всички дошли — запиши“', lastOf(e, 'daily_get').date === '2026-11-25' && save().textContent === '✓ Всички дошли — запиши' && !save().disabled);
+    const z = env(MGR, { mobile: true, daily: { marked_by: 'm', marked_by_name: 'Управител', late: false } });
+    await load(z);
+    ok('отбелязан без час → „Записано ✓“ без час, сив', z.doc.getElementById('gr-att-save').textContent === 'Записано ✓' && z.doc.getElementById('gr-att-save').disabled);
   }
 
   report();

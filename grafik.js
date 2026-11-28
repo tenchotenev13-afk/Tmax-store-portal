@@ -2347,13 +2347,14 @@ function grAttHtml(){
     h += '<details class="card" id="gr-att-off" style="padding:6px 10px;"' + (offDev ? ' open' : '') + '><summary style="font-weight:700;cursor:pointer;">Не са на смяна — ' + off.length + (offDev ? ' (дошли / отклонения: ' + offDev + ')' : '') + '</summary>' + off.map(row).join('') + '</details>';
   }
   if(can){
-    // Залепен за долния край; казва какво записва. След запис — сив „Записано ✓ ЧЧ:ММ“, докато нищо не се промени.
-    var saved = !!grAttSavedAt && !grAttDirty();
+    // Залепен за долния край; казва какво записва. Записан ден без промени (след запис, при отваряне, смяна на деня,
+    // „Откажи“) — сив „Записано ✓ ЧЧ:ММ“; активен става само при промяна.
+    var savedAt = grAttSavedLabel(), saved = savedAt !== null && !grAttDirty();
     h += '<div class="card" id="gr-att-save-box" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;bottom:0;z-index:20;box-shadow:0 -4px 12px rgba(0,0,0,.12);">';
     if(grAtt.needs_reason) h += '<label style="flex-basis:100%;font-size:13px;">Основание за корекцията * <span style="color:#64748b;">(денят е извън прозореца на обекта)</span><br><input id="gr-att-reason" style="width:100%;" maxlength="300"></label>';
     if(grAtt.late && !grAtt.needs_reason && !grAtt.daily) h += '<span style="font-size:12px;color:#92400e;flex-basis:100%;">Минал ден — ще бъде записан като „късно“.</span>';
     h += (grAttDirty() ? '<button class="btn gr-att-b" onclick="grAttReset()">Откажи</button>' : '') +
-      (saved ? '<button class="btn gr-att-b" id="gr-att-save" data-saved="1" disabled style="flex:1;font-size:16px;background:#e2e8f0;color:#475569;border-color:#cbd5e1;">Записано ✓ ' + escVal(grAttSavedAt) + '</button>'
+      (saved ? '<button class="btn gr-att-b" id="gr-att-save" data-saved="1" disabled style="flex:1;font-size:16px;background:#e2e8f0;color:#475569;border-color:#cbd5e1;">Записано ✓' + (savedAt ? ' ' + escVal(savedAt) : '') + '</button>'
         : '<button class="btn btn-green gr-att-b" id="gr-att-save" style="flex:1;font-size:16px;" onclick="grAttSave()">' +
           (miss ? 'Запиши — ' + miss + ' ' + (miss === 1 ? 'липсва' : 'липсват') : '✓ Всички дошли — запиши') + '</button>') + '</div>';
   }
@@ -2370,6 +2371,15 @@ function grAttPick(d){
   return grAttLoad().then(function(){ if(grView === 'att') grRender(); });
 }
 function grAttReset(){ grAttEdit = {}; grAttX = {}; grRender(); }
+// „ЧЧ:ММ“ за сивия бутон: часът на току-що направения запис; иначе — на последния запис в базата
+// (updated_at, иначе marked_at); '' — записан без час; null — денят не е отбелязан.
+function grAttSavedLabel(){
+  if(grAttSavedAt) return grAttSavedAt;
+  var D = grAtt && grAtt.daily;
+  if(!D) return null;
+  var d = new Date(D.updated_at || D.marked_at || '');
+  return isNaN(d.getTime()) ? '' : grPad(d.getHours()) + ':' + grPad(d.getMinutes());
+}
 // „M липсват“: хората на смяна по график, които не са в обекта (отсъствие, неуточнено, командировка).
 function grAttMissing(){
   return ((grAtt && grAtt.people) || []).filter(function(p){ var s = grAttState(p).state; return p.on_shift && (s === 'absent' || s === 'unknown' || s === 'trip'); }).length;
