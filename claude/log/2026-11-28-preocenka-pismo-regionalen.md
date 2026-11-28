@@ -6,4 +6,4 @@
 - Тест: `tests/revaluation-email.test.js` (50 проверки, истински клик „Подай“ / „Нямаме“, 19 реда, escaping); мутанти (а) без esc на описанието, (б) сборът брои реда без цена, (в) без снимки — и трите exit 1.
 - Без схема → без миграция, без rollback SQL, без ред за Живко.
 - Писма за преоценка другаде: няма в `send-routed-report`, `send-scheduled-report`, `bulletin-notify`, `report.js`, `today.js` (в `send-routed-report` „Ревизии и преоценка“ е само пътят към Зареждане).
-- SHA — попълва се след комита.
+- SHA `db0f79f` (push 28.11 13:31, по SHA, върху `2fff1ff` след rebase и пълен пакет: 550 теста, 31178 проверки, exit 0). Живият Pages сверен в 13:32:47: `revaluation.js` байт по байт = `db0f79f` (220453 байта; маркер `rvSubmitEmailHtml` — 0 в старата версия, 2 в новата).
