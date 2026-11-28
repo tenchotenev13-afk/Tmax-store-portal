@@ -1824,7 +1824,15 @@ Deno.test("2А „✎ Промени“ (решение 2): обектът — �
   eq((await save(U.mgrK, { staff_id: ids[0], day: 3, actual: "Б", reason: "x" }, 5)).status, 200, "2 дни назад — да");
   const id = r.changes[0].id;
   eq((await save(U.mgrK, { staff_id: ids[0], day: 2, actual: "Б", reason: "x" }, 5)).body.reason, "window", "3 дни назад — не");
-  eq((await save(U.mgrK, { staff_id: ids[0], day: 9, actual: "О", reason: "x" }, 5)).body.reason, "window", "бъдещ ден — не");
+  // Решение на Тенчо 28.11: бъдещ ден — ДА (планиран отпуск); заключени са само дните преди днес − 2.
+  const fut = await save(U.mgrK, { staff_id: ids[0], day: 9, actual: "О", reason: "молба за отпуск № 4" }, 5);
+  eq([fut.status, fut.body.row && fut.body.row.source], [200, "manual"], "бъдещ ден (планиран отпуск) — да");
+  const fid = fut.body.row.id;
+  eq((await save(U.mgrK, { id: fid, staff_id: ids[0], day: 10, actual: "О", reason: "молба № 4 — преместена" }, 5)).status, 200, "бъдещ — преместване в друг бъдещ ден: да");
+  eq((await call(r, U.mgrK, { action: "changes_delete", store: "Кърджали", month: "2026-11", id: fid }, at(5))).status, 200, "бъдещ — триене: да");
+  const msg = (await save(U.mgrK, { staff_id: ids[0], day: 2, actual: "Б", reason: "x" }, 5)).body.message;
+  assert(/от 03\.11 нататък/.test(msg) && /бъдещите дни/.test(msg), "съобщението казва откъде нататък: " + msg);
+  eq((await dsave(r, U.mgrK, "2026-11-09", [{ staff_id: ids[0], state: "absent", actual: "О" }, { staff_id: ids[1], state: "off" }], {}, dayClock("2026-11", 5))).body.reason, "future", "„✅ Днес“ — бъдещ ден пак не");
   eq((await save(U.mgrK, { id, staff_id: ids[0], day: 3, actual: "Б", reason: "болничен лист № 9" }, 20)).status, 200, "по-късно — само основанието: да");
   eq(r.changes[0].reason, "болничен лист № 9", "основанието е сменено");
   eq((await save(U.mgrK, { id, staff_id: ids[0], day: 3, actual: "О", reason: "x" }, 20)).body.reason, "window", "по-късно — „реално“ не");

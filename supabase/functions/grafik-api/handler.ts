@@ -571,6 +571,12 @@ function ddmm(date: string): string { return date.slice(8, 10) + "." + date.slic
 export function windowMessage(today: string): string {
   return "Обектът отбелязва и променя само днес и " + STORE_BACK_DAYS + " дни назад (" + ddmm(shiftDate(today, -STORE_BACK_DAYS)) + "–" + ddmm(today) + "). По-старите дни — регионалният или admin.";
 }
+// „✎ Промени“ (решение на Тенчо 28.11.2026): обектът въвежда и бъдещ ден (напр. планиран отпуск) —
+// заключени са само дните преди прозореца (по-стари от днес − STORE_BACK_DAYS). „✅ Днес“ остава до днес.
+export function changesOpen(date: string, today: string): boolean { return date >= shiftDate(today, -STORE_BACK_DAYS); }
+export function changesMessage(today: string): string {
+  return "Обектът променя „Промени“ от " + ddmm(shiftDate(today, -STORE_BACK_DAYS)) + " нататък (днес и " + STORE_BACK_DAYS + " дни назад, и бъдещите дни). По-старите дни — регионалният или admin.";
+}
 // Смяна по график: работна буква (вкл. К — командировка) или свободни часове.
 export const DAILY_ON_SHIFT = ["ЛД", "ЗД", "П", "В", "М", "К"];
 export const DAILY_WORK = ["ЛД", "ЗД", "П", "В", "М"];
@@ -1250,13 +1256,13 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
       const self = b.id === undefined || b.id === null ? null : uuid(b.id, "id");
       const cur = self ? all.filter((c) => c.id === self)[0] : null;
       if (self && !cur) throw new HttpError(404, "not_found", "Промяната не е намерена в този месец.");
-      // Пакет 2А, решение 2: обектът пипа само днес и STORE_BACK_DAYS дни назад (и не бъдещи дни); извън
-      // прозореца — само основанието на съществуваща промяна („уточнява причина по-късно“). Офисът — без промяна.
+      // Пакет 2А, решение 2 (+ 28.11: бъдещите дни — да): обектът не пипа дни преди днес − STORE_BACK_DAYS;
+      // там — само основанието на съществуваща промяна („уточнява причина по-късно“). Офисът — без промяна.
       if (!isOffice(acc)) {
         const today = sofiaToday(nowS);
-        const inWin = inStoreWindow(addDay(m.start, b.day as number), today) && (!cur || inStoreWindow(addDay(m.start, cur.day), today));
+        const open = changesOpen(addDay(m.start, b.day as number), today) && (!cur || changesOpen(addDay(m.start, cur.day), today));
         const reasonOnly = !!cur && cur.staff_id === ch.sid && cur.day === b.day && cur.actual === b.actual && (cur.trip_store || null) === (ch.trip || null);
-        if (!inWin && !reasonOnly) throw new HttpError(409, "window", windowMessage(today));
+        if (!open && !reasonOnly) throw new HttpError(409, "window", changesMessage(today));
       }
       // Решение б: отразената в ТРЗ се пипа само от admin.
       if (cur && cur.trz_done && !acc.canAdmin) throw new HttpError(409, "trz_done", "Промяната е отразена в ТРЗ — само admin може да я променя.");
@@ -1277,7 +1283,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
       const id = uuid(b.id, "id");
       const cur = (await repo.listChanges(month.id)).filter((c) => c.id === id)[0];
       if (!cur) throw new HttpError(404, "not_found", "Промяната не е намерена в този месец.");
-      if (!isOffice(acc) && !inStoreWindow(addDay(m.start, cur.day), sofiaToday(nowS))) throw new HttpError(409, "window", windowMessage(sofiaToday(nowS)));
+      if (!isOffice(acc) && !changesOpen(addDay(m.start, cur.day), sofiaToday(nowS))) throw new HttpError(409, "window", changesMessage(sofiaToday(nowS)));
       if (cur.trz_done && !acc.canAdmin) throw new HttpError(409, "trz_done", "Промяната е отразена в ТРЗ — само admin може да я трие.");
       await repo.deleteChange(id);
       await audit(repo, acc, "grafik_change_delete", store, { month: m.start, id, staff_id: cur.staff_id, day: cur.day, actual: cur.actual, reason: cur.reason });

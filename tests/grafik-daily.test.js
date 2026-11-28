@@ -244,7 +244,13 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     const ym = (y, m) => y + '-' + p2(m + 1);
     W2.grMonth = ym(now.getFullYear(), now.getMonth());
     ok('днес — в прозореца', W2.grChInWin(now.getDate()) === true);
-    if (now.getDate() < 28) ok('утре — не', W2.grChInWin(now.getDate() + 1) === false); else ok('утре — не (пропуснато в края на месеца)', true);
+    // Решение на Тенчо 28.11: бъдещ ден — да (планиран отпуск).
+    if (now.getDate() < 28) ok('утре и след седмица — да (бъдещите дни са отворени)', W2.grChInWin(now.getDate() + 1) === true && (now.getDate() > 21 || W2.grChInWin(now.getDate() + 7) === true));
+    else ok('утре — (пропуснато в края на месеца)', true);
+    const nxt = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    W2.grMonth = ym(nxt.getFullYear(), nxt.getMonth());
+    ok('следващият месец — отворен за обекта', W2.grChInWin(15) === true);
+    W2.grMonth = ym(now.getFullYear(), now.getMonth());
     if (now.getDate() > 3) ok('3 дни назад — не; 2 дни назад — да', W2.grChInWin(now.getDate() - 3) === false && W2.grChInWin(now.getDate() - 2) === true);
     else ok('3 дни назад — (пропуснато в началото на месеца)', true);
     const old = new Date(now.getFullYear(), now.getMonth() - 2, 1);
@@ -266,7 +272,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('✏️ на стар ред: бележка, датата / служителят / „реално“ — заключени', !!e.doc.getElementById('gr-ch-lock') && ['gr-ch-day', 'gr-ch-staff', 'gr-ch-actual', 'gr-ch-trip'].every(id => e.doc.getElementById(id).disabled) && !e.doc.getElementById('gr-ch-reason').disabled);
     md.parentNode.removeChild(md);
     W2.grChOpen('');
-    ok('„➕ Промяна“ за стар месец → съобщение, без формуляр', !e.doc.getElementById('gr-ch-modal') && /само за днес и 2 дни назад/.test(e.calls.toast.slice(-1)[0]));
+    ok('„➕ Промяна“ за стар месец → съобщение, без формуляр', !e.doc.getElementById('gr-ch-modal') && /от днес − 2 дни нататък/.test(e.calls.toast.slice(-1)[0]));
   }
 
   report();

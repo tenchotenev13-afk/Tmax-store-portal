@@ -1964,13 +1964,12 @@ var grChTripStores = [];      // обектите за „К“ (changes_list �
 function grChWho(email){ return email ? (grChNames[String(email).toLowerCase()] || email) : ''; }
 function grChCanEdit(){ return grCanEditStaff(); }
 function grChCanTrz(){ return !!grMe && (grMe.kind === 'trz' || !!grMe.can_admin); }
-/* Пакет 2А, решение 2: обектът пише в „Промени“ само днес и 2 дни назад (по датата на компютъра; истината е
-   на сървъра — по София). Регионалният и admin — без ограничение. */
+/* Пакет 2А, решение 2 (+ 28.11.2026: бъдещите дни — да, напр. планиран отпуск): обектът не пише в „Промени“ за дни
+   преди днес − 2 (по датата на компютъра; истината е на сървъра — по София). Регионалният и admin — без ограничение. */
 function grChInWin(day){
   if(grMe && (grMe.kind === 'admin' || grMe.kind === 'regional')) return true;
   var t = new Date(), iso = function(x){ return x.getFullYear() + '-' + grPad(x.getMonth() + 1) + '-' + grPad(x.getDate()); };
-  var today = iso(t), from = iso(new Date(t.getFullYear(), t.getMonth(), t.getDate() - 2)), d = grMonth + '-' + grPad(day);
-  return d <= today && d >= from;
+  return grMonth + '-' + grPad(day) >= iso(new Date(t.getFullYear(), t.getMonth(), t.getDate() - 2));
 }
 function grChLoad(){
   grChanges = null;
@@ -2063,8 +2062,9 @@ function grChOpen(id){
   /* Пакет 2А, решение 2: обектът — само днес и 2 дни назад; стара промяна — само основанието. Сървърът решава. */
   var lock = !!c && !grChInWin(c.day), win = [];
   for(var w = 1; w <= M.days; w++) if(grChInWin(w)) win.push(w);
-  if(!c && !win.length){ toast('Обектът въвежда промени само за днес и 2 дни назад — по-старите прави регионалният.', '#dc2626'); return; }
-  var staffId = c ? c.staff_id : (rows[0] ? rows[0].staff_id : ''), day = c ? c.day : win[win.length - 1];
+  if(!c && !win.length){ toast('Обектът въвежда промени от днес − 2 дни нататък (и бъдещите дни) — по-старите прави регионалният.', '#dc2626'); return; }
+  var tnow = new Date(), tday = grMonth === tnow.getFullYear() + '-' + grPad(tnow.getMonth() + 1) ? tnow.getDate() : 0;
+  var staffId = c ? c.staff_id : (rows[0] ? rows[0].staff_id : ''), day = c ? c.day : (win.indexOf(tday) >= 0 ? tday : win[0]);
   var days = ''; for(var d = 1; d <= M.days; d++) if(c ? (lock ? d === c.day : grChInWin(d) || d === c.day) : grChInWin(d)) days += '<option value="' + d + '"' + (d === day ? ' selected' : '') + '>' + escVal(grChDayLabel(d)) + '</option>';
   var dis = lock ? ' disabled' : '';
   var ppl = rows.map(function(r){ return '<option value="' + escAttrVal(r.staff_id) + '"' + (r.staff_id === staffId ? ' selected' : '') + '>' + escVal(r.full_name || r.short_name || '') + '</option>'; }).join('');
@@ -2073,7 +2073,7 @@ function grChOpen(id){
   var old = document.getElementById('gr-ch-modal');
   if(old) old.parentNode.removeChild(old);
   document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg open" id="gr-ch-modal"><div class="modal"><h3>' + (c ? '✏️ Промяна' : '➕ Промяна в графика') + '</h3>' +
-    (lock ? '<div id="gr-ch-lock" style="font-size:12px;color:#92400e;background:#fef3c7;border-radius:6px;padding:4px 8px;">Денят е извън прозореца на обекта (днес и 2 дни назад) — сменя се само основанието. Друго — регионалният.</div>' : '') +
+    (lock ? '<div id="gr-ch-lock" style="font-size:12px;color:#92400e;background:#fef3c7;border-radius:6px;padding:4px 8px;">Денят е по-стар от днес − 2 дни (прозорецът на обекта) — сменя се само основанието. Друго — регионалният.</div>' : '') +
     f('Дата', '<select id="gr-ch-day" style="width:100%;" onchange="grChPlannedShow()"' + dis + '>' + days + '</select>') +
     f('Служител', '<select id="gr-ch-staff" style="width:100%;" onchange="grChPlannedShow()"' + dis + '>' + ppl + '</select>') +
     f('По график', '<b id="gr-ch-planned"></b>') +
