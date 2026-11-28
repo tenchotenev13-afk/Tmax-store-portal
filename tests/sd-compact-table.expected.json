@@ -154,42 +154,24 @@
  },
  "warehouse/supplier": {
   "МЕЖДУСКЛАДОВ ЧАКАЩ": [
-   "sdMarkTaken(i1) ✅ Върната",
-   "openSDModal(i1) ✏️",
-   "loadDiffPrint(rep-i) 🖨",
-   "sdDelete(i1) ✕"
+   "loadDiffPrint(rep-i) 🖨"
   ],
   "МЕЖДУСКЛАДОВ ПРИЕТ": [
-   "openSDModal(i2) ✏️",
-   "loadDiffPrint(rep-i) 🖨",
-   "sdDelete(i2) ✕"
+   "loadDiffPrint(rep-i) 🖨"
   ],
   "МЕЖДУСКЛАДОВ ЛИПСА": [
-   "sdToggleCreditNote(i3) ❌ Няма",
-   "sdMarkTaken(i3) ✅ Изписана",
-   "openSDModal(i3) ✏️",
-   "loadDiffPrint(rep-i) 🖨",
-   "sdDelete(i3) ✕"
+   "loadDiffPrint(rep-i) 🖨"
   ]
  },
  "warehouse/interstore": {
   "МЕЖДУСКЛАДОВ ЧАКАЩ": [
-   "sdMarkTaken(i1) ✅ Върната",
-   "openSDModal(i1) ✏️",
-   "loadDiffPrint(rep-i) 🖨",
-   "sdDelete(i1) ✕"
+   "loadDiffPrint(rep-i) 🖨"
   ],
   "МЕЖДУСКЛАДОВ ПРИЕТ": [
-   "openSDModal(i2) ✏️",
-   "loadDiffPrint(rep-i) 🖨",
-   "sdDelete(i2) ✕"
+   "loadDiffPrint(rep-i) 🖨"
   ],
   "МЕЖДУСКЛАДОВ ЛИПСА": [
-   "sdToggleCreditNote(i3) ❌ Няма",
-   "sdMarkTaken(i3) ✅ Изписана",
-   "openSDModal(i3) ✏️",
-   "loadDiffPrint(rep-i) 🖨",
-   "sdDelete(i3) ✕"
+   "loadDiffPrint(rep-i) 🖨"
   ]
  },
  "store/supplier": {

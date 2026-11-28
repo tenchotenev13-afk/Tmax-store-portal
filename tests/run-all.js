@@ -147,6 +147,7 @@ const TESTS = [
   'razliki-etap6v3.test.js',
   'razliki-nalichnost-opravena.test.js',
   'razliki-dovarshvane.test.js',
+  'razliki-sklad-prava.test.js',
   'razliki-etap7a.test.js',
   'razliki-store-delete-report.test.js',
   'razliki-etap7b.test.js',

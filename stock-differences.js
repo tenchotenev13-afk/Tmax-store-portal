@@ -104,22 +104,29 @@ function sdIsCOViewer(){
    От тези редове излизат глоби (удръжки от гъвкавата част на обекта), затова
    обектът ги вижда и ги проследява, но не пипа количествата им. Без аргумент
    функцията се държи както преди — общ въпрос "тази роля пипа ли изобщо". */
+/* Логистичните складове (Добрич, Търговище) са с роля logistics, но в Разлики
+   НЕ са офисът: не добавят, не подават, не редактират и не решават редове
+   (28.11.2026, razliki-sklad-prava). Отговарят само по своите бланки -
+   SD_WH_BY_CAT, „📬 Прието обратно", „➡️ Към Контролинг", размените. Затова
+   четирите предиката по-долу връщат false за склада; останалите места, които
+   ги ползват, или вече изключват склада, или стават само по-строги. */
 function canEditSD(line) {
   if (!currentUser) return false;
   if (sdIsCOViewer()) return false;
+  if (isLogisticsWarehouseUser()) return false;
   if (isWrongReceiptReadOnly(line)) return false;
   return ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
 function canAddSD() {
-  return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
+  return currentUser && !isLogisticsWarehouseUser() && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
 /* Подаване на нова бланка за разлики - магазинска страна (същите роли като canEditTransit) */
 function canSubmitDiff() {
-  return currentUser && !sdIsCOViewer() && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
+  return currentUser && !sdIsCOViewer() && !isLogisticsWarehouseUser() && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
 /* Решение по разликата (Заприхождаване/Връщане/Липса) - само централен офис */
 function canReviewDiff() {
-  return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
+  return currentUser && !isLogisticsWarehouseUser() && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
 /* „Липса" се изписва само от централния офис (Цвети, 30.09.2026): магазинът
    не пипа нито статуса, нито кредитното. За „Заприхождаване" и „Връщане"
@@ -726,7 +733,7 @@ function renderStockDiff() {
           var emTitle = emRep.email_sent_at ? 'Вече изпратен на '+sdFmtDayTime(emRep.email_sent_at)+' — изпрати отново' : 'Изпрати имейл до '+diffDirEmailTo(emRep.direction);
           h += '<button data-rid="'+emRep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" title="'+escAttr(emTitle)+'" style="border:1px solid #bae6fd;background:#f0f9ff;color:#0369a1;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✉️</button>';
         }
-        if (isAdmin) {
+        if (isAdmin && !isLogisticsWarehouseUser()) {
           h += '<button data-id="'+r.id+'" onclick="sdDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✕</button>';
         }
         /* Триене на ЦЯЛАТА бланка — второ място нарочно: картата горе изчезва,
@@ -745,8 +752,8 @@ function renderStockDiff() {
   h += '</div>';
   /* Само за преглед: формата за добавяне/редакция изобщо не се рисува (иначе
      скритият модал носи „Добави“/„Откажи“ в DOM-а). openSDModal() без #sd-ov
-     излиза тихо. */
-  if (!sdIsCOViewer()) h += sdModalHtml();
+     излиза тихо. Складът (28.11.2026) — същото: модалът на Контролинга не е за него. */
+  if (!sdIsCOViewer() && !isLogisticsWarehouseUser()) h += sdModalHtml();
   /* Всеки рендер пише наново цялата обвивка - без това всяко действие по
      ред (✅, Кредитно) връщаше таблицата в горния ляв ъгъл. */
   var oldTw = document.getElementById('sd-tbl-wrap');
@@ -2640,6 +2647,7 @@ function setSDSearch(val){
 
 /* Превключва статус "Издадено кредитно известие" - релевантно само за тип "Липса" */
 function sdToggleCreditNote(id){
+  if(isLogisticsWarehouseUser()){ toast('Нямаш права за това действие','#dc2626'); return; }
   var line=sdData.find(function(x){return String(x.id)===String(id);});
   if(!line)return;
   if(sdStoreLockedMissing(line)){ toast('Липсите се изписват от Цветелина','#dc2626'); return; }
@@ -2709,6 +2717,7 @@ function sdConfirmInterstore(lineId, as){
 }
 
 function sdDelete(id) {
+  if (isLogisticsWarehouseUser()) { toast('Нямаш права за това действие','#dc2626'); return; }
   if (!confirm('Изтрий записа?')) return;
   sbDelete('stock_differences','id=eq.'+id).then(function(res){
     if(!res.ok){
@@ -3590,6 +3599,8 @@ function sdRemoveAttachment(idx){
 }
 
 function openSDModal(id) {
+  /* Складът няма модала на Контролинга - нито нов ред, нито ✏️ (28.11.2026). */
+  if (isLogisticsWarehouseUser()) { toast('Нямаш права за това действие','#dc2626'); return; }
   sdEditId = id;
   renderStockDiff();
   var ov = document.getElementById('sd-ov');
@@ -3636,6 +3647,7 @@ function sdCleanPayload(data){
 }
 
 function submitSD(sync) {
+  if (isLogisticsWarehouseUser()) { toast('Нямаш права за това действие','#dc2626'); return; }
   var store=(document.getElementById('sd-store').value||'').trim();
   var name=(document.getElementById('sd-name').value||'').trim();
   if(!store){toast('Избери магазин','#dc2626');return;}
@@ -5929,6 +5941,7 @@ function updateDiffCounterpartLabel(){
    (липса, излишък, увредена стока), а не нещо, което подателят може да знае.
    Полето „Магазин" също не се пипа — то идва от самия потребител. */
 function openDiffSubmitModal(prefill){
+  if(isLogisticsWarehouseUser()){ toast('Нямаш права за това действие','#dc2626'); return; }
   diffPendingPhotos=[];
   sdStornoNoteFor=null; /* „Направи сторно" го задава СЛЕД отварянето */
   var old=document.getElementById('diff-submit-ov'); if(old)old.remove();
@@ -6674,6 +6687,7 @@ function sdRouteNotify(info){
 }
 
 function submitDiffReport(){
+  if(isLogisticsWarehouseUser()){ toast('Нямаш права за това действие','#dc2626'); return; }
   var store=(document.getElementById('diff-store').value||'').trim();
   var direction=document.getElementById('diff-direction').value||'interstore';
   var counterpart=document.getElementById('diff-counterpart').value.trim();

@@ -444,11 +444,13 @@ async function reply(h, id, text) {
     h.close();
   }
   {
-    /* Логистичен склад: собственият обект, не общият списък. */
+    /* Логистичен склад: от 28.11.2026 (razliki-sklad-prava) не подава бланки —
+       няма „📝 Подай бланка", а openDiffSubmitModal() отказва. Дотогава тук се
+       проверяваше, че „Магазин" е собственият склад. */
     const h = env(WH, { dir: 'supplier' }); await settle();
-    realClick(h.w, btn(mod(h), '📝 Подай бланка')); await settle();
-    const el = h.doc.getElementById('diff-store');
-    ok('склад: „Магазин" е собственият склад', !!el && el.value === 'Логистичен склад Търговище', el && (el.tagName + ':' + el.value));
+    ok('склад: без „📝 Подай бланка"', !btn(mod(h), '📝 Подай бланка'));
+    h.w.openDiffSubmitModal(); await settle();
+    ok('склад: openDiffSubmitModal() не отваря формата', !h.doc.getElementById('diff-store'));
     h.close();
   }
 

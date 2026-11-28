@@ -11,6 +11,9 @@
    От 20.10.2026 еталонът има и „✉️" (openDiffEmailModal) след „🖨" за
    admin/accounting — добавен нарочно (diff-email-after-skip.test.js), само
    вмъкване; сверено със свеж --dump.
+   От 28.11.2026 (razliki-sklad-prava) редовете на склада (warehouse/*) носят
+   само „🖨" — ✏️, ✕, кредитното и „✅ Върната / Изписана" не са за склада;
+   сменени са само ключовете warehouse/*, сверено със свеж --dump.
 
    Пускане:  node tests/sd-compact-table.test.js .
    Снемане на еталона от друга версия:  node tests/sd-compact-table.test.js <корен> --dump */
