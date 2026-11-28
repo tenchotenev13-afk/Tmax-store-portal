@@ -650,8 +650,9 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
   `notify-admin` (`naList` / `naInsert` / `naUpdate` / `naDelete` в
   `shared.js`; admin, а `notification_schedules` — и accounting). Не добавяй
   `sbGet`/`sbPost`/… към тях — заковано в `tests/notify-admin-writes.test.js`.
-  Правата на anon се отнемат с `notify-tables-lock-schema.sql` (чака
-  огледалото — `claude/open/27-11-notify-tables-lock-migraciya.md`).
+  От 28.11.2026 (`notify-tables-lock-schema.sql`, миграция
+  `20261128085642`) anon/authenticated нямат никакви права върху петте, RLS
+  е включен, чете ги само `mirror_reader` (политика `mirror_reader_select`).
 - `users` е с **изключено RLS**. `anon` и `authenticated` имат САМО колонен
   SELECT върху 11 безопасни колони (от `20260824190214_users_column_grants`) —
   без `password`, `password_hash`, `history_pin_hash`. От 30.09.2026

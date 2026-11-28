@@ -1,4 +1,5 @@
 Отворено: 27.11 · Кой чака: Живко · Сесия: notify-tables-lock
+Затворено: 28.11 · Как: Живко потвърди 27.11 (огледалото — само mirror_reader; edge_logs от 27.11 11:06 UTC без anon); миграция notify_tables_lock, версия 20261128085642, приложена 28.11 — час преди нея нула anon заявки от браузъра към петте; след нея anon → 401/42501 на петте (GET/POST/PATCH/DELETE), mirror_reader = postgres (7/9/6/1/45). Първото ползване от accounting — claude/open/28-11-notify-admin-accounting-live.md.
 
 **Миграцията `notify-tables-lock-schema.sql` чака огледалото.** Петте
 таблици (report_recipients, notification_topics / matrix / overrides /

@@ -14,9 +14,6 @@
 
 ## Чака изпращане
 
-(права, без промяна на схемата: notify-tables-lock-schema.sql; миграцията още НЕ е приложена — чака това)
-- 27.11 · report_recipients, notification_topics, notification_matrix, notification_overrides, notification_schedules скоро спират да се четат с публичния ключ — само с mirror_reader. Огледалото още ги тегли с anon (edge_logs, 27.11 06:07 UTC); моля, преди миграцията скриптът да ги чете с ключа на mirror_reader (те са в 93-те) и потвърди обратно
-
 (grafik-changes-trip-schema.sql — миграция grafik_changes_trip, версия 20261127121336, приложена 27.11.2026; „Работен график“ не е в огледалото — редовете са само за записа)
 - 27.11 · grafik_changes.trip_store — text, NULL, без default (обектът, където е командирован човекът; задължителен точно при actual = 'К')
 - 27.11 · grafik_changes.actual — нова стойност 'К'
@@ -32,9 +29,6 @@
 
 (от миграцията revaluation_unit_prefix_data — версия 20261127084628, приложена 27.11.2026)
 - 27.11 · revaluation_units.unit_no — сменя вида си: 'GB7' вместо 'Габрово-П0007' (заварените 16 реда са преименувани; типът е същият). Новите номера идват в новия вид още от 20261127084126.
-
-(права, без промяна на схемата: mirror-reader-all-schema.sql; миграция mirror_reader_all — версия 20261126222936, приложена 27.11.2026)
-- 27.11 · mirror_reader чете всичките 93 таблици от tables-93.txt (users и stores — само изброените колони) — смени скрипта да чете всичко с нейния ключ; users и stores с изричен select на колоните (с select=* ключът получава отказ — няма права за password_hash, history_pin_hash, stores.pass; колоните са в COLS на tools/mirror-key/make-mirror-key.js)
 
 (тригер razliki_return_sync, razliki-return-sync-schema.sql — версия 20261126213741, приложена 26.11.2026; данни razliki-return-sync-data.sql — версия 20261126214233, приложена 26.11.2026)
 - 26.11 · stock_returns / stock_differences — само тригер и промяна в данни, без промяна за огледалото
@@ -91,6 +85,14 @@
 
 (в базата от миграцията warranty_templates_sectors, warranty-templates-sectors-schema.sql, версия 20261125182251, приложена 25.11.2026)
 - 25.11 · warranty_templates.sectors — text[], NULL, без default
+
+## Потвърдено 27.11.2026
+
+(права, без промяна на схемата: notify-tables-lock-schema.sql; миграция notify_tables_lock — версия 20261128085642, приложена 28.11.2026)
+- 27.11 · report_recipients, notification_topics, notification_matrix, notification_overrides, notification_schedules — четат се само с mirror_reader (anon и authenticated нямат права, RLS включен). Живко потвърди 27.11: огледалото тегли 93-те таблици, вкл. тези пет, само с ключа на mirror_reader; в edge_logs — mirror_reader от 27.11 11:06 UTC, нула anon
+
+(права, без промяна на схемата: mirror-reader-all-schema.sql; миграция mirror_reader_all — версия 20261126222936, приложена 27.11.2026)
+- 27.11 · mirror_reader чете всичките 93 таблици от tables-93.txt (users и stores — само изброените колони) — смени скрипта да чете всичко с нейния ключ; users и stores с изричен select на колоните (с select=* ключът получава отказ — няма права за password_hash, history_pin_hash, stores.pass; колоните са в COLS на tools/mirror-key/make-mirror-key.js)
 
 ## Изпратено 26.11.2026
 

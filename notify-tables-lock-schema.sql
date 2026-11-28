@@ -8,9 +8,18 @@
 -- (rls_disabled_in_public, 22.11.2026) — за тези пет и още 15 таблици
 -- (останалите — claude/open/27-11-rls-ostanali-15.md).
 --
--- Миграция notify_tables_lock — НЕ Е ПРИЛОЖЕНА. Ред: деплой на notify-admin →
--- push на клиента (Pages сверен) → час без anon/браузър заявки към петте в
--- edge_logs (и без TemaxMirrorSync с anon) → тази миграция.
+-- Миграция notify_tables_lock, версия 20261128085642, приложена 28.11.2026
+-- (≈10:56 София), след: notify-admin v1 (27.11) → push 3349c14 (Pages сверен
+-- 28.11) → проверка на живо като admin (чатът, 28.11) → час без anon заявки
+-- от браузъра към петте; огледалото — mirror_reader от 27.11 11:06 UTC.
+--
+-- Резултат след прилагане (28.11.2026):
+-- - RLS on и на петте; ACL: postgres, service_role, mirror_reader=r — anon и
+--   authenticated нямат нищо; политики — само mirror_reader_select (SELECT).
+-- - set local role mirror_reader: 7 / 9 / 6 / 1 / 45 = като postgres
+--   (report_recipients / topics / matrix / overrides / schedules).
+-- - HTTP с anon ключа: GET на петте → 401 (42501); POST report_recipients,
+--   PATCH notification_topics, DELETE notification_matrix → 401 (42501).
 --
 -- Сверка преди (27.11.2026):
 -- - RLS изключено и на петте; политики — няма.
