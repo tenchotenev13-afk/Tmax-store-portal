@@ -26,3 +26,18 @@ relrowsecurity` в public. Включването на RLS без политик
 Предложение за ред: първо `notification_log` и `client_order_counters`
 (само сървър/тригер?), после гаранционните, накрая Разлики (най-много
 пътища от обектите).
+
+**28.11 (сесия rls-server-only): миграция 1 от описа rls-15-opis — готова.**
+`notification_log`, `warranty_cards`, `client_order_counters`: RLS on, anon /
+authenticated без права, само `mirror_reader_select`; тригерната
+`assign_client_order_num()` — SECURITY DEFINER + search_path, без EXECUTE за
+PUBLIC/anon/authenticated (миграция `rls_server_only`, 20261128115146,
+`rls-server-only-schema.sql`). На живо: клиентски заявки след нея получават
+номер (Карлово-0512, Севлиево-0150); bulletin-notify 14:00 → 200.
+**Непроверено:** първият запис на bulletin-notify в `notification_log` след
+миграцията (последният е от 08:00 София на 28.11) — edge_logs: POST
+`/rest/v1/notification_log` от Deno → 201 и нов ред с `sent_at` след
+20261128115146. Остават 12 таблици: миграции 2 и 3 от описа
+и стъпка (б). Триенето на `warranty_cards` — отделно
+(`28-11-warranty-cards-delete.md`); 500-ките на `product_catalog` — преди
+нейната миграция (`28-11-product-catalog-500.md`).
