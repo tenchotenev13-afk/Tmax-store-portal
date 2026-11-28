@@ -82,6 +82,8 @@ function sdRestoreScroll(){
   if(y == null && !a && ln == null) return;
   var apply = function(){
     var el = ln != null ? document.getElementById('sd-line-'+ln) : (a ? document.getElementById('diff-rep-'+a) : null);
+    /* Скокът до ред (Минуси, „📄 Бланката“ от регистъра) — редът се подчертава. */
+    if(el && ln != null){ el.classList.add('sd-line-hi'); el.style.background = '#fef9c3'; el.style.outline = '2px solid #facc15'; }
     if(el && el.scrollIntoView){ el.scrollIntoView({block:'center'}); }
     else if(y != null){ window.scrollTo(0, y); }
   };
@@ -2020,12 +2022,23 @@ function submitSDRouteClose(lineId){
   var comment = el ? String(el.value || '').trim() : '';
   if(!comment){ toast('Впиши коментар — какво е направено','#dc2626'); if(el) el.focus(); return Promise.resolve(false); }
   sdKeepScroll(line.report_id);
+  return sdRouteCloseApply(line, rep, comment).then(function(r){
+    if(!r){ toast('Грешка при запис','#dc2626'); return false; }
+    var ov = document.getElementById('sdroute-ov'); if(ov) ov.remove();
+    toast(r === 'report' ? '✅ Приключено — бланката е затворена' : '✅ Приключено'); loadStockDiff(); return true;
+  });
+}
+/* Самият запис на „✅ Приключи (от свое име)“ — ЕДИН път за бутона на реда и
+   за отметката в „🏷️ Проблемни артикули“ (27.11.2026, razliki-registar-edno-
+   mqsto): PATCH на реда, известията към обекта и склада, затваряне на
+   бланката при последен отворен ред. Без toast и без презареждане — те са на
+   извикващия. → false (паднал PATCH) | true | 'report' (бланката е затворена). */
+function sdRouteCloseApply(line, rep, comment){
   var at = new Date().toISOString(), by = sdActor();
   var data = { status: 'received', completed_by: by, completed_at: at, resolution_comment: comment };
   var who = sdLineRoutedHere(line, rep) && sdLineRoute(line, rep) === 'regional' ? 'Регионалният' : 'ЦО';
   return sbPatch('stock_differences', 'id=eq.' + line.id, data).then(function(res){
-    if(!res.ok){ toast('Грешка при запис','#dc2626'); return false; }
-    var ov = document.getElementById('sdroute-ov'); if(ov) ov.remove();
+    if(!res || !res.ok) return false;
     Object.assign(line, data);
     /* Етап 6а: обектът и складът на бланката научават — fire-and-forget. */
     var pmsg = who+' приключи ред '+(line.material_code||'')+' · '+(rep.store_name||'')+': '+comment;
@@ -2033,12 +2046,10 @@ function submitSDRouteClose(lineId){
     sdNotifyInterstore(rep.counterpart, '✅ Разлика: приключен ред', pmsg);
     var siblings = sdData.filter(function(x){ return x.report_id === line.report_id; });
     if(line.report_id && siblings.length && siblings.every(function(x){ return x.status === 'received'; })){
-      return sbPatch('differences_reports', 'id=eq.' + line.report_id, sdReviewedPatch(line.report_id)).then(function(){
-        toast('✅ Приключено — бланката е затворена'); loadStockDiff(); return true;
-      });
+      return sbPatch('differences_reports', 'id=eq.' + line.report_id, sdReviewedPatch(line.report_id)).then(function(){ return 'report'; });
     }
-    toast('✅ Приключено'); loadStockDiff(); return true;
-  });
+    return true;
+  }, function(){ return false; });
 }
 /* "Магазинът" по междускладов ред - същата проверка, която стоеше само при
    "Получено". Счетоводителят по обекти има store_name "Централен офис", а
@@ -7818,7 +7829,49 @@ function sdLoadProblemArticles(force){
     /* По код с числова подредба — текстовата в базата слага 104894 преди 34924. */
     sdPa = (res.rows || []).slice().sort(function(x, y){ return sdPaCode(x.material_code).localeCompare(sdPaCode(y.material_code), 'bg', { numeric: true }) || String(x.id).localeCompare(String(y.id)); });
     sdPaFailed = false;
+    return sdPaLoadSrcLines();
   })]);
+}
+/* „📄 Бланката“ (27.11.2026): изходните редове на записите (source_line_id) —
+   съществуват ли и в коя бланка са. Паднало четене → sdPaSrcFailed; бутонът
+   остава активен и проверява при клик. */
+var sdPaSrc = {}, sdPaSrcFailed = false;
+function sdPaLoadSrcLines(){
+  var ids = [];
+  sdPa.forEach(function(p){ if(p && p.source_line_id != null && ids.indexOf(String(p.source_line_id)) < 0) ids.push(String(p.source_line_id)); });
+  if(!ids.length){ sdPaSrc = {}; sdPaSrcFailed = false; return Promise.resolve(); }
+  return sdPaFetchLines(ids).then(function(m){
+    if(!m){ sdPaSrc = {}; sdPaSrcFailed = true; return; }
+    sdPaSrc = m; sdPaSrcFailed = false;
+  });
+}
+var SD_PA_SRC_SEL = 'select=id,report_id,store_name,material_code,status,type,difference_category,differences_reports(id,direction,reviewed,email_pending)';
+function sdPaFetchLines(ids){
+  return sbGetOk('stock_differences', SD_PA_SRC_SEL + '&id=in.(' + ids.map(encodeURIComponent).join(',') + ')').then(function(res){
+    if(!res || !res.ok){ try{ console.error('problem_articles → stock_differences: ' + (res && res.error)); }catch(e){} return null; }
+    var m = {};
+    (res.rows || []).forEach(function(l){ if(l && ids.indexOf(String(l.id)) >= 0 && l.differences_reports) m[String(l.id)] = l; });
+    return m;
+  }, function(){ return null; });
+}
+function sdPaSrcBtnHtml(p){
+  if(!p || p.source_line_id == null) return '';
+  var lid = String(p.source_line_id);
+  var gone = !sdPaSrcFailed && !sdPaSrc[lid];
+  return '<div style="margin-top:4px;"><button class="sd-pa-src" data-lid="' + escVal(lid) + '"' +
+    (gone ? ' disabled title="Бланката е изтрита" style="border:1px solid #e2e8f0;background:#f1f5f9;color:#94a3b8;border-radius:5px;padding:2px 7px;font-size:11px;cursor:not-allowed;"'
+          : ' onclick="sdPaOpenSource(this.dataset.lid)" title="Отвори бланката на този ред в Разлики" style="border:1px solid #2563eb;background:#eff6ff;color:#1d4ed8;border-radius:5px;padding:2px 7px;font-size:11px;font-weight:600;cursor:pointer;"') +
+    '>📄 Бланката</button></div>';
+}
+/* Скокът — по пътя на Минуси (sdJumpToLine); правата по бланката не се пипат. */
+function sdPaOpenSource(lid){
+  var have = sdPaSrc[String(lid)];
+  var get = have ? Promise.resolve(have) : sdPaFetchLines([String(lid)]).then(function(m){ return m ? (m[String(lid)] || false) : null; });
+  return get.then(function(l){
+    if(l === null){ toast('Бланката не можа да се зареди — опитай пак', '#dc2626'); return false; }
+    if(!l){ toast('Бланката е изтрита', '#64748b'); return false; }
+    return sdJumpToLine(l);
+  });
 }
 /* Целевите обекти на записа в Бюлетина: масивът от bulletin_stores или, при
    NULL, всички обекти от reportableStoresCache. */
@@ -7931,7 +7984,11 @@ function sdPaWarnText(code){
 function sdPaWarnHtml(code){
   var t = sdPaWarnText(code);
   if(!t) return '';
-  return '<div class="sd-pa-warn" style="background:#fef9c3;border:1px solid #facc15;border-radius:5px;padding:5px 8px;font-size:11.5px;color:#713f12;margin:0 0 6px;">⚠️ Проблемен артикул: ' + t + '</div>';
+  /* До 3 миниатюри от замесените записи (27.11.2026); клик — пълен размер. */
+  var m = sdPaMatch(code), ph = [];
+  ((m.own ? [m.own] : []).concat(m.readers)).forEach(function(p){ (Array.isArray(p.photos) ? p.photos : []).forEach(function(f){ if(f && f.url && ph.length < 3) ph.push(f); }); });
+  return '<div class="sd-pa-warn" style="background:#fef9c3;border:1px solid #facc15;border-radius:5px;padding:5px 8px;font-size:11.5px;color:#713f12;margin:0 0 6px;">⚠️ Проблемен артикул: ' + t +
+    (ph.length ? '<div class="sd-pa-warn-ph">' + sdPaThumbs(ph) + '</div>' : '') + '</div>';
 }
 /* ── Етап 7б (19.11.2026): ред „грешен баркод“ → регистърът ──
    На всеки ред с категория wrong_barcode (междускладов и доставчик, отворен
@@ -8029,11 +8086,11 @@ function sdPaRowsHtml(){
       '<td style="' + TD + '">' + esc(p.material_name || '') + '</td>' +
       '<td style="' + TD + '">' + (p.reads_as_code ? '<b>' + esc(sdPaCode(p.reads_as_code)) + '</b> ' + esc(p.reads_as_name || '') : (p.reads_as_name ? esc(p.reads_as_name) : '<span style="color:#94a3b8;">—</span>')) + '</td>' +
       '<td style="' + TD + '">' + esc(p.store_action || '') + '</td>' +
-      '<td style="' + TD + 'color:#475569;">' + esc(p.note || '') + '</td>' +
+      '<td class="sd-pa-notecell" style="' + TD + 'color:#475569;">' + esc(p.note || '') + (sdPaThumbs(p.photos) ? '<div class="sd-pa-photos">' + sdPaThumbs(p.photos) + '</div>' : '') + '</td>' +
       '<td style="' + TD + 'white-space:nowrap;">' + esc(fmtDate(p.valid_from)) + '</td>' +
       '<td style="' + TD + 'white-space:nowrap;">' + (closed
         ? '<span style="color:#64748b;">Затворен' + (p.closed_at ? ' · ' + esc(sdFmtDayMonth(p.closed_at)) : '') + (p.closed_by ? ' · ' + esc(p.closed_by) : '') + '</span>'
-        : '<span style="color:#047857;font-weight:600;">Активен</span>') + '</td>' +
+        : '<span style="color:#047857;font-weight:600;">Активен</span>') + sdPaSrcBtnHtml(p) + '</td>' +
       '<td class="sd-pa-bulcell" style="' + TD + 'white-space:nowrap;">' + sdPaBulCell(p) + '</td>' +
       (w ? '<td style="' + TD + 'white-space:nowrap;">' + (closed ? '' :
         '<button class="sd-pa-edit" data-id="' + esc(String(p.id)) + '" onclick="openSDPaModal(this.dataset.id)" title="Редакция" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button> ' +
@@ -8104,6 +8161,17 @@ function openSDPaModal(id, pre){
   if(id && !p) return;
   p = p || Object.assign({ store_action: 'за преналепяне', valid_from: today() }, pre || {});
   var ex = document.getElementById('sdpa-ov'); if(ex) ex.remove();
+  /* Снимките в модала (27.11.2026): запазените на записа, новите (качват се
+     при „Запази“) и махнатите с „✕“ (трият се след успешния запис). */
+  sdPaPhotos = (Array.isArray(p.photos) ? p.photos : []).filter(function(f){ return f && f.url; }).slice();
+  sdPaPending = []; sdPaRemoved = [];
+  /* Запис от ред (source 'diff') — редът и бланката му, за „Снимки от
+     бланката“ и „✅ Приключи реда“. */
+  var srcLine = null, srcRep = null;
+  if(!id && p.source === 'diff' && p.source_line_id != null){
+    srcLine = (sdData || []).filter(function(x){ return String(x.id) === String(p.source_line_id); })[0] || null;
+    srcRep = srcLine ? ((typeof diffReports !== 'undefined' && diffReports) || []).filter(function(r){ return String(r.id) === String(srcLine.report_id); })[0] || null : null;
+  }
   var fld = function(lbl, idAttr, val, type){
     return '<label class="fl">' + lbl + '</label><input class="fi" id="' + idAttr + '"' + (type ? ' type="' + type + '"' : '') + ' value="' + escVal(val) + '" style="margin-bottom:8px;">';
   };
@@ -8118,6 +8186,8 @@ function openSDPaModal(id, pre){
     fld('Бележка', 'sdpa-note', p.note) +
     fld('От кога', 'sdpa-from', p.valid_from, 'date') +
     sdPaBulFieldsHtml(id ? p.bulletin_on === true : true, id ? p.bulletin_stores : null, id ? p.photo_required === true : false) +
+    sdPaPhotoFieldsHtml(id ? null : srcLine, id ? null : srcRep) +
+    sdPaCloseBoxHtml(id ? null : srcLine, id ? null : srcRep) +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">' +
     '<button onclick="document.getElementById(\'sdpa-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button id="sdpa-save" data-id="' + escVal(id || '') + '"' + (!id && p.source ? ' data-src="' + escVal(p.source) + '"' : '') + (!id && p.source_line_id != null ? ' data-line="' + escVal(String(p.source_line_id)) + '"' : '') + ' onclick="submitSDPa(this.dataset.id)" style="border:none;background:#7c3aed;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>' +
@@ -8140,28 +8210,204 @@ function submitSDPa(id){
     bulletin_on: bul.on, bulletin_stores: bul.stores, photo_required: bul.photo
   };
   var at = new Date().toISOString(), by = sdActor();
-  var req;
-  if(id){
-    body.updated_by = by; body.updated_at = at;
-    req = sbPatch('problem_articles', 'id=eq.' + encodeURIComponent(id), body);
-  } else {
-    var sv = document.getElementById('sdpa-save');
-    var src = sv && sv.getAttribute('data-src'), line = sv && sv.getAttribute('data-line');
-    body.status = 'active'; body.source = src || 'office'; body.created_by = by;
-    if(line) body.source_line_id = line;
-    req = sbPost('problem_articles', body);
-  }
-  return req.then(function(res){
-    if(!res || !res.ok){
-      var msg = (typeof sbErrMsg === 'function') ? sbErrMsg(res) : 'грешка';
-      /* 23505 — уникалният индекс в базата (паралелен запис от друг човек). */
-      var isDup = !!(res && res.error && (res.error.code === '23505' || /duplicate|unique/i.test(String(res.error.message || ''))));
-      toast(isDup ? 'Вече има активен запис за код ' + code + ' (базата отказа)' : 'Грешка при запис (' + code + '): ' + msg, '#dc2626');
+  var sv = document.getElementById('sdpa-save');
+  if(sv && sv.disabled) return;
+  /* Отметките се четат ПРЕДИ записа — модалът се затваря след него. */
+  var srcFiles = id ? [] : sdPaCheckedSrcFiles();
+  var closeIds = id ? [] : Array.prototype.slice.call(document.querySelectorAll('#sdpa-close-box .sdpa-close-ln')).filter(function(c){ return c.checked; }).map(function(c){ return c.getAttribute('data-lid'); });
+  var closeComment = action + (v('sdpa-note') ? ' · ' + v('sdpa-note') : '');
+  var removed = sdPaRemoved.slice();
+  if(sv) sv.disabled = true;
+  var unlock = function(){ if(sv) sv.disabled = false; };
+  /* Снимките първо: новите се качват, тези от бланката се КОПИРАТ на нов път
+     (изтриване на бланката от обекта или от admin трие файловете ѝ —
+     sdDeleteReportFiles; „✕“ на обекта — също). Паднало качване или копие →
+     червен toast, записът НЕ тръгва; качените дотук се трият. */
+  var jobs = sdPaPending.map(function(f){ return sdPaUploadFile(f.file); })
+    .concat(srcFiles.map(function(f){ return sdPaCopyFile(f); }));
+  return Promise.all(jobs).then(function(up){
+    if(up.some(function(x){ return !x; })){
+      up.forEach(function(x){ if(x) sdPaDeleteFile(x.url); });
+      toast('Грешка при качване на снимка — записът НЕ е направен', '#dc2626');
+      unlock();
       return;
     }
-    var ov = document.getElementById('sdpa-ov'); if(ov) ov.remove();
-    toast('✅ Записано');
-    return sdLoadProblemArticles(true).then(function(){ renderStockDiff(); });
+    body.photos = sdPaPhotos.concat(up);
+    var req;
+    if(id){
+      body.updated_by = by; body.updated_at = at;
+      req = sbPatch('problem_articles', 'id=eq.' + encodeURIComponent(id), body);
+    } else {
+      var src = sv && sv.getAttribute('data-src'), line = sv && sv.getAttribute('data-line');
+      body.status = 'active'; body.source = src || 'office'; body.created_by = by;
+      if(line) body.source_line_id = line;
+      req = sbPost('problem_articles', body);
+    }
+    return req.then(function(res){
+      if(!res || !res.ok){
+        var msg = (typeof sbErrMsg === 'function') ? sbErrMsg(res) : 'грешка';
+        /* 23505 — уникалният индекс в базата (паралелен запис от друг човек). */
+        var isDup = !!(res && res.error && (res.error.code === '23505' || /duplicate|unique/i.test(String(res.error.message || ''))));
+        toast(isDup ? 'Вече има активен запис за код ' + code + ' (базата отказа)' : 'Грешка при запис (' + code + '): ' + msg, '#dc2626');
+        up.forEach(function(x){ if(x) sdPaDeleteFile(x.url); });
+        unlock();
+        return;
+      }
+      var ov = document.getElementById('sdpa-ov'); if(ov) ov.remove();
+      toast('✅ Записано');
+      /* Махнатите с „✕“ — трият се след записа; паднало → жълт toast. */
+      var dels = Promise.all(removed.map(function(f){ return sdPaDeleteFile(f.url); })).then(function(r){
+        if(r.some(function(x){ return !x; })) toast('⚠️ Снимката е махната от записа, но не е изтрита от хранилището', '#d97706');
+      });
+      return dels.then(function(){ return sdPaCloseLines(closeIds, closeComment); }).then(function(closed){
+        if(closed) loadStockDiff();
+        return sdLoadProblemArticles(true).then(function(){ renderStockDiff(); });
+      });
+    });
+  });
+}
+/* ── Снимки в записа (27.11.2026, razliki-registar-edno-mqsto) ──
+   Bucket-ът на Разлики, префикс problem-articles/register/, компресията
+   diffCompressImage. Формат {url,name} — като в Бюлетина (bulPaThumbs). */
+var sdPaPhotos = [], sdPaPending = [], sdPaRemoved = [];
+var SD_PA_PREFIX = 'problem-articles/register/';
+function sdPaNewPath(){ return SD_PA_PREFIX + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.jpg'; }
+function sdPaPutBlob(blob, name, ctype){
+  var path = sdPaNewPath();
+  return fetch(DIFF_SB + '/storage/v1/object/' + DIFF_BKT + '/' + path, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + DIFF_KEY, 'Content-Type': ctype || 'image/jpeg', 'x-upsert': 'true' },
+    body: blob
+  }).then(function(r){
+    if(!r || !r.ok) return null;
+    return { url: DIFF_SB + '/storage/v1/object/public/' + DIFF_BKT + '/' + path, name: name || 'Снимка' };
+  });
+}
+function sdPaUploadFile(file){
+  return diffCompressImage(file, 1600, 0.75).then(function(blob){
+    return sdPaPutBlob(blob, file.name, 'image/jpeg');
+  }).catch(function(){ return null; });
+}
+/* Копие на файл от бланката: download → upload на нов път. */
+function sdPaCopyFile(f){
+  return fetch(f.url).then(function(r){
+    if(!r || !r.ok || typeof r.blob !== 'function') return null;
+    return r.blob().then(function(b){ return sdPaPutBlob(b, f.name, (b && b.type) || 'image/jpeg'); });
+  }).catch(function(){ return null; });
+}
+/* Трие САМО файлове под problem-articles/register/ — чужд файл (бланка,
+   Бюлетин) не се пипа. → true / false. */
+function sdPaDeleteFile(url){
+  var p = sdStoragePathFromUrl(url);
+  if(!p || p.indexOf(SD_PA_PREFIX) !== 0) return Promise.resolve(true);
+  return fetch(DIFF_SB + '/storage/v1/object/' + DIFF_BKT + '/' + p, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + DIFF_KEY } })
+    .then(function(r){ return !!(r && r.ok); }, function(){ return false; });
+}
+function sdPaIsImg(f){ return !!f && !!f.url && (f.type === 'image' || DIFF_IMG_RE.test(String(f.url))); }
+/* Снимките на бланката (без стоковата) и на реда — само изображения. */
+function sdPaSrcFilesFor(line, rep){
+  var out = [], seen = {};
+  var add = function(url, name){ if(url && !seen[url]){ seen[url] = 1; out.push({ url: url, name: name || 'Снимка' }); } };
+  (rep && Array.isArray(rep.photos) ? rep.photos : []).forEach(function(ph){
+    if(ph && ph.kind !== 'stokova' && sdPaIsImg(ph)) add(ph.url, ph.name);
+  });
+  normSDAttachments(line && line.attachments).forEach(function(a){ if(sdPaIsImg(a)) add(a.url, a.filename); });
+  return out;
+}
+var sdPaSrcOffer = [];
+function sdPaCheckedSrcFiles(){
+  return Array.prototype.slice.call(document.querySelectorAll('#sdpa-src-box .sdpa-src-ph')).filter(function(c){ return c.checked; })
+    .map(function(c){ return sdPaSrcOffer[+c.getAttribute('data-i')]; }).filter(Boolean);
+}
+var SD_PA_TH = 'width:56px;height:56px;object-fit:cover;border:1px solid #e2e8f0;border-radius:5px;';
+function sdPaPhotoListHtml(){
+  var h = sdPaPhotos.map(function(f, i){
+    return '<span class="sdpa-ph" data-kind="saved" style="position:relative;display:inline-block;margin:3px 6px 0 0;">' +
+      '<a href="' + escVal(f.url) + '" target="_blank" rel="noopener"><img src="' + escVal(f.url) + '" alt="" style="' + SD_PA_TH + '"></a>' +
+      '<button type="button" class="sdpa-ph-x" data-kind="saved" data-i="' + i + '" onclick="sdPaRmPhoto(this.dataset.kind,+this.dataset.i)" title="Махни" style="position:absolute;top:-6px;right:-6px;border:none;background:#dc2626;color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;line-height:18px;padding:0;cursor:pointer;">✕</button></span>';
+  }).concat(sdPaPending.map(function(f, i){
+    return '<span class="sdpa-ph" data-kind="new" style="position:relative;display:inline-block;margin:3px 6px 0 0;">' +
+      (f.preview ? '<img src="' + escVal(f.preview) + '" alt="" style="' + SD_PA_TH + '">' : '<span style="display:inline-flex;align-items:center;justify-content:center;' + SD_PA_TH + 'font-size:10px;color:#64748b;overflow:hidden;">' + esc(f.name) + '</span>') +
+      '<button type="button" class="sdpa-ph-x" data-kind="new" data-i="' + i + '" onclick="sdPaRmPhoto(this.dataset.kind,+this.dataset.i)" title="Махни" style="position:absolute;top:-6px;right:-6px;border:none;background:#dc2626;color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;line-height:18px;padding:0;cursor:pointer;">✕</button></span>';
+  })).join('');
+  return h || '<span style="font-size:12px;color:#94a3b8;">Няма снимки</span>';
+}
+function sdPaPhotoRefresh(){ var el = document.getElementById('sdpa-ph-list'); if(el) el.innerHTML = sdPaPhotoListHtml(); }
+function sdPaPhotoFieldsHtml(line, rep){
+  sdPaSrcOffer = line ? sdPaSrcFilesFor(line, rep) : [];
+  var h = '<div id="sdpa-ph-box" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin:4px 0 8px;">' +
+    '<div style="display:flex;align-items:center;gap:8px;"><b style="font-size:12.5px;">📷 Снимки и етикети</b>' +
+    '<label style="margin-left:auto;border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:6px;padding:3px 9px;font-size:12px;font-weight:600;cursor:pointer;">📷 Добави снимка' +
+    '<input type="file" id="sdpa-ph-input" accept="image/*" multiple style="display:none;" onchange="sdPaAddPhotos(this)"></label></div>' +
+    '<div id="sdpa-ph-list" style="margin-top:4px;">' + sdPaPhotoListHtml() + '</div>';
+  if(sdPaSrcOffer.length){
+    h += '<div id="sdpa-src-box" style="margin-top:8px;"><div style="font-size:12px;font-weight:700;color:#475569;">Снимки от бланката</div>' +
+      sdPaSrcOffer.map(function(f, i){
+        return '<label style="display:inline-flex;flex-direction:column;align-items:center;margin:3px 6px 0 0;cursor:pointer;">' +
+          '<img src="' + escVal(f.url) + '" alt="" style="' + SD_PA_TH + '"><input type="checkbox" class="sdpa-src-ph" data-i="' + i + '" checked></label>';
+      }).join('') + '</div>';
+  }
+  return h + '</div>';
+}
+function sdPaAddPhotos(input){
+  var files = Array.prototype.slice.call((input && input.files) || []);
+  if(input) input.value = '';
+  files.forEach(function(file){
+    var item = { file: file, name: file.name, preview: '' };
+    sdPaPending.push(item);
+    try{
+      var rd = new FileReader();
+      rd.onload = function(e){ item.preview = e.target.result; sdPaPhotoRefresh(); };
+      rd.readAsDataURL(file);
+    }catch(e){}
+  });
+  sdPaPhotoRefresh();
+}
+function sdPaRmPhoto(kind, i){
+  if(kind === 'saved'){ var f = sdPaPhotos.splice(i, 1)[0]; if(f) sdPaRemoved.push(f); }
+  else sdPaPending.splice(i, 1);
+  sdPaPhotoRefresh();
+}
+/* ── „✅ Приключи реда с това указание“ (27.11.2026) ──
+   Само при запис от ред и само ако потребителят има правото на бутона
+   „✅ Приключи (от свое име)“ (sdCanCloseInterstore); иначе блокът го няма.
+   Другите отворени редове „грешен баркод“ със СЪЩИЯ код в същата бланка —
+   всеки със своя отметка. */
+function sdPaCloseCandidates(line, rep){
+  if(!line || !rep || !sdCanCloseInterstore(line, rep)) return [];
+  var code = sdPaCode(line.material_code);
+  return [line].concat((sdData || []).filter(function(x){
+    return x && x !== line && String(x.report_id) === String(line.report_id) && String(x.id) !== String(line.id) &&
+      String(x.difference_category || '') === 'wrong_barcode' && sdPaCode(x.material_code) === code && sdCanCloseInterstore(x, rep);
+  }));
+}
+function sdPaCloseBoxHtml(line, rep){
+  var c = sdPaCloseCandidates(line, rep);
+  if(!c.length) return '';
+  return '<div id="sdpa-close-box" style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;padding:8px 10px;margin:4px 0 8px;">' +
+    c.map(function(l, i){
+      return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin:3px 0;cursor:pointer;' + (i ? 'padding-left:18px;' : 'font-weight:600;') + '">' +
+        '<input type="checkbox" class="sdpa-close-ln" data-lid="' + escVal(String(l.id)) + '" checked> ' +
+        (i ? 'Приключи и другия ред със същия код' + (l.quantity != null ? ' · ' + esc(String(l.quantity)) + ' бр.' : '') + (l.comment ? ' · ' + esc(l.comment) : '')
+           : '✅ Приключи реда с това указание') + '</label>';
+    }).join('') + '</div>';
+}
+/* Приключва редовете един по един по пътя на бутона (sdRouteCloseApply). →
+   брой приключени; паднал → червен toast, редът остава отворен. */
+function sdPaCloseLines(ids, comment){
+  if(!ids || !ids.length) return Promise.resolve(0);
+  var okN = 0, bad = 0;
+  return ids.reduce(function(pr, lid){
+    return pr.then(function(){
+      var line = (sdData || []).filter(function(x){ return String(x.id) === String(lid); })[0];
+      var rep = line ? (diffReports || []).filter(function(r){ return String(r.id) === String(line.report_id); })[0] : null;
+      if(!line || !rep || !sdCanCloseInterstore(line, rep)){ bad++; return; }
+      return sdRouteCloseApply(line, rep, comment).then(function(r){ if(r) okN++; else bad++; });
+    });
+  }, Promise.resolve()).then(function(){
+    if(bad) toast('Записът е в регистъра, но редът не е приключен — приключете го ръчно', '#dc2626');
+    else if(okN) toast('✅ Записано и приключено');
+    return okN;
   });
 }
 function closeSDPa(id){

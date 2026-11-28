@@ -187,7 +187,7 @@ const mnPa = (h, id) => { const r = mnRow(h, id); const b = r ? r.querySelector(
     realClick(h.w, h.doc.getElementById('sdpa-save')); await settle();
     const p = paPosts(h)[0];
     ok('точно 1 POST', paPosts(h).length === 1);
-    ok('тялото — полетата на 7а + source_line_id', !!p && JSON.stringify(Object.keys(p.body).sort()) === JSON.stringify(['bulletin_on', 'bulletin_stores', 'created_by', 'material_code', 'material_name', 'note', 'photo_required', 'reads_as_code', 'reads_as_name', 'source', 'source_line_id', 'status', 'store_action', 'valid_from']), p && JSON.stringify(p.body));
+    ok('тялото — полетата на 7а + source_line_id', !!p && JSON.stringify(Object.keys(p.body).sort()) === JSON.stringify(['bulletin_on', 'bulletin_stores', 'created_by', 'material_code', 'material_name', 'note', 'photo_required', 'photos', 'reads_as_code', 'reads_as_name', 'source', 'source_line_id', 'status', 'store_action', 'valid_from']), p && JSON.stringify(p.body));
     ok('source \'diff\', source_line_id = w2, код / бележка / чете като', !!p && p.body.source === 'diff' && p.body.source_line_id === 'w2' && p.body.material_code === '77777' &&
       p.body.note === 'чете като стола' && p.body.reads_as_code === '62082' && p.body.status === 'active' && p.body.created_by === 'Миглена Павлова', p && JSON.stringify(p.body));
     h.close();

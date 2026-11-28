@@ -149,6 +149,7 @@ const TESTS = [
   'razliki-etap7a.test.js',
   'razliki-store-delete-report.test.js',
   'razliki-etap7b.test.js',
+  'razliki-registar-edno-mqsto.test.js',
   'razliki-co-findings.test.js',
   'razliki-chete-se-kato.test.js',
   'razliki-vhodyashta-palet.test.js',
