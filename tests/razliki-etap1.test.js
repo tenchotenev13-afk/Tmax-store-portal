@@ -173,6 +173,7 @@ const chipKeys = doc => typeChips(doc).map(b => b.dataset.f);
     const cp = h.doc.getElementById('diff-counterpart');
     if (cp.options.length > 1) cp.selectedIndex = 1;
     else { cp.innerHTML = '<option>ТЕСИ ООД</option>'; cp.value = 'ТЕСИ ООД'; }
+    { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
   }
   const rowsOf = h => h.doc.querySelectorAll('#diff-items .diff-item-row');
   async function submit(h) {

@@ -1,0 +1,7 @@
+# 28.11 — razliki-id-nomer
+
+- Разлики, посока Междускладов: „ВД № (вашата входяща, по избор)“ → `document_number` и „ИД № *“ (изходящата на склада) → нова колона `differences_reports.outbound_doc`. ИД задължителен (само цифри, trim; не 80… → жълто предупреждение). Доставчик / Сторна — без промяна. `llOpenDiffForItem` (loading.js): номер от цифри, започващ с 80 → `outbound_doc`; 180… и свободен текст („без документ“ — 182 реда в базата) → `document_number` както преди.
+- Показване: карта (склад — ИД първи), търсене в бланки и по редове, Excel „ИД №“, печат, имейл (тема/текст по ИД), „Действия на магазините“, модали за изтриване. Не се показва в history/today/report/bulletin/stock-returns/transit/checklist/minusi и едж функциите — там `document_number` на бланката не се чете (grep 28.11).
+- Схема: `razliki-id-nomer-schema.sql` (add column + rollback); права на ниво таблица, колонен grant не е нужен; ред в zhivko-opashka. Данни: `razliki-id-nomer-data.sql` — 20 отворени бланки с двата номера, изричен списък + rollback; 63 приключени и 40 само с ИД — непипнати.
+- Тест: нов `tests/razliki-id-nomer.test.js` (55/55, мутации 10/10); в 12 заварени теста на подаването се попълва ИД; `loading-diff-prefill` — нова снимка (машинно сверена) + „ИД празно“ за D-100; `diff-qty-guard`, `razliki-dovarshvane` (22 колони) — обновени очаквания.
+- Миграция razliki_id_nomer, версия 20261128152633, приложена 28.11 (колоната проверена в базата: text, NULL, 0 от 1427 попълнени, anon SELECT/INSERT, mirror_reader SELECT). SHA и данни — още не.

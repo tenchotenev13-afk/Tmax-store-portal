@@ -67,6 +67,7 @@ async function openForm(h, direction) {
   if (cp.options.length > 1) cp.selectedIndex = 1;
   else cp.innerHTML = '<option>ТЕСИ ООД</option>';
   h.doc.getElementById('diff-docnum').value = '180486328';
+  { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
   realClick(h.w, btn(h.doc.getElementById('diff-submit-ov'), '+ Добави артикул'));
   if (h.doc.getElementById('diff-stokova-block')) h.w.diffPendingPhotos.push({ url: 'https://x/stokova.pdf', name: 'stokova.pdf', kind: 'stokova' }); /* етап 3: стоковата е задължителна */
   const rows = h.doc.querySelectorAll('#diff-items .diff-item-row');
@@ -170,6 +171,7 @@ const lastToast = h => String(h.calls.toast[h.calls.toast.length - 1] || '');
         h.doc.querySelectorAll('#diff-items .di-cat').forEach(s => { s.value = 'excess'; });
         const cp = h.doc.getElementById('diff-counterpart');
         cp.innerHTML = '<option>Логистичен склад Търговище</option>'; cp.value = 'Логистичен склад Търговище';
+        { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
       }
       await submit(h);
       ok('[' + d + '] POST без поръчка', repPosts(h).length === 1, h.calls.toast.join(' | '));

@@ -90,6 +90,7 @@ async function openForm(h, dir, o) {
   o = o || {};
   h.w.openDiffSubmitModal();
   await setDir(h, dir);
+  { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
   const st = h.doc.getElementById('diff-store');
   if (st && !st.value) st.value = 'Враца';
   const ord = h.doc.getElementById('diff-order-num');
@@ -126,6 +127,7 @@ async function submit(h) {
     const h = formEnv();
     for (const dir of ['interstore', 'wrong_receipt']) {
       h.w.openDiffSubmitModal(); await setDir(h, dir);
+      { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
       ok(dir + ': няма „Няма входяща" и „Без документ"', !noInb(h) && !noDoc(h));
       h.w.closeDiffSubmitModal();
     }

@@ -177,6 +177,7 @@ function cpSel(doc) { return doc.getElementById('diff-counterpart'); }
     ok('стойността се приема (опцията съществува)',
       cpSel(h.doc).value === 'Логистичен склад Търговище', cpSel(h.doc).value);
     h.doc.getElementById('diff-docnum').value = '180491138';
+    { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
     h.doc.querySelector('#diff-items .di-name').value = 'БАТЕРИЯ DURACELL';
     h.doc.querySelector('#diff-items .di-qty').value = '10';
     h.doc.querySelector('#diff-items .di-qty-real').value = '8';

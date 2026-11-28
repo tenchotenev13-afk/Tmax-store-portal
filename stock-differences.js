@@ -798,10 +798,15 @@ function sdExcelRows(list){
   var xShowWh = sdWhColumnInTable(); /* както на екрана */
   var fd = function(v){ return v ? fmtDate(v) : ''; };
   var txt = function(v){ return (v===null||v===undefined) ? '' : String(v); };
+  var repOfX = function(r){ return diffReports.find(function(x){ return x.id===r.report_id; }) || {}; };
+  /* „ИД №" (razliki-id-nomer) — само когато в износа има междускладова
+     бланка; в Доставчик / Сторна колоната я няма. */
+  var xShowId = list.some(function(r){ return repOfX(r).direction==='interstore'; });
   var aoa = [['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Поръчка за връщане',
               'Дата потвърд.','Статус','Кредитно','Коментар','Коментар контролер']
              .concat(xShowWh?['Отговор на склада','Заявка ZSTR №','Към Контролинг']:[])
-             .concat(['Дата на подаване','Документ №','Дата на документ','Няма входяща','Чете се като'])];
+             .concat(['Дата на подаване','Документ №']).concat(xShowId?['ИД №']:[])
+             .concat(['Дата на документ','Няма входяща','Чете се като'])];
   list.forEach(function(r){
     var rep = diffReports.find(function(x){ return x.id===r.report_id; }) || {};
     var q = parseFloat(r.quantity);
@@ -822,7 +827,8 @@ function sdExcelRows(list){
       txt(r.comment), txt(r.resolution_comment)
     ].concat(xShowWh?[wh.join(' · '), txt(r.zstr_number).trim(), sdToCOText(r).replace(/^➡️ /,'')]:[]).concat([
       rep.created_at ? fmtDate(localDateISO(new Date(rep.created_at))) : '',
-      txt(rep.document_number),
+      txt(rep.document_number)
+    ]).concat(xShowId?[rep.direction==='interstore'?txt(rep.outbound_doc):'']:[]).concat([
       fd(rep.doc_date),
       /* Етап 4: „да" / празно - вътрешно за SAP, в имейла до доставчика не влиза. */
       rep.no_inbound ? 'да' : '',
@@ -1132,6 +1138,13 @@ function sdTableRows(over){
   var typeF   = over.hasOwnProperty('type')   ? over.type   : sdTypeFilter;
   var statusF = over.hasOwnProperty('status') ? over.status : sdFilter;
   var storeOnly = sdStoreRowsView();
+  /* Документите на бланката (ВД / ИД) за свободното търсене по редове —
+     карта, строена веднъж, не find на всеки ред. */
+  var repDocs = null;
+  if (sdSearch) {
+    repDocs = {};
+    diffReports.forEach(function(x){ repDocs[String(x.id)] = [x.document_number||'', x.outbound_doc||''].join(' '); });
+  }
   return sdData.filter(function(r) {
     /* Обектът — само редовете за действие (етап 2). Преди всички останали
        филтри: числата по чиповете, превключвателят и Excel минават оттук. */
@@ -1172,7 +1185,7 @@ function sdTableRows(over){
     if (sdStoreFilter && r.store_name !== sdStoreFilter) return false;
     if (sdSearch) {
       var q = sdSearch.toLowerCase();
-      var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.return_order_number,r.comment,r.zstr_number].join(' ').toLowerCase();
+      var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.return_order_number,r.comment,r.zstr_number,(repDocs&&repDocs[String(r.report_id)])||''].join(' ').toLowerCase();
       if (hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -2882,6 +2895,7 @@ function sdDeleteReport(reportId){
     'Обект: '+(rep.store_name||'—')+'\n'+
     'Доставчик/насрещна страна: '+(rep.counterpart||'—')+'\n'+
     'Документ №: '+(rep.document_number||'—')+'\n'+
+    (rep.direction==='interstore'&&rep.outbound_doc?'ИД №: '+rep.outbound_doc+'\n':'')+
     'Дата: '+fmtDate(rep.doc_date)+'\n'+
     'Редове: '+lines.length+'\n'+
     'Файлове: '+urls.length)) return;
@@ -3020,7 +3034,7 @@ function sdStoreDeleteReport(reportId){
   var h = '<div class="bov open" id="sdsd-ov"><div class="bmod" style="width:460px;">'+
     '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">🗑 Изтриване на бланката</div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+esc(rep.store_name||'')+' · '+esc(rep.counterpart||'')+
-      (rep.document_number?' · Док. '+esc(rep.document_number):'')+' · '+fmtDate(rep.doc_date)+'</div>'+
+      diffDocLabelParts(rep, false).map(function(x){ return ' · '+x; }).join('')+' · '+fmtDate(rep.doc_date)+'</div>'+
     '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:9px 12px;font-size:12.5px;color:#991b1b;">Бланката и снимките ѝ ще бъдат изтрити окончателно. Ползвайте само ако е подадена по грешка.</div>'+
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">'+
     '<button onclick="closeSDStoreDelModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
@@ -4660,6 +4674,11 @@ function sdCollectActions(){
   out.sort(function(a,b){ return b.ms - a.ms; });
   return out;
 }
+/* ИД № на бланката в реда на „Действия на магазините" (складът търси по него). */
+function sdActionsIdHtml(repId){
+  var rp = repId!=null ? diffReports.find(function(x){ return String(x.id)===String(repId); }) : null;
+  return rp && rp.outbound_doc ? ' · <span class="sd-act-id">ИД '+esc(rp.outbound_doc)+'</span>' : '';
+}
 function sdActionsCard(){
   if(!isLogisticsWarehouseUser()) return '';
   var items = sdCollectActions();
@@ -4681,7 +4700,7 @@ function sdActionsCard(){
   h += '<div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;">';
   items.forEach(function(it){
     h += '<button data-rid="'+esc(String(it.repId||''))+'" onclick="sdActionsGoto(this.dataset.rid)" style="text-align:left;border:1px solid #e2e8f0;background:#fff;border-radius:6px;padding:5px 8px;font-size:11.5px;cursor:pointer;color:'+(it.red?'#dc2626':'#334155')+';'+(it.red?'font-weight:600;':'')+'">'+
-      '<b>'+esc(it.who||'')+'</b> · '+esc(it.what||'')+
+      '<b>'+esc(it.who||'')+'</b>'+sdActionsIdHtml(it.repId)+' · '+esc(it.what||'')+
       ' <span style="color:#94a3b8;font-weight:400;">· '+sdFmtDateTime(it.at)+'</span></button>';
   });
   return h+'</div></div>';
@@ -4721,7 +4740,7 @@ function sdFilteredReports(){
     var qRep = sdSearch.toLowerCase();
     unreviewed = unreviewed.filter(function(r){
       var lines = sdReportLinesShown(r);
-      var hay = [r.store_name,r.counterpart,r.document_number,r.general_comment,r.submitted_by]
+      var hay = [r.store_name,r.counterpart,r.document_number,r.outbound_doc,r.general_comment,r.submitted_by]
         .concat(lines.map(function(l){ return [l.material_code,l.material_name,l.comment,l.resolution_comment,l.zstr_number].join(' '); }))
         .join(' ').toLowerCase();
       return hay.indexOf(qRep) !== -1;
@@ -4816,7 +4835,9 @@ function renderDiffReportsSection(){
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+
          /* Кога е подадена бланката - за всички роли (етап 3, 16.11.2026). */
          (rep.created_at?'<span class="sd-rep-submitted"> · подадена '+sdFmtDateTimeFull(rep.created_at)+'</span>':'')+
-         (rep.document_number?' · Док. '+esc(rep.document_number):'')+
+         /* ИД / ВД (razliki-id-nomer): междускладов с ИД → двата номера,
+            при склада ИД първи; иначе „Док. …“ както преди. */
+         diffDocLabelParts(rep, isLogisticsWarehouseUser()).map(function(x){ return ' · <span class="sd-rep-doc">'+x+'</span>'; }).join('')+
          /* „Поръчка" - от редовете, само ако е ЕДНА И СЪЩА за всички. */
          (function(){
            var ords=lines.map(function(l){ return String(l.order_number||'').trim(); });
@@ -5083,7 +5104,7 @@ function openSDMoveModal(rid){
   var h = '<div class="bov open" id="sdm-ov"><div class="bmod" style="width:560px;max-height:88vh;overflow-y:auto;">'+
     '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+(toWr?'🧾 Премести в „Сторна по грешен прием"':'📦 Върни в „Разлики от доставчици"')+'</div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+esc(rep.store_name||'')+' · '+esc(rep.counterpart||'')+
-      (rep.document_number?' · Док. '+esc(rep.document_number):'')+' · подадена '+fmtDate(rep.created_at)+'</div>';
+      diffDocLabelParts(rep, false).map(function(x){ return ' · '+x; }).join('')+' · подадена '+fmtDate(rep.created_at)+'</div>';
   if(rep.email_sent_at) h += '<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11.5px;color:#9a3412;">⚠️ Имейл до доставчика вече е изпратен на '+sdFmtDateTime(rep.email_sent_at)+'.</div>';
   if(rep.reviewed) h += '<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11.5px;color:#9a3412;">⚠️ Бланката вече е прегледана.</div>';
   h += '<div style="font-size:11.5px;color:#475569;margin-bottom:10px;">📅 Остава в седмицата на подаването'+(wk?' (седмица '+wk+')':'')+' — отчетът и чек листът броят по нея.</div>';
@@ -5569,6 +5590,31 @@ function diffQtyDocNumMsg(value){ return 'количеството прилич�
 function diffOrderNumValid(v){
   return /^4[13]\d{8}$/.test(String(v==null?'':v).trim());
 }
+/* ИД № — изходящата доставка на склада (80…), отделно от ВД № на обекта
+   (180…, document_number). Само при междускладов; задължителна за нови
+   бланки (решение на Тенчо 28.11.2026, razliki-id-nomer). Интервали отпред и
+   отзад се режат; вътре — не (тогава не е „само цифри“). Не започва ли с 80 —
+   жълто предупреждение, не спиране. */
+function diffOutboundNorm(v){ return String(v==null?'':v).trim(); }
+function diffOutboundValid(v){ return /^\d+$/.test(diffOutboundNorm(v)); }
+function diffOutboundOdd(v){ v=diffOutboundNorm(v); return diffOutboundValid(v) && v.indexOf('80')!==0; }
+function diffOutboundWarn(el){
+  var w=document.getElementById('diff-outbound-warn');
+  if(!w || !el) return;
+  w.textContent = diffOutboundOdd(el.value) ? '⚠️ Изходящата доставка на склада обикновено започва с 80 — провери номера' : '';
+}
+/* Документите на бланката за показване (вече escape-нати):
+   междускладов с ИД → „ИД 80478143“ и „ВД 180514303“ (whFirst — складът: ИД
+   първи; иначе ВД първи); без ИД → „Док. …“ както преди. Празните се
+   пропускат. outbound_doc се гледа само при междускладов. */
+function diffDocLabelParts(rep, whFirst){
+  if(!rep) return [];
+  var id = rep.direction==='interstore' && rep.outbound_doc ? 'ИД '+esc(rep.outbound_doc) : '';
+  if(!id) return rep.document_number ? ['Док. '+esc(rep.document_number)] : [];
+  var vd = rep.document_number ? 'ВД '+esc(rep.document_number) : '';
+  var parts = whFirst ? [id, vd] : [vd, id];
+  return parts.filter(Boolean);
+}
 function diffRowQtyLikeDocNum(){
   var rows=document.querySelectorAll('#diff-items .diff-item-row');
   for(var i=0;i<rows.length;i++){
@@ -5810,8 +5856,11 @@ function diffSubmitModalHtml(){
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
     '<div><label class="fl" id="diff-counterpart-label">Обект изпращач</label><select class="fi" id="diff-counterpart"></select></div>'+
-    '<div><label class="fl">Документ №</label><input class="fi" id="diff-docnum" placeholder="вх. доставка 180486328 или документ 4600179694"></div>'+
+    '<div><label class="fl" id="diff-docnum-label">ВД № <span style="color:#94a3b8;font-weight:400;">(вашата входяща, по избор)</span></label><input class="fi" id="diff-docnum" placeholder="180486328"></div>'+
     '</div>'+
+    /* ИД № (изходящата на склада) — рисува се от updateDiffCounterpartLabel()
+       само при междускладов; при другите посоки полето го няма в DOM-а. */
+    '<div id="diff-outbound-wrap"></div>'+
     /* Отметката "без документ" се рисува тук от updateDiffCounterpartLabel() -
        само при посока доставчик. Празен контейнер значи, че при останалите
        посоки <input> изобщо не съществува, а не просто е скрит. */
@@ -5890,6 +5939,28 @@ function updateDiffCounterpartLabel(){
     var newOrderEl=document.getElementById('diff-order-num');
     if(newOrderEl) newOrderEl.value=noDocWrap.getAttribute('data-order-num')||'';
   }
+  /* ИД № / ВД № (razliki-id-nomer, 28.11.2026): при междускладов две полета —
+     ВД (вашата входяща, document_number, по избор) и ИД (изходящата на склада,
+     outbound_doc, задължителна). Доставчик и сторна — едно „Документ №“ както
+     преди. Въведеният ИД се пази в data-outbound при смяна на посоката. */
+  var docLbl=document.getElementById('diff-docnum-label');
+  var docEl=document.getElementById('diff-docnum');
+  if(docLbl) docLbl.innerHTML = dir==='interstore'
+    ? 'ВД № <span style="color:#94a3b8;font-weight:400;">(вашата входяща, по избор)</span>'
+    : 'Документ №';
+  if(docEl) docEl.setAttribute('placeholder', dir==='interstore' ? '180486328' : 'вх. доставка 180486328 или документ 4600179694');
+  var obWrap=document.getElementById('diff-outbound-wrap');
+  if(obWrap){
+    var oldOb=document.getElementById('diff-outbound');
+    if(oldOb) obWrap.setAttribute('data-outbound',oldOb.value);
+    obWrap.innerHTML = dir==='interstore'
+      ? '<div style="margin-bottom:8px;"><label class="fl">ИД № * <span style="color:#94a3b8;font-weight:400;">(изходящата доставка на склада, 80…)</span></label>'+
+          '<input class="fi" id="diff-outbound" inputmode="numeric" placeholder="напр. 80478143" style="max-width:220px;" oninput="diffOutboundWarn(this)">'+
+          '<div id="diff-outbound-warn" style="font-size:11.5px;color:#b45309;margin-top:3px;"></div></div>'
+      : '';
+    var newOb=document.getElementById('diff-outbound');
+    if(newOb){ newOb.value=obWrap.getAttribute('data-outbound')||''; diffOutboundWarn(newOb); }
+  }
   diffStokovaBlockSync(dir);
   /* Сторната по грешен прием също тръгва от фактура на ДОСТАВЧИК - списъкът е
      същият като при посока "Доставчик", не списъкът с обекти. */
@@ -5929,8 +6000,9 @@ function updateDiffCounterpartLabel(){
 }
 
 /* prefill (по избор) — предварително попълнена бланка, подадена отвън:
-     {direction, counterpart, document_number, doc_date, comment,
+     {direction, counterpart, document_number, outbound_doc, doc_date, comment,
       items:[{sap,name,qty}]}
+   outbound_doc = ИД № (изходящата на склада) — само при междускладов.
    Днес единственият ѝ ползвател е бутонът „⚠️ Разлика" по неполучен палет в
    Товарни листи (llOpenDiffForItem в loading.js): магазинът вече е описал
    веднъж какво е получил и няма смисъл да преписва склада, документа и
@@ -5970,6 +6042,9 @@ function openDiffSubmitModal(prefill){
     if(cpEl && prefill.counterpart) cpEl.setAttribute('data-want',prefill.counterpart);
     setVal('diff-counterpart',prefill.counterpart);
     setVal('diff-docnum',prefill.document_number);
+    /* ИД № — полето съществува само при междускладов. */
+    setVal('diff-outbound',prefill.outbound_doc);
+    var obPre=document.getElementById('diff-outbound'); if(obPre) diffOutboundWarn(obPre);
     /* Обектът - само ако е сред опциите (собственият обект е скрито поле). */
     setVal('diff-store',prefill.store_name);
     /* Полето съществува само при доставчик и сторна - при междускладов setVal
@@ -6715,6 +6790,15 @@ function submitDiffReport(){
     toast(direction==='interstore'?'Избери склад изпращач':'Избери доставчик','#dc2626');
     return;
   }
+  /* ИД № (изходящата на склада) — задължителна при междускладов, само цифри
+     (razliki-id-nomer, 28.11.2026). При другите посоки полето го няма. */
+  var obEl=document.getElementById('diff-outbound');
+  var outboundDoc=direction==='interstore' && obEl ? diffOutboundNorm(obEl.value) : '';
+  if(direction==='interstore' && !diffOutboundValid(outboundDoc)){
+    toast(outboundDoc?'ИД №: само цифри (изходящата доставка на склада, 80…)':'Впиши ИД № — изходящата доставка на склада (80…)','#dc2626');
+    if(obEl) obEl.focus();
+    return;
+  }
   /* „🟫 Входяща за палет": избран палет, брой палети цяло > 0, списъкът
      прочетен - иначе нищо не се записва. Преди проверката за наименование:
      ред без избран палет е с празно име и иначе би казал „впиши наименование". */
@@ -6817,6 +6901,8 @@ function submitDiffReport(){
     store_name:store,
     counterpart:counterpart,
     document_number:document.getElementById('diff-docnum').value.trim(),
+    /* ИД № — само при междускладов; иначе null. */
+    outbound_doc:direction==='interstore' ? outboundDoc : null,
     doc_date:document.getElementById('diff-docdate').value||null,
     submitted_by:currentUser.display_name||currentUser.email,
     general_comment:document.getElementById('diff-comment').value.trim(),
@@ -7057,7 +7143,11 @@ function diffEmailBodyHtml(rep,lines,note){
   h+='<p>Здравейте,</p>';
   h+='<p>Установени са разлики при '+diffDirEmailPhrase(rep.direction)+' — '+esc(rep.counterpart||'')+
      /* „Без документ" + поръчка → и двете: доставчикът познава само поръчката. */
-     (rep.no_document?', документ: няма (стока без документ)'+(ord?', поръчка №'+esc(ord):''):(ord?', поръчка №'+esc(ord):(rep.document_number?', документ №'+esc(rep.document_number):'')))+
+     (rep.no_document?', документ: няма (стока без документ)'+(ord?', поръчка №'+esc(ord):''):(ord?', поръчка №'+esc(ord):
+       /* Междускладов с ИД (razliki-id-nomer): складът търси по своята
+          изходяща — тя е първа, ВД на обекта след нея. */
+       (rep.direction==='interstore'&&rep.outbound_doc?', изходяща доставка (ИД) №'+esc(rep.outbound_doc)+(rep.document_number?', входяща (ВД) №'+esc(rep.document_number):''):
+       (rep.document_number?', документ №'+esc(rep.document_number):''))))+
      (rep.doc_date?', дата '+fmtDate(rep.doc_date):'')+'.</p>';
   var isSupplier=rep.direction==='supplier';
   h+='<table style="width:100%;border-collapse:collapse;font-size:13px;margin:14px 0;">';
@@ -7105,7 +7195,8 @@ function diffEmailBodyHtml(rep,lines,note){
 
 function diffEmailModalHtml(rep,lines){
   /* Поръчката вместо входящата при доставчик — същата функция като текста. */
-  var subjNum=diffReportOrderNum(rep,lines)||rep.document_number;
+  /* Междускладов с ИД — темата е по ИД (складът търси по него). */
+  var subjNum=diffReportOrderNum(rep,lines)||(rep.direction==='interstore'&&rep.outbound_doc)||rep.document_number;
   var subject=(subjNum?subjNum+' - ':'')+'РАЗЛИКИ ('+esc(rep.store_name||'')+')';
   return '<div class="bov" id="diff-email-ov"><div class="bmod" style="width:680px;max-height:90vh;overflow-y:auto;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
@@ -7456,7 +7547,10 @@ function renderDiffPrint(rep){
         '<div class="dp-sub">'+diffDirPrintSub(rep.direction)+'</div>'+
         '<table class="dp-meta">'+
           '<tr><td>'+diffDirCounterpartLabel(rep.direction)+':</td><td>'+esc(rep.counterpart||'—')+'</td></tr>'+
-          '<tr><td>Документ №:</td><td>'+(rep.no_document?'няма (стока без документ)':esc(rep.document_number||'—'))+'</td></tr>'+
+          (rep.direction==='interstore'&&rep.outbound_doc
+            ? '<tr class="dp-id"><td>ИД №:</td><td>'+esc(rep.outbound_doc)+'</td></tr>'+
+              '<tr><td>ВД №:</td><td>'+esc(rep.document_number||'—')+'</td></tr>'
+            : '<tr><td>Документ №:</td><td>'+(rep.no_document?'няма (стока без документ)':esc(rep.document_number||'—'))+'</td></tr>')+
           (rep.no_inbound?'<tr class="dp-noinb"><td>Входяща доставка:</td><td>📭 няма в системата</td></tr>':'')+
           '<tr><td>Дата на документа:</td><td>'+fmtDate(rep.doc_date)+'</td></tr>'+
           '<tr><td>Подал:</td><td>'+esc(rep.submitted_by||'—')+'</td></tr>'+

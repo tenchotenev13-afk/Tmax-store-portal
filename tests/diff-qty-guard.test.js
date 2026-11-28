@@ -115,7 +115,9 @@ function mainCell(doc, name) {
     ok('[' + d + '] „Реално получено" съдържа „бр."', !!r && r.indexOf('бр.') >= 0, JSON.stringify(r));
     const dn = ph(h.doc, '#diff-docnum');
     ok('[' + d + '] „Документ №" съдържа 180486328', !!dn && dn.indexOf(VD) >= 0, JSON.stringify(dn));
-    ok('[' + d + '] „Документ №" пази и 4600179694', !!dn && dn.indexOf('4600179694') >= 0, JSON.stringify(dn));
+    /* razliki-id-nomer (28.11.2026): при междускладов полето е „ВД №“ само за
+       входящата (180…) — номерът на документ от доставчик там няма място. */
+    if (d !== 'interstore') ok('[' + d + '] „Документ №" пази и 4600179694', !!dn && dn.indexOf('4600179694') >= 0, JSON.stringify(dn));
     const all = Array.from(h.doc.querySelectorAll('#diff-submit-ov [placeholder]')).map(e => e.getAttribute('placeholder'));
     ok('[' + d + '] нито една подсказка в модала не е „' + OLD_DOC + '"',
       all.length > 0 && all.every(p => p.indexOf(OLD_DOC) < 0), JSON.stringify(all));

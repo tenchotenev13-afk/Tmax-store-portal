@@ -1696,11 +1696,18 @@ function llOpenDiffForItem(itemId){
   var nested = llNestedGroups(it.nested_codes);
   if(nested.length) comment += ' Стока в стока: ' + nested.map(function(g){ return g.join('/'); }).join('; ') + '.';
 
+  /* ИД № / ВД № (razliki-id-nomer, 28.11.2026): номерът на реда е изходящата
+     на склада (80…, база 28.11: 3609 от 3814 реда) → „ИД №“. Всичко друго —
+     свободен текст („без документ“, „Стар …“, 182 реда) или входяща 180… —
+     остава в „ВД / Документ №“ както преди, иначе текстът би спрял подаването
+     със „само цифри“. */
+  var docIsId = /^80\d+$/.test(String(doc || '').trim());
   var open = function(items){
     openDiffSubmitModal({
       direction: 'interstore',
       counterpart: (l && l.warehouse) || '',
-      document_number: doc || '',
+      outbound_doc: docIsId ? String(doc).trim() : '',
+      document_number: docIsId ? '' : (doc || ''),
       doc_date: (l && l.list_date) || '',
       comment: comment,
       items: items

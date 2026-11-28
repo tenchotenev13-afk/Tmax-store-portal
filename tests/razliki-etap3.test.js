@@ -92,6 +92,7 @@ async function setDir(h, dir) {
 async function openForm(h, dir, code) {
   h.w.openDiffSubmitModal();
   await setDir(h, dir);
+  { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
   const st = h.doc.getElementById('diff-store');
   if (st && !st.value) st.value = 'Враца';
   const ord = h.doc.getElementById('diff-order-num');

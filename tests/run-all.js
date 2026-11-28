@@ -153,6 +153,7 @@ const TESTS = [
   'razliki-etap7b.test.js',
   'razliki-registar-edno-mqsto.test.js',
   'razliki-co-findings.test.js',
+  'razliki-id-nomer.test.js',
   'razliki-chete-se-kato.test.js',
   'razliki-vhodyashta-palet.test.js',
   'bulletin-problem-articles.test.js',

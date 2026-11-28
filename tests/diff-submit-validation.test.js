@@ -52,6 +52,7 @@ async function submit(h) {
   await ticks();
   const cp = h.doc.getElementById('diff-counterpart');
   if (cp && !cp.value && cp.options.length > 1) cp.selectedIndex = 1;
+  { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
   const ov = h.doc.getElementById('diff-submit-ov');
   const b = btn(ov, 'Изпрати') || btn(ov, 'Подай');
   realClick(h.w, b);

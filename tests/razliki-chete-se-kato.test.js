@@ -107,6 +107,7 @@ const correctBtns = el => el ? Array.prototype.filter.call(el.querySelectorAll('
     const sel = h.doc.getElementById('diff-direction');
     if (sel.value !== 'interstore') { sel.value = 'interstore'; fire(h.w, sel, 'change'); await settle(); }
     h.doc.getElementById('diff-counterpart').value = WH;
+    { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
     const st = h.doc.getElementById('diff-store'); if (st && !st.value) st.value = 'Петрич';
   }
 

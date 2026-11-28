@@ -66,8 +66,15 @@ const crypto = require('crypto');
    едно срещане и нищо друго: без него HTML-ът е байт по байт старата снимка
    143bcbf3… (6608), проверено машинно. Падащото „Палет на *“ се появява само
    при тази категория — виж razliki-vhodyashta-palet.test.js. */
-const MODAL_SHA = '1b7fae2acc0848918736a056c8961efbfedd26fda87ddf076b1eedf2587bb6e4';
-const MODAL_LEN = 6642;
+/* Обновена на 28.11.2026 (6642 -> 7129): ИД № / ВД № при междускладов
+   (razliki-id-nomer) — три неща и нищо друго:
+     етикетът на diff-docnum „Документ №“ -> id="diff-docnum-label" + „ВД № (вашата
+       входяща, по избор)“; подсказката -> „180486328“;
+     нов <div id="diff-outbound-wrap"> с полето „ИД № *“ (428 знака).
+   Без тях HTML-ът е байт по байт старата снимка 1b7fae2a… (6642), проверено
+   машинно. Виж razliki-id-nomer.test.js. */
+const MODAL_SHA = 'cfd6bdaad62f48ec7044b01ed2f86a0e116016e91274b03ac8f9e0b0971dd146';
+const MODAL_LEN = 7129;
 
 const WH = 'Логистичен склад Търговище';
 const STORE = { email: 'petrich@temax.bg', display_name: 'Управител Петрич',
@@ -184,8 +191,11 @@ function rows(doc) {
           val(h.doc, 'diff-direction'));
         ok('изпращачът е складът от листа', val(h.doc, 'diff-counterpart') === WH,
           val(h.doc, 'diff-counterpart'));
+        /* razliki-id-nomer: „D-100“ не е изходяща 80… → остава в „ВД / Документ №“
+           както преди; „ИД №“ — празно. ИД (80…) е покрит в razliki-id-nomer.test.js. */
         ok('документът е D-100', val(h.doc, 'diff-docnum') === 'D-100',
           val(h.doc, 'diff-docnum'));
+        ok('ИД остава празно (D-100 не е 80…)', val(h.doc, 'diff-outbound') === '', val(h.doc, 'diff-outbound'));
         ok('датата е на товарния лист', val(h.doc, 'diff-docdate') === '2026-09-02',
           val(h.doc, 'diff-docdate'));
 
@@ -247,7 +257,7 @@ function rows(doc) {
     ok('бланката е отворена', !!modal(h.doc));
     ok('един празен ред', rows(h.doc).length === 1 && rows(h.doc)[0].name === '',
       JSON.stringify(rows(h.doc)));
-    ok('документът е празен', val(h.doc, 'diff-docnum') === '', val(h.doc, 'diff-docnum'));
+    ok('документът е празен', val(h.doc, 'diff-docnum') === '' && val(h.doc, 'diff-outbound') === '', val(h.doc, 'diff-docnum') + '|' + val(h.doc, 'diff-outbound'));
     const c = val(h.doc, 'diff-comment');
     ok('коментарът казва „без документ"', c.indexOf('стокова № без документ') >= 0, c);
     /* llKindLabel() дава „насип" с малка буква — вътре в изречението е точно

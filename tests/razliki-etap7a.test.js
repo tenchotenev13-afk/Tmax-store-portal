@@ -268,6 +268,7 @@ const setV = (h, id, v) => { const el = h.doc.getElementById(id); if (el) el.val
     const cp = h.doc.getElementById('diff-counterpart');
     if (cp && !cp.value && cp.options.length > 1) cp.selectedIndex = 1;
     const dn = h.doc.getElementById('diff-docnum'); if (dn) dn.value = 'Т-123';
+    { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
     const row = h.doc.querySelector('#diff-items .diff-item-row');
     row.querySelector('.di-sap').value = '62081';
     row.querySelector('.di-name').value = 'СТОЛ';

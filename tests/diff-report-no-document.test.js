@@ -50,6 +50,7 @@ async function openForm(h, direction) {
   await ticks();
   const cp = h.doc.getElementById('diff-counterpart');
   if (cp && !cp.value && cp.options.length > 1) cp.selectedIndex = 1;
+  { const _ob = h.doc.getElementById('diff-outbound'); if (_ob) _ob.value = '80478143'; } /* razliki-id-nomer: ИД № задължителен при междускладов */
   /* „Поръчка №" (41…) е задължителна при посока доставчик от 29.09.2026 —
      покрита в diff-order-required.test.js; тук само валидна стойност. */
   const ord = h.doc.getElementById('diff-order-num');
