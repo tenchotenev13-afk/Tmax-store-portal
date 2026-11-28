@@ -47,6 +47,23 @@ export type ChangeRow = {
   id: string; month_id: string; staff_id: string; day: number; planned_letter: string | null; planned_code: string | null;
   actual: string; reason: string; trip_store?: string | null; created_at?: string; created_by?: string | null; updated_at?: string; updated_by?: string | null;
   trz_done: boolean; trz_done_at?: string | null; trz_done_by?: string | null;
+  source?: "manual" | "daily";   // пакет 2А (миграция grafik_daily): „✎ Промени“ / „✅ Днес“
+};
+// Пакет 2А — дневна присъствена „✅ Днес“ (grafik_daily / grafik_daily_marks, миграция grafik_daily).
+export type DailyRow = {
+  id: string; store_name: string; month_id: string; day: string; marked_by: string; marked_by_name: string | null; marked_at: string; late: boolean;
+  updated_by?: string | null; updated_by_name?: string | null; updated_at?: string | null;
+  corrected_by?: string | null; corrected_by_name?: string | null; corrected_at?: string | null; correct_reason?: string | null;
+};
+export type MarkRow = {
+  staff_id: string; planned_letter: string | null; state: string; actual: string | null; trip_store: string | null; note: string | null;
+  change_id?: string | null; marked_by?: string | null; marked_at?: string;
+};
+export type DailySave = {
+  store_name: string; month_id: string; day: string; actor: string; actor_name: string; late: boolean; correction: { reason: string } | null;
+  changes_delete: string[];
+  changes_upsert: { staff_id: string; planned_letter: string; planned_code: string; actual: string; reason: string; trip_store: string | null }[];
+  marks: MarkRow[];
 };
 // Ролята в модула (grafik_access.list, решение на Тенчо 27.11.2026): view — всички обекти, само четене;
 // trz — подадените, одобрява; edit — пише по правата си в портала. „beta“ — старото име на edit
@@ -76,6 +93,10 @@ export interface Repo {
   insertChange(fields: Record<string, unknown>): Promise<ChangeRow>;
   updateChange(id: string, fields: Record<string, unknown>): Promise<ChangeRow | null>;
   deleteChange(id: string): Promise<boolean>;
+  // Пакет 2А: денят на обекта, отметките му и записът (функцията grafik_daily_save — една транзакция).
+  getDaily(store: string, day: string): Promise<DailyRow | null>;
+  listMarks(dailyId: string): Promise<MarkRow[]>;
+  dailySave(p: DailySave): Promise<string>;
   listAccess(): Promise<AccessRow[]>;
   insertAccess(fields: Record<string, unknown>): Promise<AccessRow>;
   updateAccess(id: string, fields: Record<string, unknown>): Promise<AccessRow | null>;
@@ -529,6 +550,135 @@ export function staleChanges(changes: ChangeRow[], staff: Staff[], start: string
   });
 }
 
+// ── Дневна присъствена „✅ Днес“ (пакет 2А, план и решения на Тенчо 27.11.2026) ──────────────
+// Обектът отбелязва днес и STORE_BACK_DAYS дни назад (минал ден → „късно“); регионален / admin —
+// всеки ден на месеца до днес, извън прозореца на обекта — с основание (корекция). Бъдещ ден — никой.
+// Същият прозорец важи за обекта и в „✎ Промени“ (решение 2) — иначе заключването е само на вид.
+// Отклонението от графика е ред в grafik_changes (source 'daily'); „неуточнено“ — само отметка.
+export const STORE_BACK_DAYS = 2;
+export function sofiaToday(nowS: number): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Sofia", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(nowS * 1000));
+}
+export function shiftDate(d: string, n: number): string {
+  const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10);
+}
+// „Офисът“ — регионалният (своите обекти) и admin; другите с право на запис са обектът (manager).
+export const isOffice = (a: Access) => a.kind === "admin" || a.kind === "regional";
+export function inStoreWindow(date: string, today: string): boolean {
+  return date <= today && date >= shiftDate(today, -STORE_BACK_DAYS);
+}
+function ddmm(date: string): string { return date.slice(8, 10) + "." + date.slice(5, 7); }
+export function windowMessage(today: string): string {
+  return "Обектът отбелязва и променя само днес и " + STORE_BACK_DAYS + " дни назад (" + ddmm(shiftDate(today, -STORE_BACK_DAYS)) + "–" + ddmm(today) + "). По-старите дни — регионалният или admin.";
+}
+// Смяна по график: работна буква (вкл. К — командировка) или свободни часове.
+export const DAILY_ON_SHIFT = ["ЛД", "ЗД", "П", "В", "М", "К"];
+export const DAILY_WORK = ["ЛД", "ЗД", "П", "В", "М"];
+export const DAILY_ABSENT = ["Б", "О", "Н", "Д", "А", "С", "Майч", "почивка"];
+export const DAILY_STATES = ["present", "absent", "unknown", "other_shift", "trip", "extra", "off"];
+export const DAILY_LABEL: Record<string, string> = {
+  Б: "болничен", О: "платен отпуск", Н: "неплатен отпуск", Д: "държавни задължения", А: "с разрешение на администрацията",
+  С: "самоотлъчка", Майч: "майчинство", почивка: "почивка", К: "командировка",
+};
+export function onShift(planned: string): boolean { return DAILY_ON_SHIFT.indexOf(planned) >= 0 || HOURS_RE.test(planned); }
+// Какво „реално“ дава отметката (null — без отклонение от графика или неуточнено).
+export function markActual(m: { state: string; actual?: string | null }, planned: string): string | null {
+  const a = m.state === "trip" ? "К" : (m.state === "absent" || m.state === "other_shift" || m.state === "extra") ? (m.actual || null) : null;
+  return a && !sameAsPlanned(a, planned) ? a : null;
+}
+// Проверка на една отметка спрямо смяната по график. Връща текст на грешката или null.
+export function markError(m: Record<string, unknown>, planned: string): string | null {
+  const st = m.state, a = typeof m.actual === "string" ? m.actual : "";
+  if (typeof st !== "string" || DAILY_STATES.indexOf(st) < 0) return "непознато отбелязване";
+  if (m.note !== undefined && m.note !== null && (typeof m.note !== "string" || m.note.length > 200)) return "бележката е до 200 знака";
+  const on = onShift(planned);
+  if ((st === "present" || st === "unknown" || st === "other_shift") && !on) return "не е на смяна по график";
+  if ((st === "off" || st === "extra") && on) return "на смяна е по график";
+  if (st === "absent" && DAILY_ABSENT.indexOf(a) < 0) return "причината е една от: " + DAILY_ABSENT.join(", ");
+  if ((st === "other_shift" || st === "extra") && DAILY_WORK.indexOf(a) < 0) return "смяната е една от: " + DAILY_WORK.join(", ");
+  if (st === "other_shift" && a === planned) return "това е смяната по график — „Дошъл“";
+  if (st === "trip" && !(typeof m.trip_store === "string" && m.trip_store.trim())) return "избери обекта на командировката";
+  return null;
+}
+// Основанието на реда в „Промени“: „Дневна присъствена — болничен: бележка“.
+export function dailyReason(actual: string, note: unknown): string {
+  const lbl = DAILY_LABEL[actual] || "смяна " + actual;
+  const n = typeof note === "string" ? note.trim().replace(/\s+/g, " ") : "";
+  return ("Дневна присъствена — " + lbl + (n ? ": " + n : "")).slice(0, 300);
+}
+function needDate(v: unknown, m: { start: string; end: string }): string {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v) || v < m.start || v > m.end || shiftDate(v, 0) !== v) throw new HttpError(400, "bad_request", "Денят не е в месеца.");
+  return v;
+}
+// Хората за деня — от СНИМКАТА на подадения месец (персоналът може да е сменен след подаването),
+// само назначените и ненапусналите към датата; секторът и името — от персонала.
+type DailyPerson = {
+  staff_id: string; name: string; short_name: string; position: string | null; sector: string; sector_order: number; hpd: number;
+  planned_letter: string; planned_code: string; planned_legend: string | null; on_shift: boolean;
+  change: ChangeRow | null; mark: MarkRow | null;
+};
+async function dailyContext(repo: Repo, store: string, m: { start: string; end: string; days: number }, month: MonthRow, date: string) {
+  const day = +date.slice(8, 10);
+  const [staff, rows, raw, changes, daily] = await Promise.all([
+    repo.listStaff(store), repo.listRows(month.id), repo.setupRaw(store), repo.listChanges(month.id), repo.getDaily(store, date),
+  ]);
+  const marks = daily ? await repo.listMarks(daily.id) : [];
+  const setup = resolveSetup(raw, m.start, m.end);
+  const snap = (isObj(month.snapshot) && Array.isArray(month.snapshot.rows) ? month.snapshot.rows : []) as Record<string, unknown>[];
+  const byStaff: Record<string, Staff> = {}; staff.forEach((s) => { byStaff[s.id] = s; });
+  const letters: Record<string, string[]> = {}; rows.forEach((r) => { letters[r.staff_id] = r.letters || []; });
+  const secs: Record<string, { name: string; sort_order: number }> = {}; setup.sectors.forEach((x) => { secs[x.id] = x; });
+  const employed = (s: Record<string, unknown>) => !(typeof s.hired_on === "string" && date < s.hired_on) && !(typeof s.left_on === "string" && date > s.left_on);
+  const people: DailyPerson[] = [];
+  const inSnap: Record<string, boolean> = {};
+  for (const sr of snap) {
+    const sid = String(sr.staff_id), st = byStaff[sid] || {} as Staff;
+    inSnap[sid] = true;
+    if (!employed(st)) continue;
+    const L = letters[sid] || [], pl = typeof L[day - 1] === "string" ? L[day - 1] : "";
+    const code = Array.isArray(sr.codes) && typeof sr.codes[day - 1] === "string" ? sr.codes[day - 1] as string : "";
+    const cd = setup.codes.filter((c) => c.code === code)[0];
+    const sec = typeof st.sector_id === "string" ? secs[st.sector_id] : undefined;
+    people.push({
+      staff_id: sid, name: String(sr.full_name || st.full_name || sr.short_name || ""), short_name: String(st.short_name || sr.short_name || ""),
+      position: typeof st.position === "string" ? st.position : null,
+      sector: sec ? sec.name : "Без сектор", sector_order: sec ? sec.sort_order : 100000,
+      hpd: typeof sr.hours_per_day === "number" && sr.hours_per_day > 0 ? sr.hours_per_day : 8,
+      planned_letter: pl, planned_code: code, planned_legend: cd && cd.legend ? cd.legend : null, on_shift: onShift(pl),
+      change: changes.filter((c) => c.staff_id === sid && c.day === day)[0] || null,
+      mark: marks.filter((x) => x.staff_id === sid)[0] || null,
+    });
+  }
+  people.sort((a, b) => a.sector_order - b.sector_order || a.sector.localeCompare(b.sector, "bg") || a.name.localeCompare(b.name, "bg"));
+  // Решение 4: нов човек, който не е в подадения график, не се отбелязва — „върни графика“ (името на екрана).
+  const missing = staff.filter((s) => !inSnap[s.id] && employed(s)).map((s) => String(s.full_name || s.short_name || ""));
+  return { day, daily, people, missing };
+}
+// Какво вижда браузърът за деня; can_mark / needs_reason — по прозореца и правата.
+async function dailyView(repo: Repo, acc: Access, store: string, m: { start: string; end: string; days: number }, month: MonthRow | null, date: string, today: string) {
+  const filed = isFiled(month);
+  const office = isOffice(acc), edit = canEdit(acc, store);
+  const maxDate = today < m.end ? today : m.end;
+  const winFrom = shiftDate(today, -STORE_BACK_DAYS);
+  const base = {
+    store, month: m.start, date, today, status: month ? month.status : null, filed,
+    min_date: edit && !office ? (winFrom > m.start ? winFrom : m.start) : m.start, max_date: maxDate,
+    window_from: winFrom, back_days: STORE_BACK_DAYS,
+  };
+  if (!filed) return { ...base, people: [], missing: [], daily: null, can_mark: false, needs_reason: false, trip_stores: [] };
+  const ctx = await dailyContext(repo, store, m, month!, date);
+  const inWin = inStoreWindow(date, today);
+  const can = edit && date <= today && (inWin || office);
+  const names = await repo.storeNames();
+  return {
+    ...base, daily: ctx.daily, people: ctx.people, missing: ctx.missing,
+    can_mark: can, needs_reason: can && !inWin, late: date < today,
+    // „Неуточнено“ се уточнява и след прозореца (решение 3) — от който пише в обекта.
+    can_resolve: edit && date <= today,
+    trip_stores: names.filter((n) => n !== store),
+  };
+}
+
 // Обектите в обзора: с дружество (grafik_store_company) И ВТР на дружеството (grafik_company_terms),
 // валидни към първия ден на месеца. Без дружество → noCompany (admin го вижда като пропуск);
 // с дружество без ВТР (ТЦД 2 — логистичните складове) → извън обхвата, мълчаливо.
@@ -661,6 +811,7 @@ async function notifyReturned(repo: Repo, acc: Access, store: string, start: str
 // се пише веднъж на 10 мин (dedup_key, unique в базата; повторът е „on conflict do nothing“).
 export const READ_EVENTS: Record<string, string> = {
   load_month: "grafik_view_month", overview: "grafik_view_overview", staff_list: "grafik_view_staff", changes_list: "grafik_view_changes",
+  daily_get: "grafik_view_daily",
 };
 // Печат и файлове — браузърът казва какво е направил (log), сървърът пише кой и за кой обект.
 export const LOG_WHAT: Record<string, string> = {
@@ -1099,13 +1250,22 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
       const self = b.id === undefined || b.id === null ? null : uuid(b.id, "id");
       const cur = self ? all.filter((c) => c.id === self)[0] : null;
       if (self && !cur) throw new HttpError(404, "not_found", "Промяната не е намерена в този месец.");
+      // Пакет 2А, решение 2: обектът пипа само днес и STORE_BACK_DAYS дни назад (и не бъдещи дни); извън
+      // прозореца — само основанието на съществуваща промяна („уточнява причина по-късно“). Офисът — без промяна.
+      if (!isOffice(acc)) {
+        const today = sofiaToday(nowS);
+        const inWin = inStoreWindow(addDay(m.start, b.day as number), today) && (!cur || inStoreWindow(addDay(m.start, cur.day), today));
+        const reasonOnly = !!cur && cur.staff_id === ch.sid && cur.day === b.day && cur.actual === b.actual && (cur.trip_store || null) === (ch.trip || null);
+        if (!inWin && !reasonOnly) throw new HttpError(409, "window", windowMessage(today));
+      }
       // Решение б: отразената в ТРЗ се пипа само от admin.
       if (cur && cur.trz_done && !acc.canAdmin) throw new HttpError(409, "trz_done", "Промяната е отразена в ТРЗ — само admin може да я променя.");
       if (all.some((c) => c.id !== self && c.staff_id === ch.sid && c.day === b.day)) {
         throw new HttpError(409, "duplicate", "За този служител и ден вече има промяна — редактирай нея.");
       }
       const now = new Date().toISOString();
-      const fields = { staff_id: ch.sid, day: b.day, planned_letter: ch.plannedLetter, planned_code: ch.plannedCode, actual: b.actual, reason: ch.reason, trip_store: ch.trip, updated_at: now, updated_by: acc.email };
+      // source: записът през „✎ Промени“ е ръчен — и редът от „✅ Днес“, редактиран тук, губи „📱 дневна“ (пакет 2А).
+      const fields = { staff_id: ch.sid, day: b.day, planned_letter: ch.plannedLetter, planned_code: ch.plannedCode, actual: b.actual, reason: ch.reason, trip_store: ch.trip, source: "manual", updated_at: now, updated_by: acc.email };
       const row = cur ? await repo.updateChange(cur.id, fields) : await repo.insertChange({ ...fields, month_id: month.id, created_by: acc.email });
       await audit(repo, acc, cur ? "grafik_change_update" : "grafik_change_create", store, { month: m.start, id: row ? row.id : null, staff_id: ch.sid, day: b.day, actual: b.actual, planned: ch.plannedLetter + "/" + ch.plannedCode, ...(ch.trip ? { trip_store: ch.trip } : {}) });
       return { row };
@@ -1117,6 +1277,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
       const id = uuid(b.id, "id");
       const cur = (await repo.listChanges(month.id)).filter((c) => c.id === id)[0];
       if (!cur) throw new HttpError(404, "not_found", "Промяната не е намерена в този месец.");
+      if (!isOffice(acc) && !inStoreWindow(addDay(m.start, cur.day), sofiaToday(nowS))) throw new HttpError(409, "window", windowMessage(sofiaToday(nowS)));
       if (cur.trz_done && !acc.canAdmin) throw new HttpError(409, "trz_done", "Промяната е отразена в ТРЗ — само admin може да я трие.");
       await repo.deleteChange(id);
       await audit(repo, acc, "grafik_change_delete", store, { month: m.start, id, staff_id: cur.staff_id, day: cur.day, actual: cur.actual, reason: cur.reason });
@@ -1135,6 +1296,108 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>, unl
       const row = await repo.updateChange(id, b.done ? { trz_done: true, trz_done_at: new Date().toISOString(), trz_done_by: acc.email } : { trz_done: false, trz_done_at: null, trz_done_by: null });
       await audit(repo, acc, b.done ? "grafik_change_trz" : "grafik_change_trz_undo", store, { month: m.start, id, staff_id: cur.staff_id, day: cur.day });
       return { row };
+    }
+
+    // ── „✅ Днес“ — дневна присъствена (пакет 2А) ─────────────────────────────
+    case "daily_get": {
+      const store = await needStore(repo, acc, b.store, "read");
+      const m = needMonth(b.month);
+      const today = sofiaToday(nowS);
+      const date = b.date === undefined || b.date === null || b.date === ""
+        ? (today < m.start ? m.start : today > m.end ? m.end : today) : needDate(b.date, m);
+      return await dailyView(repo, acc, store, m, await repo.getMonth(store, m.start), date, today);
+    }
+
+    case "daily_save": {
+      const store = await needStore(repo, acc, b.store, "edit");
+      const { m, month } = await submittedMonth(repo, store, b.month);
+      const date = needDate(b.date, m), today = sofiaToday(nowS);
+      if (date > today) throw new HttpError(409, "future", "Бъдещ ден не се отбелязва.");
+      const inWin = inStoreWindow(date, today);
+      let correction: { reason: string } | null = null;
+      if (!inWin) {
+        if (!isOffice(acc)) throw new HttpError(409, "daily_locked", windowMessage(today));
+        const cr = typeof b.correct_reason === "string" ? b.correct_reason.trim().replace(/\s+/g, " ") : "";
+        if (cr.length < 3 || cr.length > 300) throw new HttpError(400, "correct_reason", "Корекция извън прозореца на обекта — напиши основание (от 3 до 300 знака).");
+        correction = { reason: cr };
+      }
+      if (!Array.isArray(b.marks) || b.marks.length > 200) throw new HttpError(400, "bad_request", "marks трябва да е списък.");
+      const ctx = await dailyContext(repo, store, m, month, date);
+      const sent: Record<string, Record<string, unknown>> = {};
+      for (const x of b.marks) {
+        if (!isObj(x) || typeof x.staff_id !== "string") throw new HttpError(400, "bad_request", "Невалидно отбелязване.");
+        if (sent[x.staff_id]) throw new HttpError(400, "bad_request", "Служител е два пъти в отбелязването.");
+        sent[x.staff_id] = x;
+      }
+      const known: Record<string, boolean> = {}; ctx.people.forEach((p) => { known[p.staff_id] = true; });
+      if (Object.keys(sent).some((id) => !known[id])) throw new HttpError(400, "not_in_schedule", "Служител не е в подадения график за този ден — върни графика в чернова, добави го и го подай пак.");
+      const errors: { staff_id: string; name: string; error: string }[] = [];
+      for (const p of ctx.people) {
+        const mk = sent[p.staff_id];
+        const e = mk ? markError(mk, p.planned_letter) : "не е отбелязан";
+        if (e) errors.push({ staff_id: p.staff_id, name: p.name, error: e });
+      }
+      if (errors.length) throw new HttpError(400, "bad_marks", "Отбелязването не е записано:\n" + errors.map((e) => "· " + e.name + ": " + e.error).join("\n"), { errors });
+      const del: string[] = [], up: DailySave["changes_upsert"] = [], marks: MarkRow[] = [], diff: { staff_id: string; from: string; to: string }[] = [];
+      const eff = (mk: { state: string; actual?: string | null } | null, c: ChangeRow | null) => mk ? mk.state + (mk.actual ? ":" + mk.actual : "") : c ? "change:" + c.actual : "—";
+      for (const p of ctx.people) {
+        const mk = sent[p.staff_id], st = String(mk.state);
+        const trip = st === "trip" ? String(mk.trip_store).trim() : null;
+        const desired = markActual({ state: st, actual: st === "trip" ? "К" : (mk.actual as string) }, p.planned_letter);
+        const ec = p.change;
+        if (desired && ec && ec.actual === desired && (ec.trip_store || null) === trip) { /* същото — без запис */ }
+        else if (desired || ec) {
+          if (ec && ec.trz_done && !acc.canAdmin) throw new HttpError(409, "trz_done", p.name + ": промяната за деня е отразена в ТРЗ — само admin може да я променя.");
+          if (desired) {
+            // Ръчна промяна за деня се заменя — старото „реално“ и основанието (напр. № на документ) остават в новото.
+            const was = ec && ec.source !== "daily" ? " (беше: " + ec.actual + " — " + ec.reason + ")" : "";
+            const ch = await checkChange(repo, store, m, month, p.staff_id, ctx.day, desired, (dailyReason(desired, mk.note) + was).slice(0, 300), trip);
+            up.push({ staff_id: p.staff_id, planned_letter: ch.plannedLetter, planned_code: ch.plannedCode, actual: desired, reason: ch.reason, trip_store: ch.trip });
+          } else del.push(ec!.id);
+        }
+        const actual = st === "trip" ? "К" : (st === "absent" || st === "other_shift" || st === "extra") ? String(mk.actual) : null;
+        const note = typeof mk.note === "string" && mk.note.trim() ? mk.note.trim().slice(0, 200) : null;
+        marks.push({ staff_id: p.staff_id, planned_letter: p.planned_letter, state: st, actual, trip_store: trip, note });
+        const was = eff(p.mark, p.change), now = st + (actual ? ":" + actual : "");
+        if (was !== now) diff.push({ staff_id: p.staff_id, from: was, to: now });
+      }
+      const late = date < today;
+      await repo.dailySave({ store_name: store, month_id: month.id, day: date, actor: acc.email, actor_name: acc.name, late, correction, changes_delete: del, changes_upsert: up, marks });
+      await audit(repo, acc, correction ? "grafik_daily_correct" : "grafik_daily_save", store, {
+        month: m.start, date, late, first: !ctx.daily, ...(correction ? { correct_reason: correction.reason } : {}),
+        people: marks.length, deviations: marks.filter((x) => x.state !== "present" && x.state !== "off").length, changes: { upsert: up.length, delete: del.length }, diff,
+      });
+      return await dailyView(repo, acc, store, m, month, date, today);
+    }
+
+    case "daily_resolve": {
+      // Решение 3: „неуточнено“ отсъствие се уточнява и след прозореца — само причината, само за неуточнения.
+      const store = await needStore(repo, acc, b.store, "edit");
+      const { m, month } = await submittedMonth(repo, store, b.month);
+      const date = needDate(b.date, m), today = sofiaToday(nowS);
+      if (date > today) throw new HttpError(409, "future", "Бъдещ ден не се отбелязва.");
+      const sid = uuid(b.staff_id, "служител");
+      const actual = typeof b.actual === "string" ? b.actual : "";
+      if (DAILY_ABSENT.indexOf(actual) < 0) throw new HttpError(400, "bad_request", "Причината е една от: " + DAILY_ABSENT.join(", ") + ".");
+      if (b.note !== undefined && b.note !== null && (typeof b.note !== "string" || b.note.length > 200)) throw new HttpError(400, "bad_request", "Бележката е до 200 знака.");
+      const ctx = await dailyContext(repo, store, m, month, date);
+      const p = ctx.people.filter((x) => x.staff_id === sid)[0];
+      if (!ctx.daily || !p || !p.mark || p.mark.state !== "unknown") throw new HttpError(409, "not_unknown", "Тук се уточнява само „неуточнено“ отсъствие.");
+      if (p.change && p.change.trz_done && !acc.canAdmin) throw new HttpError(409, "trz_done", "Промяната за деня е отразена в ТРЗ — само admin може да я променя.");
+      const note = typeof b.note === "string" && b.note.trim() ? b.note.trim().slice(0, 200) : p.mark.note;
+      const desired = markActual({ state: "absent", actual }, p.planned_letter);
+      const up: DailySave["changes_upsert"] = [];
+      if (desired) {
+        const ch = await checkChange(repo, store, m, month, sid, ctx.day, desired, dailyReason(desired, note), null);
+        up.push({ staff_id: sid, planned_letter: ch.plannedLetter, planned_code: ch.plannedCode, actual: desired, reason: ch.reason, trip_store: null });
+      }
+      const marks = ctx.people.filter((x) => !!x.mark).map((x) => x.staff_id === sid
+        ? { staff_id: sid, planned_letter: x.planned_letter, state: "absent", actual, trip_store: null, note }
+        : { staff_id: x.staff_id, planned_letter: x.mark!.planned_letter, state: x.mark!.state, actual: x.mark!.actual, trip_store: x.mark!.trip_store, note: x.mark!.note });
+      await repo.dailySave({ store_name: store, month_id: month.id, day: date, actor: acc.email, actor_name: acc.name, late: ctx.daily.late, correction: null,
+        changes_delete: !desired && p.change ? [p.change.id] : [], changes_upsert: up, marks });
+      await audit(repo, acc, "grafik_daily_resolve", store, { month: m.start, date, staff_id: sid, actual, late: date < today });
+      return await dailyView(repo, acc, store, m, month, date, today);
     }
 
     case "sector_save": {

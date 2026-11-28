@@ -14,6 +14,11 @@
 
 ## Чака изпращане
 
+(grafik-daily-schema.sql — миграция grafik_daily, пакет 2А „✅ Днес“; ЧАКА ПРИЛАГАНЕ — версията се дописва след него; „Работен график“ не е в огледалото — редовете са само за записа)
+- 28.11 · grafik_changes.source — text, NOT NULL, default 'manual' (стойности 'manual' / 'daily' — „✎ Промени“ / „✅ Днес“)
+- 28.11 · нова таблица grafik_daily — id uuid NOT NULL (PK), store_name text NOT NULL, month_id uuid NOT NULL (→ grafik_months.id), day date NOT NULL, marked_by text NOT NULL, marked_by_name text NULL, marked_at timestamptz NOT NULL default now(), late boolean NOT NULL default false, updated_by text NULL, updated_by_name text NULL, updated_at timestamptz NULL, corrected_by text NULL, corrected_by_name text NULL, corrected_at timestamptz NULL, correct_reason text NULL
+- 28.11 · нова таблица grafik_daily_marks — id uuid NOT NULL (PK), daily_id uuid NOT NULL (→ grafik_daily.id), staff_id uuid NOT NULL (→ grafik_staff.id), planned_letter text NULL, state text NOT NULL (present / absent / unknown / other_shift / trip / extra / off), actual text NULL, trip_store text NULL, note text NULL, change_id uuid NULL (→ grafik_changes.id), marked_by text NULL, marked_at timestamptz NOT NULL default now()
+
 (grafik-changes-trip-schema.sql — миграция grafik_changes_trip, версия 20261127121336, приложена 27.11.2026; „Работен график“ не е в огледалото — редовете са само за записа)
 - 27.11 · grafik_changes.trip_store — text, NULL, без default (обектът, където е командирован човекът; задължителен точно при actual = 'К')
 - 27.11 · grafik_changes.actual — нова стойност 'К'

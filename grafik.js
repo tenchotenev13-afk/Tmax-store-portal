@@ -156,6 +156,7 @@ setInterval(function(){ grIdleTick(); }, 30000);
    картата в Администрация) — на тяхно място е формулярът за ПИН. */
 function grPinLock(){
   grData = null; grRows = {}; grCalc = null; grOverview = null; grPrev = null; grChanges = null; grDirty = {};
+  grAtt = null; grAttEdit = {};
   grMeAt = 0;
   if(grMe){ grMe.unlocked = false; grMe.stores = []; if(grMe.pin && grMe.pin.state === 'none') grMe.pin.state = 'set'; }
   var el = document.getElementById('mod-grafik');
@@ -342,8 +343,11 @@ function loadGrafik(){
     /* ТРЗ и „преглед“ (view, 27.11.2026) започват от обзора; регионалният и admin — от своя график. */
     if(grMe.kind === 'trz' || (grMe.kind === 'view' && !grStarted)) grView = 'overview';
     else if(grView === 'overview' && !grCanOverview()) grView = 'grid';
+    /* Пакет 2А: на телефона обектът започва от „✅ Днес“ (дневната присъствена е работата му оттам). */
+    else if(!grStarted && grMe.kind === 'manager' && grIsMobile()) grView = 'att';
     grStarted = true;
     if(grView === 'overview') return grLoadOverview(seq);
+    if(grView === 'att' && grStore) return grAttShow(seq);
     if(!grStore){ el.innerHTML = grTitle() + '<div class="card" id="gr-nostore">Няма обект, чийто график да виждаш.</div>'; return; }
     return grLoadMonth(seq);
   });
@@ -818,6 +822,7 @@ function grToolbar(){
        '<button class="btn-sm" onclick="grGoMonth(1)" title="Следващ месец">▶</button>';
   h += '<span style="flex:1"></span>';
   if(grCanOverview()) h += '<button class="filter-btn' + (grView === 'overview' ? ' active' : '') + '" onclick="grSetView(\'overview\')">🏬 Обекти</button>';
+  h += '<button class="filter-btn' + (grView === 'att' ? ' active' : '') + '" id="gr-att-tab" onclick="grSetView(\'att\')">✅ Днес</button>';
   h += '<button class="filter-btn' + (grView === 'grid' ? ' active' : '') + '" onclick="grSetView(\'grid\')">📆 График</button>';
   h += '<button class="filter-btn' + (grView === 'changes' ? ' active' : '') + '" onclick="grSetView(\'changes\')">✎ Промени</button>';
   if(!trz) h += '<button class="filter-btn' + (grView === 'staff' ? ' active' : '') + '" onclick="grSetView(\'staff\')">👥 Персонал</button>';
@@ -985,6 +990,7 @@ function grRender(){
   var el = document.getElementById('mod-grafik');
   if(!el) return;
   if(grView === 'overview'){ el.innerHTML = grTitle() + grToolbar() + grOverviewHtml(); return; }
+  if(grView === 'att'){ el.innerHTML = grTitle() + grToolbar() + grAttHtml(); return; }   // пакет 2А — дневна присъствена
   if(!grData){ el.innerHTML = grTitle() + grToolbar(); return; }
   var h = grTitle() + grToolbar();
   if(grView === 'staff') h += grStaffHtml();
@@ -1461,21 +1467,27 @@ function grWarningsHtml(){
 /* Първо запис на текущия обект/месец, ПОСЛЕ смяната — иначе чакащите редове
    тръгват с новия обект. Откаже ли човекът да изостави незаписаното — остава. */
 function grPickStore(v){
-  return grFlushThen(function(){ grStore = v; grSel = { r: 0, d: 0 }; grAnc = null; grDrop = false; return grLoadMonth(); }, function(){ grRender(); });
+  if(!grAttLeaveOk()){ grRender(); return Promise.resolve(); }
+  return grFlushThen(function(){ grStore = v; grSel = { r: 0, d: 0 }; grAnc = null; grDrop = false; return grView === 'att' ? grAttShow() : grLoadMonth(); }, function(){ grRender(); });
 }
 function grGoMonth(n){
-  return grFlushThen(function(){ grMonth = grShiftMonth(grMonth, n); grSel = { r: 0, d: 0 }; grAnc = null; grDrop = false; return grView === 'overview' ? grLoadOverview() : grLoadMonthTrz(); });
+  if(!grAttLeaveOk()) return Promise.resolve();
+  if(grView === 'att') grAttDate = '';   // друг месец — „днес“ в него (или най-близкият ден)
+  return grFlushThen(function(){ grMonth = grShiftMonth(grMonth, n); grSel = { r: 0, d: 0 }; grAnc = null; grDrop = false; return grView === 'overview' ? grLoadOverview() : grView === 'att' ? grAttShow() : grLoadMonthTrz(); });
 }
 /* Обзорът е за всички обекти и тегли сам; от него към графика / персонала — графикът на
    grStore за grMonth наново (месецът може да е сменен в обзора). */
 function grSetView(v){
+  if(grView === 'att' && v !== 'att' && !grAttLeaveOk()) return;   // незаписаните отметки — и към „Обекти“
   if(v === 'overview'){
     if(!grCanOverview()) return;
     return grFlushThen(function(){ grView = 'overview'; grEdit = ''; return grLoadOverview(); });
   }
   if(v === 'staff' && grMe && grMe.kind === 'trz') return;
+  if(v === 'att' && !grStore) return;
   var from = grView;
   grView = v; grEdit = ''; grAnc = null; grDrop = false;
+  if(v === 'att') return grAttShow();
   if(from === 'overview' || !grData) return grLoadMonthTrz();
   grRender();
 }
@@ -1952,6 +1964,14 @@ var grChTripStores = [];      // обектите за „К“ (changes_list �
 function grChWho(email){ return email ? (grChNames[String(email).toLowerCase()] || email) : ''; }
 function grChCanEdit(){ return grCanEditStaff(); }
 function grChCanTrz(){ return !!grMe && (grMe.kind === 'trz' || !!grMe.can_admin); }
+/* Пакет 2А, решение 2: обектът пише в „Промени“ само днес и 2 дни назад (по датата на компютъра; истината е
+   на сървъра — по София). Регионалният и admin — без ограничение. */
+function grChInWin(day){
+  if(grMe && (grMe.kind === 'admin' || grMe.kind === 'regional')) return true;
+  var t = new Date(), iso = function(x){ return x.getFullYear() + '-' + grPad(x.getMonth() + 1) + '-' + grPad(x.getDate()); };
+  var today = iso(t), from = iso(new Date(t.getFullYear(), t.getMonth(), t.getDate() - 2)), d = grMonth + '-' + grPad(day);
+  return d <= today && d >= from;
+}
 function grChLoad(){
   grChanges = null;
   if(!grData || !grFiled()) return Promise.resolve();
@@ -2023,9 +2043,11 @@ function grChangesHtml(){
         : (c.trz_done ? '<span style="color:#16a34a;font-weight:600;" title="' + escAttrVal(grChWho(c.trz_done_by) + ' · ' + grFmtAt(c.trz_done_at)) + '">✔ да</span>' : '<span style="color:#94a3b8;">не</span>');
       var can = (edit && !c.trz_done) || adm;
       h += '<tr id="gr-ch-' + escAttrVal(c.id) + '"><td style="white-space:nowrap;">' + escVal(grChDayLabel(c.day)) + '</td><td style="text-align:left;">' + escVal(grChName(c.staff_id)) + '</td>' +
-        '<td>' + escVal((c.planned_letter || 'почивка') + (c.planned_code ? ' / ' + c.planned_code : '')) + '</td><td style="font-weight:700;">' + escVal(c.actual) + (c.trip_store ? '<div class="gr-ch-trip" style="font-weight:400;font-size:11px;color:#475569;">→ ' + escVal(c.trip_store) + '</div>' : '') + '</td>' +
+        '<td>' + escVal((c.planned_letter || 'почивка') + (c.planned_code ? ' / ' + c.planned_code : '')) + '</td><td style="font-weight:700;">' + escVal(c.actual) + (c.trip_store ? '<div class="gr-ch-trip" style="font-weight:400;font-size:11px;color:#475569;">→ ' + escVal(c.trip_store) + '</div>' : '') +
+          (c.source === 'daily' ? '<div class="gr-ch-src" style="font-weight:400;font-size:11px;color:#0369a1;" title="Въведено от „✅ Днес“ (дневната присъствена)">📱 дневна</div>' : '') + '</td>' +
         '<td style="text-align:left;">' + escVal(c.reason) + '</td><td style="font-size:11px;color:#64748b;">' + escVal(who) + '</td><td style="text-align:center;">' + tz + '</td>' +
-        (edit || adm ? '<td style="white-space:nowrap;">' + (can ? '<button class="btn-sm" onclick="grChOpen(\'' + escAttrVal(c.id) + '\')">✏️</button> <button class="btn-sm" onclick="grChDelete(\'' + escAttrVal(c.id) + '\')">✕</button>'
+        (edit || adm ? '<td style="white-space:nowrap;">' + (can ? '<button class="btn-sm" onclick="grChOpen(\'' + escAttrVal(c.id) + '\')"' + (grChInWin(c.day) ? '' : ' title="Извън прозореца на обекта — само основанието"') + '>✏️</button>' +
+          (adm || grChInWin(c.day) ? ' <button class="btn-sm" onclick="grChDelete(\'' + escAttrVal(c.id) + '\')">✕</button>' : '')
           : '<span style="font-size:11px;color:#94a3b8;" title="Отразена в ТРЗ — само admin">🔒</span>') + '</td>' : '') + '</tr>';
     });
     h += '</tbody></table></div>';
@@ -2038,20 +2060,26 @@ function grChOpen(id){
   var c = id ? (grChanges || []).filter(function(x){ return x.id === id; })[0] : null;
   if(id && !c) return;
   var M = grCalc.month, rows = grChSnapRows();
-  var staffId = c ? c.staff_id : (rows[0] ? rows[0].staff_id : ''), day = c ? c.day : 1;
-  var days = ''; for(var d = 1; d <= M.days; d++) days += '<option value="' + d + '"' + (d === day ? ' selected' : '') + '>' + escVal(grChDayLabel(d)) + '</option>';
+  /* Пакет 2А, решение 2: обектът — само днес и 2 дни назад; стара промяна — само основанието. Сървърът решава. */
+  var lock = !!c && !grChInWin(c.day), win = [];
+  for(var w = 1; w <= M.days; w++) if(grChInWin(w)) win.push(w);
+  if(!c && !win.length){ toast('Обектът въвежда промени само за днес и 2 дни назад — по-старите прави регионалният.', '#dc2626'); return; }
+  var staffId = c ? c.staff_id : (rows[0] ? rows[0].staff_id : ''), day = c ? c.day : win[win.length - 1];
+  var days = ''; for(var d = 1; d <= M.days; d++) if(c ? (lock ? d === c.day : grChInWin(d) || d === c.day) : grChInWin(d)) days += '<option value="' + d + '"' + (d === day ? ' selected' : '') + '>' + escVal(grChDayLabel(d)) + '</option>';
+  var dis = lock ? ' disabled' : '';
   var ppl = rows.map(function(r){ return '<option value="' + escAttrVal(r.staff_id) + '"' + (r.staff_id === staffId ? ' selected' : '') + '>' + escVal(r.full_name || r.short_name || '') + '</option>'; }).join('');
   var act = GR_CH_ACTUALS.map(function(a){ return '<option value="' + escAttrVal(a[0]) + '"' + (c && c.actual === a[0] ? ' selected' : '') + '>' + escVal(a[1]) + '</option>'; }).join('');
   var f = function(lbl, inner){ return '<label style="display:block;margin:6px 0;font-size:13px;">' + lbl + '<br>' + inner + '</label>'; };
   var old = document.getElementById('gr-ch-modal');
   if(old) old.parentNode.removeChild(old);
   document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg open" id="gr-ch-modal"><div class="modal"><h3>' + (c ? '✏️ Промяна' : '➕ Промяна в графика') + '</h3>' +
-    f('Дата', '<select id="gr-ch-day" style="width:100%;" onchange="grChPlannedShow()">' + days + '</select>') +
-    f('Служител', '<select id="gr-ch-staff" style="width:100%;" onchange="grChPlannedShow()">' + ppl + '</select>') +
+    (lock ? '<div id="gr-ch-lock" style="font-size:12px;color:#92400e;background:#fef3c7;border-radius:6px;padding:4px 8px;">Денят е извън прозореца на обекта (днес и 2 дни назад) — сменя се само основанието. Друго — регионалният.</div>' : '') +
+    f('Дата', '<select id="gr-ch-day" style="width:100%;" onchange="grChPlannedShow()"' + dis + '>' + days + '</select>') +
+    f('Служител', '<select id="gr-ch-staff" style="width:100%;" onchange="grChPlannedShow()"' + dis + '>' + ppl + '</select>') +
     f('По график', '<b id="gr-ch-planned"></b>') +
-    f('Реално *', '<select id="gr-ch-actual" style="width:100%;" onchange="grChTripShow()">' + (c ? '' : '<option value="">— избери —</option>') + act + '</select>') +
+    f('Реално *', '<select id="gr-ch-actual" style="width:100%;" onchange="grChTripShow()"' + dis + '>' + (c ? '' : '<option value="">— избери —</option>') + act + '</select>') +
     /* „К“ — обектът, където е командирован човекът (пакет 1, т.6); часовете при него — пакет 4. */
-    '<div id="gr-ch-trip-wrap" style="display:none;">' + f('Командирован в обект *', '<select id="gr-ch-trip" style="width:100%;"><option value="">— избери обект —</option>' +
+    '<div id="gr-ch-trip-wrap" style="display:none;">' + f('Командирован в обект *', '<select id="gr-ch-trip" style="width:100%;"' + dis + '><option value="">— избери обект —</option>' +
       grChTripStores.map(function(n){ return '<option value="' + escAttrVal(n) + '"' + (c && c.trip_store === n ? ' selected' : '') + '>' + escVal(n) + '</option>'; }).join('') + '</select>') + '</div>' +
     f('Основание / документ № *', '<input id="gr-ch-reason" style="width:100%;" maxlength="300" value="' + escAttrVal(c ? c.reason : '') + '">') +
     '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-ch-modal\')">Откажи</button><button class="btn btn-green" onclick="grChSave(\'' + escAttrVal(id || '') + '\')">Запиши</button></div></div></div>');
@@ -2141,6 +2169,272 @@ function grPrintChanges(){
     '</div>';
   grLogOut('print_changes');
   showModule('print');
+}
+
+/* ─── „✅ Днес“ — дневна присъствена (пакет 2А, план и решения на Тенчо 27.11.2026) ──────────
+   Управителят всеки ден (от телефона) отбелязва кой е дошъл: „Дошъл“ е по подразбиране за всички
+   на смяна — едно натискане „✓ Всички дошли — запиши“; отклонение — с клик на човека. Всяко
+   отклонение става ред в „✎ Промени“ (source 'daily') на сървъра — без двойно въвеждане.
+   Обектът — днес и 2 дни назад („късно“); регионален / admin — всеки ден до днес, извън прозореца
+   на обекта — с основание. „Неуточнено“ се уточнява и по-късно („Уточни“). Хората — от снимката на
+   подадения график; нов човек → „върни графика“. Всички проверки — в grafik-api (daily_*). */
+var grAtt = null;          // daily_get за grStore / grMonth / grAttDate
+var grAttDate = '';        // избраният ден (ГГГГ-ММ-ДД); '' — днес (сървърът го избира в месеца)
+var grAttEdit = {};        // staff_id → { state, actual, trip_store, note } — незаписаното
+var GR_ATT_ABSENT = [['Б', 'Б — болничен'], ['О', 'О — платен отпуск'], ['Н', 'НО — неплатен отпуск'], ['Д', 'Д — държавни задължения'],
+  ['А', 'А — с разрешение на администрацията'], ['С', 'С — самоотлъчка'], ['Майч', 'Майч — майчинство'], ['почивка', 'почивка (размяна)']];
+var GR_ATT_WORK = ['ЛД', 'ЗД', 'П', 'В', 'М'];
+var GR_ATT_ON = ['ЛД', 'ЗД', 'П', 'В', 'М', 'К'];
+function grAttLoad(){
+  var store = grStore, month = grMonth, date = grAttDate && grAttDate.slice(0, 7) === grMonth ? grAttDate : '';
+  return grApi('daily_get', { store: store, month: month, date: date }).then(function(res){
+    if(store !== grStore || month !== grMonth) return;
+    grAttEdit = {};
+    if(!res.ok){ grAtt = { error: grErrText(res) }; return; }
+    grAtt = res.data; grAttDate = res.data.date || '';
+  });
+}
+/* „Днес“ тегли само деня (daily_get) — без графика на месеца (на телефона — една лека заявка). Друг
+   обект / месец от тук → графикът в паметта вече не е техният: grData = null, „📆 График“ го тегли наново. */
+function grAttShow(seq){
+  seq = seq || ++grLoadSeq;
+  if(grData && (grData.store !== grStore || String(grData.month || '').slice(0, 7) !== grMonth)){ grData = null; grChanges = null; }
+  grAtt = null; grRender();
+  return grAttLoad().then(function(){ if(seq === grLoadSeq && grView === 'att') grRender(); });
+}
+function grAttDirty(){ return Object.keys(grAttEdit).length > 0; }
+function grAttLeaveOk(){
+  if(grView !== 'att' || !grAttDirty()) return true;
+  if(!confirm('Има незаписани отметки за деня — да ги изоставя?')) return false;
+  grAttEdit = {};
+  return true;
+}
+function grAttOnShift(L){ return GR_ATT_ON.indexOf(L) >= 0 || /^(?:[1-9]|1[0-2])$/.test(L || ''); }
+function grAttSame(a, L){ var p = L === 'НО' ? 'Н' : (L === '' ? 'почивка' : L); return a === p; }
+// „Реално“ от отметката — както markActual в grafik-api (null — без отклонение).
+function grAttActual(st, L){
+  var a = st.state === 'trip' ? 'К' : (st.state === 'absent' || st.state === 'other_shift' || st.state === 'extra') ? (st.actual || null) : null;
+  return a && !grAttSame(a, L || '') ? a : null;
+}
+// Състоянието от сървъра: отметката, ако е в съгласие с „Промени“; иначе — промяната (тя е истината).
+function grAttServerState(p){
+  var L = p.planned_letter || '', c = p.change, ca = c ? c.actual : null;
+  if(p.mark){
+    var m = { state: p.mark.state, actual: p.mark.actual || null, trip_store: p.mark.trip_store || null, note: p.mark.note || '' };
+    if(grAttActual(m, L) === ca) return m;
+  }
+  if(c){
+    if(ca === 'К') return { state: 'trip', actual: 'К', trip_store: c.trip_store || '', note: '' };
+    if(GR_ATT_WORK.indexOf(ca) >= 0) return { state: p.on_shift ? 'other_shift' : 'extra', actual: ca, trip_store: null, note: '' };
+    return { state: 'absent', actual: ca, trip_store: null, note: '' };
+  }
+  return { state: p.on_shift ? 'present' : 'off', actual: null, trip_store: null, note: '' };
+}
+function grAttState(p){ return grAttEdit[p.staff_id] || grAttServerState(p); }
+function grAttAbsLabel(a){ var x = GR_ATT_ABSENT.filter(function(y){ return y[0] === a; })[0]; return x ? x[1] : a; }
+function grAttChip(st, p){
+  var s = st.state;
+  if(s === 'present') return '<span class="gr-att-chip" data-state="present" style="color:#166534;background:#dcfce7;">✓ дошъл</span>';
+  if(s === 'off') return '<span class="gr-att-chip" data-state="off" style="color:#64748b;background:#f1f5f9;">' + (p.planned_letter ? escVal(p.planned_letter) : 'почива') + '</span>';
+  if(s === 'unknown') return '<span class="gr-att-chip" data-state="unknown" style="color:#92400e;background:#fef3c7;">? не е дошъл — неуточнено</span>';
+  if(s === 'absent') return '<span class="gr-att-chip" data-state="absent" style="color:#991b1b;background:#fee2e2;">✕ ' + escVal(grAttAbsLabel(st.actual)) + '</span>';
+  if(s === 'trip') return '<span class="gr-att-chip" data-state="trip" style="color:#9a3412;background:#ffedd5;">К → ' + escVal(st.trip_store || '?') + '</span>';
+  if(s === 'other_shift') return '<span class="gr-att-chip" data-state="other_shift" style="color:#1e40af;background:#dbeafe;">↔ ' + escVal(st.actual) + ' вместо ' + escVal(p.planned_letter) + '</span>';
+  if(s === 'extra') return '<span class="gr-att-chip" data-state="extra" style="color:#1e40af;background:#dbeafe;">+ ' + escVal(st.actual) + ' (без смяна)</span>';
+  return '';
+}
+function grAttDayLabel(iso){
+  var d = new Date(iso + 'T00:00:00Z'), w = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][d.getUTCDay()];
+  return iso.slice(8, 10) + '.' + iso.slice(5, 7) + ' ' + w;
+}
+function grAttDates(){
+  var out = [], d = grAtt.min_date;
+  while(d && d <= grAtt.max_date){ out.push(d); var x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); d = x.toISOString().slice(0, 10); }
+  if(out.indexOf(grAtt.date) < 0) out.push(grAtt.date);
+  return out.sort();
+}
+function grAttWhoHtml(){
+  var D = grAtt.daily;
+  if(!D) return '<span id="gr-att-who" style="color:#b45309;font-weight:600;">Денят още не е отбелязан</span>';
+  var h = '<span id="gr-att-who" style="color:#166534;">✔ Отбелязано от <b>' + escVal(D.marked_by_name || D.marked_by) + '</b> · ' + escVal(grFmtAt(D.marked_at)) +
+    (D.late ? ' <span class="gr-att-late" style="background:#fef3c7;color:#92400e;border-radius:8px;padding:0 6px;font-size:11px;">късно</span>' : '') + '</span>';
+  if(D.updated_at) h += '<span style="color:#64748b;font-size:12px;"> · променено от ' + escVal(D.updated_by_name || D.updated_by || '') + ' · ' + escVal(grFmtAt(D.updated_at)) + '</span>';
+  if(D.corrected_at) h += '<div id="gr-att-corr" style="font-size:12px;color:#9a3412;">✎ Корекция от ' + escVal(D.corrected_by_name || D.corrected_by || '') + ' · ' + escVal(grFmtAt(D.corrected_at)) + ': ' + escVal(D.correct_reason || '') + '</div>';
+  return h;
+}
+function grAttHtml(){
+  if(!grAtt) return '<div class="card" style="color:#94a3b8;">⏳ Зареждане...</div>';
+  if(grAtt.error) return '<div class="card" id="gr-error" style="color:#dc2626;">' + escVal(grAtt.error) + '</div>';
+  if(!grAtt.filed){
+    return '<div class="card" id="gr-att-draft" style="color:#64748b;">Дневната присъствена се води по подаден график. Графикът на ' + escVal(grStore) + ' за ' + escVal(grMonthLabel(grMonth)) +
+      (grAtt.status === 'draft' ? ' е чернова' : ' още не е въведен') + ' — първо го подай.</div>';
+  }
+  var can = !!grAtt.can_mark, dates = grAttDates(), i = dates.indexOf(grAtt.date);
+  var h = '<div class="card" id="gr-att-head" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
+    '<button class="btn-sm" onclick="grAttGo(-1)"' + (i <= 0 ? ' disabled' : '') + '>◀</button>' +
+    '<select id="gr-att-date" onchange="grAttPick(this.value)" style="font-size:15px;">' + dates.map(function(d){
+      return '<option value="' + d + '"' + (d === grAtt.date ? ' selected' : '') + '>' + escVal(grAttDayLabel(d)) + (d === grAtt.today ? ' · днес' : '') + '</option>';
+    }).join('') + '</select>' +
+    '<button class="btn-sm" onclick="grAttGo(1)"' + (i >= dates.length - 1 ? ' disabled' : '') + '>▶</button>' +
+    '<span style="flex:1"></span>' + grAttWhoHtml() + '</div>';
+  if(!can){
+    var why = grAtt.date > grAtt.today ? 'Бъдещ ден — отбелязва се в самия ден.'
+      : grCanEditStaff() ? 'Денят е заключен за обекта (днес и ' + grAtt.back_days + ' дни назад) — корекция прави регионалният или admin.' : '';
+    if(why) h += '<div class="card" id="gr-att-locked" style="color:#64748b;">🔒 ' + escVal(why) + '</div>';
+  }
+  if((grAtt.missing || []).length){
+    h += '<div class="card" id="gr-att-missing" style="background:#fff7ed;color:#9a3412;">⚠ Не са в подадения график и не могат да се отбележат: <b>' + escVal(grAtt.missing.join(', ')) +
+      '</b>. За да ги отбележиш — регионалният връща графика в чернова, добавяш ги и го подаваш пак.</div>';
+  }
+  var ppl = grAtt.people || [];
+  if(!ppl.length) return h + '<div class="card" style="color:#64748b;">Няма служители в графика за този ден.</div>';
+  var on = ppl.filter(function(p){ return p.on_shift; }), off = ppl.filter(function(p){ return !p.on_shift; });
+  var row = function(p){
+    var st = grAttState(p), dirty = !!grAttEdit[p.staff_id];
+    var plan = p.planned_letter ? '<b>' + escVal(p.planned_letter) + '</b>' + (p.planned_legend ? ' <span style="color:#64748b;font-size:12px;">' + escVal(p.planned_legend) + '</span>' : '') : '<span style="color:#94a3b8;">почивка</span>';
+    var resolve = st.state === 'unknown' && !dirty && grAtt.can_resolve && p.mark && p.mark.state === 'unknown' && !can
+      ? ' <button class="btn-sm gr-att-resolve" onclick="event.stopPropagation();grAttResolveOpen(\'' + escAttrVal(p.staff_id) + '\')">Уточни</button>' : '';
+    return '<div class="gr-att-person" id="gr-att-' + escAttrVal(p.staff_id) + '" data-state="' + st.state + '"' + (can ? ' onclick="grAttOpen(\'' + escAttrVal(p.staff_id) + '\')"' : '') +
+      ' style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 4px;border-top:1px solid #f1f5f9;font-size:15px;' + (can ? 'cursor:pointer;' : '') + (dirty ? 'background:#fffbeb;' : '') + '">' +
+      '<span><span style="font-weight:600;">' + escVal(p.name) + '</span><br><span style="font-size:13px;">' + plan + '</span></span>' +
+      '<span style="text-align:right;white-space:nowrap;">' + grAttChip(st, p) + resolve + (st.note ? '<div style="font-size:11px;color:#64748b;max-width:160px;white-space:normal;">' + escVal(st.note) + '</div>' : '') + '</span></div>';
+  };
+  var bySec = {}, order = [];
+  on.forEach(function(p){ if(!bySec[p.sector]){ bySec[p.sector] = []; order.push(p.sector); } bySec[p.sector].push(p); });
+  h += '<div class="card" id="gr-att-on" style="padding:6px 10px;"><div style="font-weight:700;margin-bottom:2px;">На смяна по график — ' + on.length + '</div>';
+  order.forEach(function(sk){
+    h += '<div class="gr-att-sec" data-sector="' + escAttrVal(sk) + '" style="margin-top:6px;"><div style="font-size:12px;font-weight:700;color:#475569;text-transform:uppercase;">' + escVal(sk) + '</div>' + bySec[sk].map(row).join('') + '</div>';
+  });
+  if(!on.length) h += '<div style="color:#64748b;padding:6px 0;">Никой не е на смяна по график.</div>';
+  h += '</div>';
+  if(off.length){
+    var offDev = off.filter(function(p){ return grAttState(p).state !== 'off'; }).length;
+    h += '<details class="card" id="gr-att-off" style="padding:6px 10px;"' + (offDev ? ' open' : '') + '><summary style="font-weight:700;cursor:pointer;">Не са на смяна — ' + off.length + (offDev ? ' (дошли / отклонения: ' + offDev + ')' : '') + '</summary>' + off.map(row).join('') + '</details>';
+  }
+  if(can){
+    var dev = ppl.filter(function(p){ var s = grAttState(p).state; return s !== 'present' && s !== 'off'; }).length;
+    h += '<div class="card" id="gr-att-save-box" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
+    if(grAtt.needs_reason) h += '<label style="flex-basis:100%;font-size:13px;">Основание за корекцията * <span style="color:#64748b;">(денят е извън прозореца на обекта)</span><br><input id="gr-att-reason" style="width:100%;" maxlength="300"></label>';
+    if(grAtt.late && !grAtt.needs_reason && !grAtt.daily) h += '<span style="font-size:12px;color:#92400e;">Минал ден — ще бъде записан като „късно“.</span>';
+    h += '<span style="flex:1"></span>' + (grAttDirty() ? '<button class="btn" onclick="grAttReset()">Откажи</button>' : '') +
+      '<button class="btn btn-green" id="gr-att-save" style="font-size:16px;padding:10px 18px;" onclick="grAttSave()">' +
+      (dev ? '💾 Запиши деня (' + dev + (dev === 1 ? ' отклонение' : ' отклонения') + ')' : '✓ Всички дошли — запиши') + '</button></div>';
+  }
+  return h + '<div style="font-size:11px;color:#64748b;margin:4px 2px 12px;">Отклоненията влизат в „✎ Промени“ с основание „Дневна присъствена“. Обектът отбелязва днес и ' + (grAtt.back_days || 2) + ' дни назад; след това — регионалният.</div>';
+}
+function grAttGo(n){
+  var dates = grAttDates(), i = dates.indexOf(grAtt.date) + n;
+  if(i < 0 || i >= dates.length) return;
+  return grAttPick(dates[i]);
+}
+function grAttPick(d){
+  if(!grAttLeaveOk()){ grRender(); return Promise.resolve(); }
+  grAttDate = d;
+  return grAttLoad().then(function(){ if(grView === 'att') grRender(); });
+}
+function grAttReset(){ grAttEdit = {}; grRender(); }
+function grAttPerson(id){ return ((grAtt && grAtt.people) || []).filter(function(p){ return p.staff_id === id; })[0] || null; }
+/* Изборът за човек — голям списък за телефона. „Готово“ само пази избора; записът е с „Запиши деня“. */
+function grAttOpen(id){
+  var p = grAttPerson(id);
+  if(!p || !grAtt.can_mark) return;
+  var st = grAttState(p), on = p.on_shift;
+  var opt = function(val, lbl, extra){
+    return '<label class="gr-att-opt" style="display:block;padding:10px 6px;border-bottom:1px solid #f1f5f9;font-size:15px;"><input type="radio" name="gr-att-st" value="' + val + '"' + (st.state === val ? ' checked' : '') + ' onchange="grAttOptShow()"> ' + lbl + (extra || '') + '</label>';
+  };
+  var sel = function(sid, list, cur){
+    return '<select id="' + sid + '" style="margin-left:24px;margin-top:4px;font-size:15px;">' + list.map(function(x){
+      var o = Array.isArray(x) ? x : [x, x];
+      return '<option value="' + escAttrVal(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + escVal(o[1]) + '</option>';
+    }).join('') + '</select>';
+  };
+  var work = GR_ATT_WORK.filter(function(l){ return !on || l !== p.planned_letter; });
+  var h = '<div class="modal-bg open" id="gr-att-modal"><div class="modal"><h3>' + escVal(p.name) + '</h3>' +
+    '<div style="font-size:13px;color:#64748b;margin-bottom:6px;">По график: <b>' + escVal(p.planned_letter || 'почивка') + '</b>' + (p.planned_legend ? ' · ' + escVal(p.planned_legend) : '') + '</div>';
+  if(on){
+    h += opt('present', '✓ Дошъл') + opt('absent', '✕ Не е дошъл — причина', '<br>' + sel('gr-att-abs', GR_ATT_ABSENT, st.state === 'absent' ? st.actual : 'Б')) +
+      opt('unknown', '? Не е дошъл — причината още не е ясна') +
+      opt('other_shift', '↔ Друга смяна', '<br>' + sel('gr-att-shift', work, st.state === 'other_shift' ? st.actual : work[0]));
+  } else {
+    h += opt('off', 'Не е на смяна (както е по график)') + opt('extra', '+ Дошъл, без да е на смяна', '<br>' + sel('gr-att-shift', work, st.state === 'extra' ? st.actual : 'П')) +
+      opt('absent', '✕ Друго отсъствие (напр. болничен в отпуска)', '<br>' + sel('gr-att-abs', GR_ATT_ABSENT, st.state === 'absent' ? st.actual : 'Б'));
+  }
+  h += opt('trip', 'К → командирован в друг обект', '<br>' + sel('gr-att-trip', [['', '— избери обект —']].concat((grAtt.trip_stores || []).map(function(n){ return [n, n]; })), st.trip_store || ''));
+  h += '<label style="display:block;margin-top:8px;font-size:13px;">Бележка (по желание, напр. № на болничния)<br><input id="gr-att-note" style="width:100%;" maxlength="200" value="' + escAttrVal(st.note || '') + '"></label>' +
+    '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-att-modal\')">Откажи</button><button class="btn btn-green" id="gr-att-ok" onclick="grAttApply(\'' + escAttrVal(id) + '\')">Готово</button></div></div></div>';
+  var old = document.getElementById('gr-att-modal');
+  if(old) old.parentNode.removeChild(old);
+  document.body.insertAdjacentHTML('beforeend', h);
+  grAttOptShow();
+}
+function grAttOptShow(){
+  var r = document.querySelector('#gr-att-modal input[name="gr-att-st"]:checked'), s = r ? r.value : '';
+  var show = function(id, on){ var el = document.getElementById(id); if(el) el.style.display = on ? '' : 'none'; };
+  show('gr-att-abs', s === 'absent'); show('gr-att-shift', s === 'other_shift' || s === 'extra'); show('gr-att-trip', s === 'trip');
+}
+function grAttApply(id){
+  var p = grAttPerson(id), r = document.querySelector('#gr-att-modal input[name="gr-att-st"]:checked');
+  if(!p || !r) return;
+  var s = r.value, st = { state: s, actual: null, trip_store: null, note: v('gr-att-note') };
+  if(s === 'absent') st.actual = v('gr-att-abs');
+  if(s === 'other_shift' || s === 'extra') st.actual = v('gr-att-shift');
+  if(s === 'trip'){ st.actual = 'К'; st.trip_store = v('gr-att-trip'); if(!st.trip_store){ toast('Избери обекта на командировката.', '#dc2626'); return; } }
+  var was = grAttServerState(p);
+  if(was.state === st.state && (was.actual || null) === (st.actual || null) && (was.trip_store || null) === (st.trip_store || null) && (was.note || '') === (st.note || '')) delete grAttEdit[id];
+  else grAttEdit[id] = st;
+  closeModal('gr-att-modal');
+  grRender();
+}
+function grAttSave(){
+  if(!grAtt || !grAtt.can_mark) return;
+  var payload = { store: grStore, month: grMonth, date: grAtt.date, marks: grAtt.people.map(function(p){
+    var st = grAttState(p), m = { staff_id: p.staff_id, state: st.state };
+    if(st.actual && st.state !== 'present' && st.state !== 'off' && st.state !== 'unknown') m.actual = st.actual;
+    if(st.state === 'trip') m.trip_store = st.trip_store;
+    if(st.note) m.note = st.note;
+    return m;
+  }) };
+  if(grAtt.needs_reason){
+    payload.correct_reason = v('gr-att-reason');
+    if(payload.correct_reason.length < 3){ toast('Напиши основание за корекцията.', '#dc2626'); return; }
+  }
+  var btnEl = document.getElementById('gr-att-save');
+  if(btnEl) btnEl.disabled = true;
+  var store = grStore, month = grMonth;
+  return grApi('daily_save', payload).then(function(res){
+    if(store !== grStore || month !== grMonth) return;
+    if(!res.ok){
+      if(btnEl) btnEl.disabled = false;
+      toast('Не е записано: ' + grErrText(res), '#dc2626');
+      return;
+    }
+    grAtt = res.data; grAttEdit = {};
+    toast('Денят е отбелязан.');
+    return grChLoad().then(function(){ if(grView === 'att') grRender(); });
+  });
+}
+/* Решение 3: „неуточнено“ — причината и по-късно (само тя; друго — регионалният с корекция). */
+function grAttResolveOpen(id){
+  var p = grAttPerson(id);
+  if(!p) return;
+  var old = document.getElementById('gr-att-modal');
+  if(old) old.parentNode.removeChild(old);
+  document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg open" id="gr-att-modal"><div class="modal"><h3>Уточни: ' + escVal(p.name) + '</h3>' +
+    '<div style="font-size:13px;color:#64748b;">' + escVal(grAttDayLabel(grAtt.date)) + ' — отбелязан „не е дошъл, неуточнено“.</div>' +
+    '<label style="display:block;margin:8px 0;font-size:13px;">Причина *<br><select id="gr-att-res-abs" style="width:100%;font-size:15px;">' + GR_ATT_ABSENT.map(function(a){ return '<option value="' + escAttrVal(a[0]) + '">' + escVal(a[1]) + '</option>'; }).join('') + '</select></label>' +
+    '<label style="display:block;margin:8px 0;font-size:13px;">Бележка (напр. № на болничния)<br><input id="gr-att-res-note" style="width:100%;" maxlength="200" value="' + escAttrVal((p.mark && p.mark.note) || '') + '"></label>' +
+    '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-att-modal\')">Откажи</button><button class="btn btn-green" id="gr-att-res-ok" onclick="grAttResolve(\'' + escAttrVal(id) + '\')">Запиши</button></div></div></div>');
+}
+function grAttResolve(id){
+  var store = grStore, month = grMonth;
+  return grApi('daily_resolve', { store: store, month: month, date: grAtt.date, staff_id: id, actual: v('gr-att-res-abs'), note: v('gr-att-res-note') }).then(function(res){
+    if(store !== grStore || month !== grMonth) return;
+    if(!res.ok){ toast('Не е записано: ' + grErrText(res), '#dc2626'); return; }
+    closeModal('gr-att-modal');
+    grAtt = res.data; grAttEdit = {};
+    toast('Причината е записана.');
+    return grChLoad().then(function(){ if(grView === 'att') grRender(); });
+  });
 }
 
 /* ─── ПРИСЪСТВЕНА ФОРМА (П3, план одобрен 05.11.2026) ─────────────────
@@ -2836,7 +3130,9 @@ function grPinChange(){
 var GR_AUDIT_LABEL = {
   grafik_unlock: '🔓 отключи', grafik_view_month: '👁 график', grafik_view_overview: '👁 обзор', grafik_view_staff: '👁 персонал', grafik_view_changes: '👁 промени',
   grafik_print: '🖨 печат', grafik_print_presence: '🖨 присъствена', grafik_print_changes: '🖨 промени', grafik_export_trz: '📥 файл за ТРЗ', grafik_export_presence: '📥 присъствена',
-  grafik_pin_set: '🔑 зададе ПИН', grafik_pin_fail: '✕ грешен ПИН', grafik_pin_change: '🔑 смени ПИН', grafik_pin_change_fail: '✕ грешен ПИН (смяна)', grafik_pin_reset: '↺ нулира ПИН'
+  grafik_pin_set: '🔑 зададе ПИН', grafik_pin_fail: '✕ грешен ПИН', grafik_pin_change: '🔑 смени ПИН', grafik_pin_change_fail: '✕ грешен ПИН (смяна)', grafik_pin_reset: '↺ нулира ПИН',
+  // Пакет 2А — „✅ Днес“
+  grafik_view_daily: '👁 днес', grafik_daily_save: '✅ отбеляза деня', grafik_daily_correct: '✎ корекция на деня', grafik_daily_resolve: '✅ уточни отсъствие'
 };
 function grAdmAuditHtml(){
   return '<div style="margin:16px 0 4px;font-weight:600;">📜 Кой отваря графика</div>' +

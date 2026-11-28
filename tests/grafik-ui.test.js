@@ -253,6 +253,9 @@ function env(user, opt) {
     return orig.apply(this, arguments);
   };
   h.w.grMonth = '2026-11';
+  // Пакет 2А: обектът пише в „✎ Промени“ само днес и 2 дни назад (по часовника). Разделите тук проверяват
+  // формуляра с дни от целия ноември 2026 — прозорецът е заключен в tests/grafik-daily.test.js (раздел 10).
+  h.w.grChInWin = () => true;
   h.S = S;
   return h;
 }
@@ -2245,6 +2248,9 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     let narrow = true;
     const m = env(MGR, { server: mk(), grouped: true });
     m.w.matchMedia = q => ({ matches: narrow && /max-width:\s*767px/.test(q) });
+    // Пакет 2А: на телефона управителят започва от „✅ Днес“ (tests/grafik-daily.test.js) — А6 е за графика,
+    // затова табът се води за вече отварян (grStarted) и остава на „📆 График“.
+    m.w.grStarted = true;
     await load(m);
     const md = m.doc, MW = m.w;
     ok('А6: под 768px — изглед за телефон, без мрежата', !!md.getElementById('gr-mob') && !md.getElementById('gr-grid') && /само преглед/.test(md.getElementById('gr-mob').textContent));

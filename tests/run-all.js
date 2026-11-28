@@ -594,6 +594,7 @@ const TESTS = [
   'grafik-engine.test.js',
   'grafik-ui.test.js',
   'grafik-pin.test.js',
+  'grafik-daily.test.js',
   'delete-tables-whitelist.test.js',
   'preocenka-buletin-vrazka.test.js',
   'preocenka-dovarshvane.test.js',

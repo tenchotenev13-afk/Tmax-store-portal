@@ -5,8 +5,9 @@
 import {
   handleGrafik, HttpError, accessEmails, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
   snapshotOffNorm, sameAsPlanned, staleChanges, roleOf, activeInMonth, returnMail, PORTAL_URL, sofiaMonthStart,
+  sofiaToday, shiftDate, inStoreWindow, markError, markActual, dailyReason, STORE_BACK_DAYS,
   type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector, type RowStat, type AccessRow, type ChangeRow,
-  type GAuditEntry, type PinState,
+  type GAuditEntry, type PinState, type DailyRow, type MarkRow, type DailySave,
 } from "./handler.ts";
 import { signSession } from "../_shared/session.ts";
 import { signPinToken } from "./pin-token.ts";
@@ -80,6 +81,33 @@ class MemRepo implements Repo {
   async insertChange(f: Record<string, unknown>) { const c = { id: nid(), trz_done: false, ...f } as ChangeRow; this.changes.push(c); return { ...c }; }
   async updateChange(id: string, f: Record<string, unknown>) { const c = this.changes.filter((x) => x.id === id)[0]; if (!c) return null; Object.assign(c, f); return { ...c }; }
   async deleteChange(id: string) { const n = this.changes.length; this.changes = this.changes.filter((c) => c.id !== id); return this.changes.length < n; }
+  // ── Пакет 2А: „✅ Днес“ — dailySave повтаря функцията grafik_daily_save (една транзакция).
+  dailies: (DailyRow & { marks: MarkRow[] })[] = []; dailyCalls: DailySave[] = [];
+  async getDaily(store: string, day: string) { const d = this.dailies.filter((x) => x.store_name === store && x.day === day)[0]; if (!d) return null; const { marks: _m, ...rest } = d; return { ...rest }; }
+  async listMarks(id: string) { const d = this.dailies.filter((x) => x.id === id)[0]; return d ? d.marks.map((m) => ({ ...m })) : []; }
+  async dailySave(p: DailySave) {
+    this.dailyCalls.push(JSON.parse(JSON.stringify(p)));
+    const mo = this.months.filter((m) => m.id === p.month_id && m.store_name === p.store_name && (m.status === "submitted" || m.status === "approved") && m.month === p.day.slice(0, 8) + "01")[0];
+    if (!mo) throw new HttpError(409, "not_submitted", "Графикът вече не е подаден — презареди.");
+    const now = new Date().toISOString(), dn = +p.day.slice(8, 10);
+    let d = this.dailies.filter((x) => x.store_name === p.store_name && x.day === p.day)[0];
+    if (!d) {
+      d = { id: nid(), store_name: p.store_name, month_id: p.month_id, day: p.day, marked_by: p.actor, marked_by_name: p.actor_name, marked_at: now, late: p.late, marks: [],
+        ...(p.correction ? { corrected_by: p.actor, corrected_by_name: p.actor_name, corrected_at: now, correct_reason: p.correction.reason } : {}) };
+      this.dailies.push(d);
+    } else {
+      Object.assign(d, { updated_by: p.actor, updated_by_name: p.actor_name, updated_at: now },
+        p.correction ? { corrected_by: p.actor, corrected_by_name: p.actor_name, corrected_at: now, correct_reason: p.correction.reason } : {});
+    }
+    this.changes = this.changes.filter((c) => !(c.month_id === p.month_id && c.day === dn && p.changes_delete.indexOf(c.id) >= 0));
+    for (const c of p.changes_upsert) {
+      const cur = this.changes.filter((x) => x.month_id === p.month_id && x.staff_id === c.staff_id && x.day === dn)[0];
+      if (cur) Object.assign(cur, c, { source: "daily", updated_by: p.actor, updated_at: now });
+      else this.changes.push({ id: nid(), month_id: p.month_id, day: dn, trz_done: false, ...c, source: "daily", created_by: p.actor, updated_by: p.actor, created_at: now, updated_at: now });
+    }
+    d.marks = p.marks.map((m) => ({ ...m, change_id: (this.changes.filter((c) => c.month_id === p.month_id && c.staff_id === m.staff_id && c.day === dn)[0] || { id: null }).id, marked_by: p.actor, marked_at: now }));
+    return d.id;
+  }
   async listAccess() { return this.access.slice(); }
   async insertAccess(f: Record<string, unknown>) { const r = { id: nid(), note: null, ...f } as AccessRow; this.access.push(r); return r; }
   async updateAccess(id: string, f: Record<string, unknown>) { const x = this.access.filter((a) => a.id === id)[0]; if (!x) return null; Object.assign(x, f); return { ...x }; }
@@ -193,8 +221,21 @@ class MemRepo implements Repo {
 // По подразбиране заявката носи и валиден ключ за ПИН-а (етап Б) за същото влизане — за да
 // тестват старите проверки правата, не ПИН-а. pin: false — без ключ; pin: "низ" — точно този.
 const iatOf = (tok: string) => JSON.parse(atob(tok.split(".")[0].replace(/-/g, "+").replace(/_/g, "/"))).iat as number;
+// Пакет 2А: обектът пипа „Промени“ само днес и 2 дни назад. Старите тестове на „Промени“ проверяват други
+// правила — за тях часовникът е денят на промяната (12:00 в София), освен ако тестът не даде now сам.
+export function dayClock(ym: string, day: number): number { return Math.floor(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1, day, 10) / 1000); }
+function autoNow(repo: MemRepo, body: Record<string, unknown>): number | undefined {
+  if (typeof body.month !== "string") return undefined;
+  if (body.action === "changes_save" && typeof body.day === "number" && body.day >= 1 && body.day <= 31) {
+    const cur = typeof body.id === "string" ? repo.changes.filter((c) => c.id === body.id)[0] : null;
+    return dayClock(body.month, Math.max(body.day, cur ? cur.day : 0));
+  }
+  if (body.action === "changes_delete") { const c = repo.changes.filter((x) => x.id === body.id)[0]; return c ? dayClock(body.month, c.day) : undefined; }
+  return undefined;
+}
 async function call(repo: MemRepo, who: User | null, body: Record<string, unknown>, opts: { session?: unknown; method?: string; now?: number; pin?: boolean | string } = {}) {
-  const session = "session" in opts ? opts.session : who ? await signSession({ uid: who.id, role: who.role || "", email: who.email }) : undefined;
+  if (opts.now === undefined) { const a = autoNow(repo, body); if (a !== undefined) opts = { ...opts, now: a }; }
+  const session = "session" in opts ? opts.session : who ? await signSession({ uid: who.id, role: who.role || "", email: who.email }, opts.now) : undefined;
   const nowS = opts.now ?? Math.floor(Date.now() / 1000);
   const pin_token = typeof opts.pin === "string" ? opts.pin
     : opts.pin === false || !who || typeof session !== "string" ? undefined
@@ -1573,4 +1614,237 @@ Deno.test("т.8 регионален admin (edit): свой обект — пи�
 Deno.test("sofiaMonthStart: границата на месеца по българско време", () => {
   eq(sofiaMonthStart(Date.UTC(2026, 10, 30, 22, 30) / 1000), "2026-12-01", "30.11 22:30 UTC = 01.12 00:30 София");
   eq(sofiaMonthStart(Date.UTC(2026, 10, 30, 21, 30) / 1000), "2026-11-01", "30.11 21:30 UTC = 23:30 София");
+});
+
+// ── Пакет 2А: „✅ Днес“ — дневна присъствена (план и решения на Тенчо 27.11.2026) ──────────────
+// submittedK: ids[0] П на 2 и 3 (Д1/З), ids[1] О на 2, НО на 4; другите дни — почивка. 8.11 — неделя.
+const D3 = dayClock("2026-11", 3);          // 03.11.2026 12:00 София
+const dget = (r: MemRepo, who: User, f: Record<string, unknown> = {}, now = D3) => call(r, who, { action: "daily_get", store: "Кърджали", month: "2026-11", ...f }, { now });
+const dsave = (r: MemRepo, who: User, date: string, marks: Record<string, unknown>[], f: Record<string, unknown> = {}, now = D3) =>
+  call(r, who, { action: "daily_save", store: "Кърджали", month: "2026-11", date, marks, ...f }, { now });
+const regK = (r: MemRepo): User => {
+  const u: User = { id: nid(), email: "reg.k@temax.bg", display_name: "Регионален Кърджали", store_name: "Централен офис", role: "accounting", is_regional: true, assigned_stores: ["Кърджали"], active: true };
+  r.users.push(u); r.access.push({ id: nid(), list: "edit", email: u.email, note: null }); return u;
+};
+
+Deno.test("2А чисти: днес по София, прозорец 2 дни назад, отметки, основание", () => {
+  eq(sofiaToday(Date.UTC(2026, 10, 26, 22, 30) / 1000), "2026-11-27", "26.11 22:30 UTC = 27.11 по София");
+  eq(sofiaToday(Date.UTC(2026, 10, 26, 21, 30) / 1000), "2026-11-26", "26.11 21:30 UTC = 23:30 София");
+  eq([STORE_BACK_DAYS, shiftDate("2026-12-01", -2), shiftDate("2026-11-30", 1)], [2, "2026-11-29", "2026-12-01"], "отместване през месеца");
+  eq(["2026-11-27", "2026-11-25", "2026-11-24", "2026-11-28"].map((d) => inStoreWindow(d, "2026-11-27")), [true, true, false, false], "днес, точно 2 назад — да; 3 назад и утре — не");
+  eq(markError({ state: "present" }, "П"), null, "дошъл на смяна");
+  eq(markError({ state: "present" }, ""), "не е на смяна по график", "дошъл без смяна — с „Дошъл, без да е на смяна“");
+  eq(markError({ state: "off" }, "П"), "на смяна е по график", "„не е на смяна“ за човек на смяна");
+  eq(markError({ state: "absent", actual: "X" }, "П") !== null, true, "непозната причина");
+  eq(markError({ state: "absent", actual: "Б" }, "П"), null, "Б");
+  eq(markError({ state: "other_shift", actual: "П" }, "П") !== null, true, "друга смяна = същата");
+  eq(markError({ state: "other_shift", actual: "К" }, "П") !== null, true, "К не е „друга смяна“ — има си бутон");
+  eq(markError({ state: "extra", actual: "ЗД" }, "О"), null, "в отпуск, а е дошъл");
+  eq(markError({ state: "trip", trip_store: " " }, "П") !== null, true, "К без обект");
+  eq(markError({ state: "unknown" }, "П"), null, "неуточнено — за човек на смяна");
+  eq(markError({ state: "unknown" }, "") !== null, true, "неуточнено — не и за човек без смяна");
+  eq(markError({ state: "present", note: "x".repeat(201) }, "П") !== null, true, "бележка над 200");
+  eq([markActual({ state: "absent", actual: "Н" }, "НО"), markActual({ state: "absent", actual: "Б" }, "П"), markActual({ state: "trip" }, "К"), markActual({ state: "unknown" }, "П")],
+    [null, "Б", null, null], "НО = Н; К по график = К; неуточнено — без промяна");
+  eq(dailyReason("Б", "  лист   № 5 "), "Дневна присъствена — болничен: лист № 5", "основанието");
+  eq(dailyReason("ЗД", null), "Дневна присъствена — смяна ЗД", "смяна");
+});
+
+Deno.test("2А daily_get: хората от снимката, смяната, назначените към датата; нов човек — в missing", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  r.staff.filter((s) => s.id === ids[0])[0].sector_id = "5ec00000-0000-4000-8000-000000000002";   // Каса
+  const nw = nid();
+  r.staff.push({ id: nw, store_name: "Кърджали", short_name: "НОВ", full_name: "Нов След Подаването", sort_order: 0, left_on: null });
+  const g = await dget(r, U.mgrK, { date: "2026-11-03" });
+  eq(g.status, 200, "200");
+  const b = g.body;
+  eq([b.filed, b.date, b.today, b.can_mark, b.needs_reason, b.late, b.min_date, b.max_date], [true, "2026-11-03", "2026-11-03", true, false, false, "2026-11-01", "2026-11-03"], "днес, обектът");
+  eq(b.people.map((p: { staff_id: string; planned_letter: string; planned_code: string; on_shift: boolean; sector: string }) => [p.staff_id === ids[0], p.planned_letter, p.planned_code, p.on_shift, p.sector]),
+    [[true, "П", "Д1/З", true, "Каса"], [false, "", "", false, "Без сектор"]], "смяната от графика и снимката; секторът от персонала");
+  eq(b.missing, ["Нов След Подаването"], "решение 4: новият човек — с име");
+  r.staff.filter((s) => s.id === ids[1])[0].left_on = "2026-11-02";
+  eq((await dget(r, U.mgrK, { date: "2026-11-03" })).body.people.length, 1, "напуснал преди датата — не");
+  const d0 = await dget(r, U.mgrK);
+  eq(d0.body.date, "2026-11-03", "без дата — днес");
+  const late = await dget(r, U.mgrK, { date: "2026-11-01" }, dayClock("2026-11", 4));
+  eq([late.body.can_mark, late.body.late, late.body.min_date], [false, true, "2026-11-02"], "3 дни назад — обектът не; изборът от 02.11");
+  const ad = await dget(r, U.admin, { date: "2026-11-01" }, dayClock("2026-11", 4));
+  eq([ad.body.can_mark, ad.body.needs_reason, ad.body.min_date], [true, true, "2026-11-01"], "admin — може, с основание");
+  const fut = await dget(r, U.admin, { date: "2026-11-05" });
+  eq(fut.body.can_mark, false, "бъдещ ден — никой");
+});
+
+Deno.test("2А daily_get: чернова → filed false; права за четене", async () => {
+  const r = new MemRepo();
+  const ids = kStaff(r);
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30(["", "П"]) }] });
+  const g = await dget(r, U.mgrK, { date: "2026-11-03" });
+  eq([g.status, g.body.filed, g.body.people.length, g.body.can_mark], [200, false, 0, false], "чернова — без хора");
+  eq((await dsave(r, U.mgrK, "2026-11-03", [])).body.reason, "not_submitted", "чернова — запис не");
+  eq((await dget(r, U.regSh, { date: "2026-11-03" })).status, 403, "регионален на друг обект — не чете");
+  const t = await dget(r, U.trz, { date: "2026-11-03" });
+  eq([t.status, t.body.can_mark], [200, false], "ТРЗ чете, не пише");
+});
+
+Deno.test("2А daily_save: всички дошли → ден + отметки, без промени; кой и кога; одит", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const s = await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "present" }, { staff_id: ids[1], state: "off" }]);
+  eq(s.status, 200, "записано: " + JSON.stringify(s.body));
+  eq([r.dailies.length, r.dailies[0].marked_by, r.dailies[0].marked_by_name, r.dailies[0].late, r.changes.length], [1, "tencho.tenev13@gmail.com", "Управител Кърджали", false, 0], "денят — кой; без промени");
+  eq([s.body.daily.marked_by_name, s.body.people[0].mark.state], ["Управител Кърджали", "present"], "отговорът — денят наново");
+  eq(r.dailyCalls.length, 1, "един запис (една транзакция)");
+  eq(r.audits.slice(-1)[0].event, "grafik_daily_save", "одит");
+  const ga = r.gaudits.filter((x) => x.event === "grafik_daily_save")[0];
+  eq([ga.store_name, ga.month, (ga.details as Record<string, unknown>).date, (ga.details as Record<string, unknown>).first], ["Кърджали", "2026-11", "2026-11-03", true], "grafik_audit — обект, месец, ден");
+});
+
+Deno.test("2А daily_save: отклоненията → „Промени“ (source daily), без двойно въвеждане; обратно — махат се", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const s = await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "absent", actual: "Б", note: "лист 12" }, { staff_id: ids[1], state: "extra", actual: "П" }]);
+  eq(s.status, 200, JSON.stringify(s.body));
+  const c = r.changes.slice().sort((a) => (a.staff_id === ids[0] ? -1 : 1));
+  eq(c.map((x) => [x.day, x.planned_letter, x.planned_code, x.actual, x.reason, x.source, x.created_by]),
+    [[3, "П", "Д1/З", "Б", "Дневна присъствена — болничен: лист 12", "daily", "tencho.tenev13@gmail.com"],
+     [3, "", "", "П", "Дневна присъствена — смяна П", "daily", "tencho.tenev13@gmail.com"]], "две промени — по график от сървъра, основание, source");
+  eq(r.dailies[0].marks.map((m) => [m.state, m.actual, !!m.change_id]), [["absent", "Б", true], ["extra", "П", true]], "отметките сочат промените");
+  const l = await call(r, U.trz, { action: "changes_list", store: "Кърджали", month: "2026-11" });
+  eq(l.body.rows.map((x: ChangeRow) => x.source), ["daily", "daily"], "ТРЗ ги вижда в „Промени“ с източника");
+  // Същото пак — без нов запис на промените.
+  const before = JSON.stringify(r.changes);
+  await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "absent", actual: "Б", note: "лист 12" }, { staff_id: ids[1], state: "extra", actual: "П" }]);
+  eq([JSON.stringify(r.changes) === before, r.dailyCalls.slice(-1)[0].changes_upsert.length, r.dailies[0].updated_by], [true, 0, "tencho.tenev13@gmail.com"], "без промяна — без запис; денят — updated_by");
+  // Обратно: дошъл / не е на смяна → промените се махат.
+  await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "present" }, { staff_id: ids[1], state: "off" }]);
+  eq(r.changes.length, 0, "махнати");
+  eq(r.audits.filter((x) => x.event === "grafik_daily_save").length, 3, "всеки запис — в одита");
+});
+
+Deno.test("2А daily_save: друга смяна, командировка, неуточнено; проверките на „Промени“ важат", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const s = await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "other_shift", actual: "ЗД" }, { staff_id: ids[1], state: "off" }]);
+  eq([s.status, r.changes[0].actual, r.changes[0].planned_letter], [200, "ЗД", "П"], "П → ЗД");
+  const t = await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "trip", trip_store: "Шумен" }, { staff_id: ids[1], state: "off" }]);
+  eq([t.status, r.changes.length, r.changes[0].actual, r.changes[0].trip_store, r.changes[0].reason], [200, 1, "К", "Шумен", "Дневна присъствена — командировка"], "К → обект (същият ред)");
+  eq((await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "trip", trip_store: "Кърджали" }, { staff_id: ids[1], state: "off" }])).body.reason, "trip_store", "К в своя обект — отказ");
+  const u = await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "unknown" }, { staff_id: ids[1], state: "off" }]);
+  eq([u.status, r.changes.length, r.dailies[0].marks[0].state], [200, 0, "unknown"], "неуточнено — без промяна (присъствената остава по график, докато се уточни)");
+  // Неделя 8.11: ЛД — отказ, както в „Промени“.
+  const sun = await dsave(r, U.mgrK, "2026-11-08", [{ staff_id: ids[0], state: "extra", actual: "ЛД" }, { staff_id: ids[1], state: "off" }], {}, dayClock("2026-11", 8));
+  eq(sun.body.reason, "sunday_ld", "ЛД в неделя");
+  eq(r.dailies.length, 1, "…и денят не е записан");
+});
+
+Deno.test("2А daily_save: непълно / грешно отбелязване → 400 със списъка, нищо не се записва", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const a = await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "present" }]);
+  eq([a.status, a.body.reason, a.body.errors.length, a.body.errors[0].error], [400, "bad_marks", 1, "не е отбелязан"], "липсва човек");
+  const b = await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "off" }, { staff_id: ids[1], state: "present" }]);
+  eq(b.body.errors.map((e: { error: string }) => e.error), ["на смяна е по график", "не е на смяна по график"], "грешките по човек");
+  eq((await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "present" }, { staff_id: ids[0], state: "present" }])).body.reason, "bad_request", "два пъти същият");
+  eq((await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "present" }, { staff_id: ids[1], state: "off" }, { staff_id: nid(), state: "present" }])).body.reason, "not_in_schedule", "човек извън графика");
+  eq((await dsave(r, U.mgrK, "2026-11-31", [])).body.reason, "bad_request", "31.11");
+  eq([r.dailies.length, r.changes.length, r.dailyCalls.length], [0, 0, 0], "нищо не е записано");
+});
+
+Deno.test("2А прозорец: обектът — днес и 2 назад („късно“); 3 назад и бъдещ — не; офисът — с основание", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const all = [{ staff_id: ids[0], state: "present" }, { staff_id: ids[1], state: "off" }];
+  const late = await dsave(r, U.mgrK, "2026-11-03", all, {}, dayClock("2026-11", 5));
+  eq([late.status, r.dailies[0].late], [200, true], "2 дни назад — може, „късно“");
+  const old = await dsave(r, U.mgrK, "2026-11-03", all, {}, dayClock("2026-11", 6));
+  eq([old.status, old.body.reason], [409, "daily_locked"], "3 дни назад — заключено за обекта");
+  assert(/днес и 2 дни назад \(04\.11–06\.11\)/.test(old.body.message), "съобщението с датите: " + old.body.message);
+  eq((await dsave(r, U.mgrK, "2026-11-04", all, {}, D3)).body.reason, "future", "бъдещ ден");
+  eq((await dsave(r, U.admin, "2026-11-04", all, {}, D3)).body.reason, "future", "бъдещ — и admin не");
+  // В 00:30 София на 06.11 „днес“ вече е 06.11 — 03.11 е заключен.
+  eq((await dsave(r, U.mgrK, "2026-11-03", all, {}, Math.floor(Date.UTC(2026, 10, 5, 22, 30) / 1000))).body.reason, "daily_locked", "денят е по София, не по UTC");
+  const reg = regK(r);
+  eq((await dsave(r, reg, "2026-11-03", all, {}, dayClock("2026-11", 20))).body.reason, "correct_reason", "регионален извън прозореца — без основание не");
+  const c = await dsave(r, reg, "2026-11-03", [{ staff_id: ids[0], state: "absent", actual: "Б" }, { staff_id: ids[1], state: "off" }], { correct_reason: "болничен донесен на 20.11" }, dayClock("2026-11", 20));
+  eq(c.status, 200, JSON.stringify(c.body));
+  eq([r.dailies[0].marked_by, r.dailies[0].corrected_by, r.dailies[0].correct_reason, r.changes[0].actual], ["tencho.tenev13@gmail.com", "reg.k@temax.bg", "болничен донесен на 20.11", "Б"], "корекция — кой, основание; първият отбелязал остава");
+  eq(r.audits.slice(-1)[0].event, "grafik_daily_correct", "одит — корекция");
+  const ad = await dsave(r, U.admin, "2026-11-02", [{ staff_id: ids[0], state: "present" }, { staff_id: ids[1], state: "absent", actual: "Б" }], { correct_reason: "попълване" }, dayClock("2026-11", 20));
+  eq(ad.status, 200, "admin — неотбелязан ден извън прозореца, с основание: " + JSON.stringify(ad.body));
+});
+
+Deno.test("2А права: склад, ТРЗ, преглед, чужд регионален — не пишат", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const all = [{ staff_id: ids[0], state: "present" }, { staff_id: ids[1], state: "off" }];
+  eq((await dsave(r, U.sklK, "2026-11-03", all)).status, 403, "склад");
+  eq((await dsave(r, U.trz, "2026-11-03", all)).status, 403, "ТРЗ");
+  eq((await dsave(r, U.regSh, "2026-11-03", all)).status, 403, "регионален на друг обект");
+  r.access.push({ id: nid(), list: "view", email: "viewer@temax.bg", note: null });
+  const vw: User = { id: nid(), email: "viewer@temax.bg", display_name: "Преглед", store_name: "Централен офис", role: "admin", is_regional: false, assigned_stores: null, active: true };
+  r.users.push(vw);
+  eq((await dsave(r, vw, "2026-11-03", all)).status, 403, "преглед");
+  eq((await call(r, vw, { action: "daily_resolve", store: "Кърджали", month: "2026-11", date: "2026-11-03", staff_id: ids[0], actual: "Б" }, { now: D3 })).status, 403, "преглед — и уточняване не");
+  eq(r.dailies.length, 0, "нищо");
+});
+
+Deno.test("2А отразена в ТРЗ промяна за деня: обектът не я сменя през „Днес“; admin — да", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "absent", actual: "Б" }, { staff_id: ids[1], state: "off" }]);
+  r.changes[0].trz_done = true;
+  eq((await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "present" }, { staff_id: ids[1], state: "off" }])).body.reason, "trz_done", "махане — не");
+  eq((await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "absent", actual: "О" }, { staff_id: ids[1], state: "off" }])).body.reason, "trz_done", "смяна — не");
+  eq((await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "absent", actual: "Б" }, { staff_id: ids[1], state: "off" }])).status, 200, "същото — може (нищо не пипа)");
+  eq((await dsave(r, U.admin, "2026-11-03", [{ staff_id: ids[0], state: "present" }, { staff_id: ids[1], state: "off" }])).status, 200, "admin — може");
+  eq(r.changes.length, 0, "махната от admin");
+});
+
+Deno.test("2А daily_resolve: „неуточнено“ се уточнява и след прозореца; само то", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "unknown", note: "не вдига" }, { staff_id: ids[1], state: "off" }]);
+  const res = (who: User, f: Record<string, unknown>, now = dayClock("2026-11", 12)) => call(r, who, { action: "daily_resolve", store: "Кърджали", month: "2026-11", date: "2026-11-03", staff_id: ids[0], ...f }, { now });
+  eq((await res(U.mgrK, { actual: "П" })).body.reason, "bad_request", "само причина за отсъствие");
+  const ok1 = await res(U.mgrK, { actual: "Б", note: "лист 77" });
+  eq(ok1.status, 200, JSON.stringify(ok1.body));
+  eq([r.changes.length, r.changes[0].actual, r.changes[0].reason, r.changes[0].source], [1, "Б", "Дневна присъствена — болничен: лист 77", "daily"], "промяната — 9 дни по-късно, от обекта");
+  eq(r.dailies[0].marks.map((m) => m.state).sort(), ["absent", "off"], "отметката — absent; другите остават");
+  eq(r.audits.slice(-1)[0].event, "grafik_daily_resolve", "одит");
+  eq((await res(U.mgrK, { actual: "О" })).body.reason, "not_unknown", "вече уточнено — не (смяна — регионалният с корекция)");
+  eq((await call(r, U.mgrK, { action: "daily_resolve", store: "Кърджали", month: "2026-11", date: "2026-11-04", staff_id: ids[0], actual: "Б" }, { now: dayClock("2026-11", 12) })).body.reason, "not_unknown", "неотбелязан ден — не");
+});
+
+Deno.test("2А „✎ Промени“ (решение 2): обектът — само днес и 2 назад; основанието — и по-късно; офисът — без промяна", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const at = (d: number) => ({ now: dayClock("2026-11", d) });
+  const save = (who: User, f: Record<string, unknown>, d: number) => call(r, who, { action: "changes_save", store: "Кърджали", month: "2026-11", ...f }, at(d));
+  eq((await save(U.mgrK, { staff_id: ids[0], day: 3, actual: "Б", reason: "x" }, 5)).status, 200, "2 дни назад — да");
+  const id = r.changes[0].id;
+  eq((await save(U.mgrK, { staff_id: ids[0], day: 2, actual: "Б", reason: "x" }, 5)).body.reason, "window", "3 дни назад — не");
+  eq((await save(U.mgrK, { staff_id: ids[0], day: 9, actual: "О", reason: "x" }, 5)).body.reason, "window", "бъдещ ден — не");
+  eq((await save(U.mgrK, { id, staff_id: ids[0], day: 3, actual: "Б", reason: "болничен лист № 9" }, 20)).status, 200, "по-късно — само основанието: да");
+  eq(r.changes[0].reason, "болничен лист № 9", "основанието е сменено");
+  eq((await save(U.mgrK, { id, staff_id: ids[0], day: 3, actual: "О", reason: "x" }, 20)).body.reason, "window", "по-късно — „реално“ не");
+  eq((await save(U.mgrK, { id, staff_id: ids[0], day: 20, actual: "Б", reason: "x" }, 20)).body.reason, "window", "преместване от стар ден в днешния — не");
+  eq((await call(r, U.mgrK, { action: "changes_delete", store: "Кърджали", month: "2026-11", id }, at(20))).body.reason, "window", "по-късно — триене не");
+  eq((await save(U.admin, { id, staff_id: ids[0], day: 3, actual: "О", reason: "поправка" }, 20)).status, 200, "admin — да");
+  const reg = regK(r);
+  eq((await save(reg, { staff_id: ids[0], day: 25, actual: "О", reason: "предварително" }, 3)).status, 200, "регионален — и бъдещ ден");
+  eq((await call(r, reg, { action: "changes_delete", store: "Кърджали", month: "2026-11", id }, at(28))).status, 200, "регионален трие стар");
+});
+
+Deno.test("2А „Днес“ върху ръчна промяна: старото „реално“ и документът остават в основанието; ръчна редакция → source manual", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const reg = regK(r);
+  eq((await call(r, reg, { action: "changes_save", store: "Кърджали", month: "2026-11", staff_id: ids[0], day: 3, actual: "Б", reason: "болничен № 123" }, { now: D3 })).status, 200, "ръчна Б");
+  await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "absent", actual: "О" }, { staff_id: ids[1], state: "off" }]);
+  eq([r.changes.length, r.changes[0].actual, r.changes[0].source, r.changes[0].reason], [1, "О", "daily", "Дневна присъствена — платен отпуск (беше: Б — болничен № 123)"], "заменена, документът е в основанието");
+  await dsave(r, U.mgrK, "2026-11-03", [{ staff_id: ids[0], state: "absent", actual: "Б" }, { staff_id: ids[1], state: "off" }]);
+  eq(r.changes[0].reason, "Дневна присъствена — болничен", "дневна върху дневна — без „беше“");
+  eq((await call(r, reg, { action: "changes_save", store: "Кърджали", month: "2026-11", id: r.changes[0].id, staff_id: ids[0], day: 3, actual: "Б", reason: "болничен № 9" }, { now: D3 })).status, 200, "ръчна редакция");
+  eq(r.changes[0].source, "manual", "редът губи „дневна“");
 });

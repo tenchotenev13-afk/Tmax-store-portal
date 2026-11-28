@@ -3,7 +3,7 @@
 // за да се пуска и от repo.live-test.ts (без Deno.serve при импорт).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { hashSync, genSaltSync, compareSync } from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
-import { HttpError, type AccessRow, type AdminTable, type ChangeRow, type PinState, type Repo, type RowRec, type Sector, type Staff, type Vtr } from "./handler.ts";
+import { HttpError, type AccessRow, type AdminTable, type ChangeRow, type DailyRow, type MarkRow, type PinState, type Repo, type RowRec, type Sector, type Staff, type Vtr } from "./handler.ts";
 
 // Само безопасни колони — никога password_hash / history_pin_hash.
 const USER_COLS = "id,email,display_name,store_name,role,is_regional,assigned_stores,active";
@@ -50,6 +50,19 @@ export function makeRepo(): Repo {
     async deleteChange(id) {
       const rows = ok<unknown[]>(await db.from("grafik_changes").delete().eq("id", id).select("id"));
       return rows.length > 0;
+    },
+    // ── Пакет 2А: „✅ Днес“ (миграция grafik_daily). Записът — само през функцията (една транзакция).
+    async getDaily(store, day) {
+      return ok<DailyRow | null>(await db.from("grafik_daily").select("*").eq("store_name", store).eq("day", day).maybeSingle());
+    },
+    async listMarks(dailyId) {
+      return ok<MarkRow[]>(await db.from("grafik_daily_marks").select("staff_id,planned_letter,state,actual,trip_store,note,change_id,marked_by,marked_at").eq("daily_id", dailyId));
+    },
+    async dailySave(p) {
+      const r = await db.rpc("grafik_daily_save", { p });
+      // Месецът е върнат / одобрен междувременно (функцията проверява под заключване) → 409, не 500.
+      if (r.error && /месецът не е подаден/.test(r.error.message)) throw new HttpError(409, "not_submitted", "Графикът вече не е подаден — презареди.");
+      return ok<string>(r);
     },
     async listAccess() {
       return ok<AccessRow[]>(await db.from("grafik_access").select(ACCESS_COLS).order("list").order("email"));
