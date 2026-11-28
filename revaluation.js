@@ -349,6 +349,8 @@ function rvRender(){
     h += '<span style="font-size:12px;color:#64748b;">% за бланката: ' + esc(rvFmtQty(pct)) + '</span>';
   }
   h += '</div>';
+  /* Т.6 на Теодор (27.11.2026), преместен най-горе по негова молба 27.11.2026 — и при празна бланка. */
+  if(edit && !(rvSub && rvSub.no_items)) h += '<button type="button" id="rv-add-btn" class="rv-add-big" onclick="rvFormOpen()">➕ Добави артикул</button>';
   h += '<div style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-bottom:8px;">' +
     'Не се подават артикули от проверка на срокове или за връщане към доставчик. Кабели/гофри/маркучи/мрежи под 1 л.м. и мушама под 0,5 л.м. са брак, не преоценка.</div>';
   if(rvReturnedNow()){
@@ -403,8 +405,6 @@ function rvRender(){
   rvItems.forEach(function(it){ h += rvRowHtml(it, edit, pink, coEdit); });
   h += '</tbody></table></div>';
   if(cards) h += rvCardsHtml(rvCanSubmit());
-  /* Т.6 на Теодор (27.11.2026): големият бутон под таблицата — и при празна бланка. */
-  if(edit && !(rvSub && rvSub.no_items)) h += '<button type="button" id="rv-add-btn" class="rv-add-big" onclick="rvFormOpen()">➕ Добави артикул</button>';
   h += '</div>';
   el.innerHTML = h;
 }

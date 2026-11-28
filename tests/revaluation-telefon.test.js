@@ -1,7 +1,9 @@
 /* Преоценка на телефон — т.1, 2, 5, 6 на Теодор (27.11.2026) и задължителна
    снимка (решение на Тенчо 27.11.2026).
 
-   - „➕ Добави артикул" (голям, червен) ПОД таблицата, и при празна бланка;
+   - „➕ Добави артикул" (голям, червен) НАЙ-ГОРЕ в бланката — над жълтото
+     предупреждение, таблицата и картите (молба на Теодор 27.11.2026;
+     дотогава беше под таблицата), и при празна бланка;
      лентата „＋ Ред" я няма. Бутонът отваря прозорец #rv-form (в body):
      скенер / SAP код / EAN, описание, МЕ, ст. цена, кол., %, нова цена,
      причина, снимки („📷 Снимай" / „🖼 От галерията", миниатюри с ✕).
@@ -164,17 +166,26 @@ async function enter(h, code) {
 function type(h, id, val) { const el = $(h, id); el.value = val; fire(h.w, el, 'input'); }
 async function openAdd(h) { realClick(h.w, $(h, 'rv-add-btn')); await ticks(1); }
 async function save(h) { realClick(h.w, $(h, 'rv-f-save')); await ticks(10); }
+/* Молба на Теодор 27.11.2026: бутонът е НАЙ-ГОРЕ — преди жълтото
+   „Не се подават артикули…", преди таблицата и преди картите. */
+function checkOrder(h, b, label) {
+  const before = (x, y) => !!x && !!y && (x.compareDocumentPosition(y) & 4) !== 0;
+  const warn = [...mod(h).querySelectorAll('div')].find(d => /^Не се подават артикули от проверка на срокове/.test(d.textContent));
+  ok(label + ': бутонът е ПРЕДИ жълтото предупреждение', before(b, warn));
+  ok(label + ': …ПРЕДИ таблицата (.tbl-rv-sheet table)', before(b, mod(h).querySelector('.tbl-rv-sheet table')));
+  ok(label + ': …ПРЕДИ картите (#rv-cards)', before(b, $(h, 'rv-cards')));
+}
 
 (async function run() {
 
-  section('1. Бутонът „➕ Добави артикул" — под таблицата, и при празна бланка; „＋ Ред" го няма');
+  section('1. Бутонът „➕ Добави артикул" — най-горе (над предупреждението и таблицата), и при празна бланка; „＋ Ред" го няма');
   {
     const h = env(); await h.w.loadRevaluation(); await ticks(5);
     const b = $(h, 'rv-add-btn');
     ok('празна бланка → бутонът е там', !!b && b.textContent === '➕ Добави артикул');
     ok('…червен, голям (клас rv-add-big)', b && b.className === 'rv-add-big');
-    const wrap = mod(h).querySelector('.tbl-rv-sheet');
-    ok('…ПОД таблицата', !!wrap && (wrap.compareDocumentPosition(b) & 4) !== 0);
+    ok('…точно един бутон rv-add-btn', mod(h).querySelectorAll('button#rv-add-btn').length === 1);
+    checkOrder(h, b, 'празна бланка');
     ok('старият „＋ Ред" го няма', !btn(mod(h), '＋ Ред'));
     ok('лентата #rv-add я няма', !$(h, 'rv-add') && !$(h, 'rv-a-code'));
     await openAdd(h);
@@ -324,6 +335,8 @@ async function save(h) { realClick(h.w, $(h, 'rv-f-save')); await ticks(10); }
     ok('обектът: таблицата е с rv-has-cards (под 700 px се скрива)', wrap.classList.contains('rv-has-cards'));
     const c1 = $(h, 'rv-card-i-1'), c2 = $(h, 'rv-card-i-2');
     ok('2 карти', !!c1 && !!c2 && mod(h).querySelectorAll('.rv-card').length === 2);
+    ok('с редове: точно един бутон rv-add-btn', mod(h).querySelectorAll('button#rv-add-btn').length === 1);
+    checkOrder(h, $(h, 'rv-add-btn'), 'с редове');
     ok('карта 1: код, № KJ7, описание', c1.querySelector('.rv-card-code').textContent === '53531' && c1.querySelector('.rv-units').textContent === '№ KJ7' && c1.querySelector('.rv-card-name').textContent === 'АРКА ГРАДИНСКА МЕТАЛНА');
     ok('…„1 БР · 50 % → 8,90 (ст. 17,79)"', c1.querySelector('.rv-card-line').textContent === '1 БР · 50 % → 8,90 (ст. 17,79)', c1.querySelector('.rv-card-line').textContent);
     ok('…причина и миниатюра', c1.querySelector('.rv-card-why').textContent === 'счупен крак' && c1.querySelectorAll('.rv-thumb').length === 1);
@@ -489,4 +502,11 @@ async function save(h) { realClick(h.w, $(h, 'rv-f-save')); await ticks(10); }
      M6 винаги % (без form.last) → „цената пипната последна → 12,00";
      M7 картите с бутони и извън черновата → „извън прозореца: без бутона, без „✏️ Промени"";
      M8 карти и за ЦО → „ЦО: без карти и без rv-has-cards";
-     M9 повторният опит качва всичко наново → „повторен опит → качва само падналата". */
+     M9 повторният опит качва всичко наново → „повторен опит → качва само падналата".
+
+   Бутонът най-горе (молба на Теодор, 27.11.2026) — чистият код: exit 0,
+   113 успешни; всеки вариант на revaluation.js е паднал с exit 1:
+     Ма бутонът върнат най-долу (след rvCardsHtml) → „… ПРЕДИ жълтото
+        предупреждение / таблицата / картите" (празна бланка и с редове);
+     Мб бутонът и горе, и долу → „…точно един бутон rv-add-btn" (и двата случая);
+     Мв бутонът махнат изцяло → „празна бланка → бутонът е там" + редът. */
