@@ -2181,15 +2181,25 @@ function grPrintChanges(){
 var grAtt = null;          // daily_get за grStore / grMonth / grAttDate
 var grAttDate = '';        // избраният ден (ГГГГ-ММ-ДД); '' — днес (сървърът го избира в месеца)
 var grAttEdit = {};        // staff_id → { state, actual, trip_store, note } — незаписаното
+var grAttX = {};           // staff_id → true: натиснат ✕ на реда (показва Б / О / ? / Друго… на самия ред)
+var grAttSavedAt = '';     // „ЧЧ:ММ“ на успешния запис — бутонът е сив „Записано ✓“, докато нищо не се промени
 var GR_ATT_ABSENT = [['Б', 'Б — болничен'], ['О', 'О — платен отпуск'], ['Н', 'НО — неплатен отпуск'], ['Д', 'Д — държавни задължения'],
   ['А', 'А — с разрешение на администрацията'], ['С', 'С — самоотлъчка'], ['Майч', 'Майч — майчинство'], ['почивка', 'почивка (размяна)']];
 var GR_ATT_WORK = ['ЛД', 'ЗД', 'П', 'В', 'М'];
+// Бутоните за пръст — поне 44 px; причината на отсъствието — едро.
+// .gr-att-b задава САМО размера — „Запиши“ / „Откажи“ пазят вида си от .btn / .btn-green (иначе белият фон бие зеленото).
+var GR_ATT_CSS = '.gr-att-b{min-height:44px;min-width:44px;}' +
+  '.gr-att-yn .gr-att-b,.gr-att-q{padding:6px 10px;font-size:16px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#334155;cursor:pointer;}' +
+  '.gr-att-yn .gr-att-b{width:52px;font-size:20px;font-weight:700;margin-left:6px;}' +
+  '.gr-att-yes.gr-att-on{background:#16a34a;border-color:#16a34a;color:#fff;}.gr-att-no.gr-att-on{background:#dc2626;border-color:#dc2626;color:#fff;}' +
+  '.gr-att-q{font-weight:700;padding:6px 8px;}.gr-att-q.gr-att-on{background:#1e293b;border-color:#1e293b;color:#fff;}' +
+  '.gr-att-nav{min-height:44px;min-width:44px;}.gr-att-big{font-size:18px;font-weight:700;padding:2px 8px;border-radius:8px;display:inline-block;}';
 var GR_ATT_ON = ['ЛД', 'ЗД', 'П', 'В', 'М', 'К'];
 function grAttLoad(){
   var store = grStore, month = grMonth, date = grAttDate && grAttDate.slice(0, 7) === grMonth ? grAttDate : '';
   return grApi('daily_get', { store: store, month: month, date: date }).then(function(res){
     if(store !== grStore || month !== grMonth) return;
-    grAttEdit = {};
+    grAttEdit = {}; grAttX = {}; grAttSavedAt = '';
     if(!res.ok){ grAtt = { error: grErrText(res) }; return; }
     grAtt = res.data; grAttDate = res.data.date || '';
   });
@@ -2206,7 +2216,7 @@ function grAttDirty(){ return Object.keys(grAttEdit).length > 0; }
 function grAttLeaveOk(){
   if(grView !== 'att' || !grAttDirty()) return true;
   if(!confirm('Има незаписани отметки за деня — да ги изоставя?')) return false;
-  grAttEdit = {};
+  grAttEdit = {}; grAttX = {};
   return true;
 }
 function grAttOnShift(L){ return GR_ATT_ON.indexOf(L) >= 0 || /^(?:[1-9]|1[0-2])$/.test(L || ''); }
@@ -2236,8 +2246,8 @@ function grAttChip(st, p){
   var s = st.state;
   if(s === 'present') return '<span class="gr-att-chip" data-state="present" style="color:#166534;background:#dcfce7;">✓ дошъл</span>';
   if(s === 'off') return '<span class="gr-att-chip" data-state="off" style="color:#64748b;background:#f1f5f9;">' + (p.planned_letter ? escVal(p.planned_letter) : 'почива') + '</span>';
-  if(s === 'unknown') return '<span class="gr-att-chip" data-state="unknown" style="color:#92400e;background:#fef3c7;">? не е дошъл — неуточнено</span>';
-  if(s === 'absent') return '<span class="gr-att-chip" data-state="absent" style="color:#991b1b;background:#fee2e2;">✕ ' + escVal(grAttAbsLabel(st.actual)) + '</span>';
+  if(s === 'unknown') return '<span class="gr-att-chip gr-att-big" data-state="unknown" style="color:#92400e;background:#fef3c7;">? не е дошъл — неуточнено</span>';
+  if(s === 'absent') return '<span class="gr-att-chip gr-att-big" data-state="absent" style="color:#991b1b;background:#fee2e2;">✕ ' + escVal(grAttAbsLabel(st.actual)) + '</span>';
   if(s === 'trip') return '<span class="gr-att-chip" data-state="trip" style="color:#9a3412;background:#ffedd5;">К → ' + escVal(st.trip_store || '?') + '</span>';
   if(s === 'other_shift') return '<span class="gr-att-chip" data-state="other_shift" style="color:#1e40af;background:#dbeafe;">↔ ' + escVal(st.actual) + ' вместо ' + escVal(p.planned_letter) + '</span>';
   if(s === 'extra') return '<span class="gr-att-chip" data-state="extra" style="color:#1e40af;background:#dbeafe;">+ ' + escVal(st.actual) + ' (без смяна)</span>';
@@ -2270,12 +2280,12 @@ function grAttHtml(){
       (grAtt.status === 'draft' ? ' е чернова' : ' още не е въведен') + ' — първо го подай.</div>';
   }
   var can = !!grAtt.can_mark, dates = grAttDates(), i = dates.indexOf(grAtt.date);
-  var h = '<div class="card" id="gr-att-head" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
-    '<button class="btn-sm" onclick="grAttGo(-1)"' + (i <= 0 ? ' disabled' : '') + '>◀</button>' +
-    '<select id="gr-att-date" onchange="grAttPick(this.value)" style="font-size:15px;">' + dates.map(function(d){
+  var h = '<style id="gr-att-css">' + GR_ATT_CSS + '</style><div class="card" id="gr-att-head" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
+    '<button class="btn-sm gr-att-nav" onclick="grAttGo(-1)"' + (i <= 0 ? ' disabled' : '') + '>◀</button>' +
+    '<select id="gr-att-date" class="gr-att-nav" onchange="grAttPick(this.value)" style="font-size:15px;">' + dates.map(function(d){
       return '<option value="' + d + '"' + (d === grAtt.date ? ' selected' : '') + '>' + escVal(grAttDayLabel(d)) + (d === grAtt.today ? ' · днес' : '') + '</option>';
     }).join('') + '</select>' +
-    '<button class="btn-sm" onclick="grAttGo(1)"' + (i >= dates.length - 1 ? ' disabled' : '') + '>▶</button>' +
+    '<button class="btn-sm gr-att-nav" onclick="grAttGo(1)"' + (i >= dates.length - 1 ? ' disabled' : '') + '>▶</button>' +
     '<span style="flex:1"></span>' + grAttWhoHtml() + '</div>';
   if(!can){
     var why = grAtt.date > grAtt.today ? 'Бъдещ ден — отбелязва се в самия ден.'
@@ -2289,16 +2299,41 @@ function grAttHtml(){
   var ppl = grAtt.people || [];
   if(!ppl.length) return h + '<div class="card" style="color:#64748b;">Няма служители в графика за този ден.</div>';
   var on = ppl.filter(function(p){ return p.on_shift; }), off = ppl.filter(function(p){ return !p.on_shift; });
+  /* Ред: име (клик → сегашния прозорец) + вдясно ✓ / ✕ (само за хората на смяна — „?“ / „дошъл“ сървърът
+     ги приема само за тях). ✕ показва на самия ред Б / О / ? / Друго…; „Друго…“ → сегашния прозорец. */
   var row = function(p){
-    var st = grAttState(p), dirty = !!grAttEdit[p.staff_id];
+    var st = grAttState(p), dirty = !!grAttEdit[p.staff_id], id = escAttrVal(p.staff_id), yn = can && p.on_shift;
     var plan = p.planned_letter ? '<b>' + escVal(p.planned_letter) + '</b>' + (p.planned_legend ? ' <span style="color:#64748b;font-size:12px;">' + escVal(p.planned_legend) + '</span>' : '') : '<span style="color:#94a3b8;">почивка</span>';
     var resolve = st.state === 'unknown' && !dirty && grAtt.can_resolve && p.mark && p.mark.state === 'unknown' && !can
-      ? ' <button class="btn-sm gr-att-resolve" onclick="event.stopPropagation();grAttResolveOpen(\'' + escAttrVal(p.staff_id) + '\')">Уточни</button>' : '';
-    return '<div class="gr-att-person" id="gr-att-' + escAttrVal(p.staff_id) + '" data-state="' + st.state + '"' + (can ? ' onclick="grAttOpen(\'' + escAttrVal(p.staff_id) + '\')"' : '') +
-      ' style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 4px;border-top:1px solid #f1f5f9;font-size:15px;' + (can ? 'cursor:pointer;' : '') + (dirty ? 'background:#fffbeb;' : '') + '">' +
-      '<span><span style="font-weight:600;">' + escVal(p.name) + '</span><br><span style="font-size:13px;">' + plan + '</span></span>' +
-      '<span style="text-align:right;white-space:nowrap;">' + grAttChip(st, p) + resolve + (st.note ? '<div style="font-size:11px;color:#64748b;max-width:160px;white-space:normal;">' + escVal(st.note) + '</div>' : '') + '</span></div>';
+      ? ' <button class="btn-sm gr-att-resolve" onclick="event.stopPropagation();grAttResolveOpen(\'' + id + '\')">Уточни</button>' : '';
+    var bg = st.state === 'absent' ? '#fef2f2' : st.state === 'unknown' ? '#fefce8' : '';
+    var no = yn && (st.state !== 'present' || !!grAttX[p.staff_id]);
+    var h2 = '<div class="gr-att-person" id="gr-att-' + id + '" data-state="' + st.state + '"' + (dirty ? ' data-dirty="1"' : '') +
+      ' style="padding:8px 4px;border-top:1px solid #f1f5f9;font-size:15px;' + (bg ? 'background:' + bg + ';' : '') + (dirty ? 'border-left:4px solid #f59e0b;padding-left:6px;' : '') + '">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+      '<span class="gr-att-name"' + (can ? ' onclick="grAttOpen(\'' + id + '\')" style="cursor:pointer;flex:1;min-width:0;"' : ' style="flex:1;min-width:0;"') + '>' +
+      '<span style="font-weight:600;">' + escVal(p.name) + '</span><br><span style="font-size:13px;">' + plan + '</span>' +
+      (yn ? '<div style="margin-top:3px;">' + grAttChip(st, p) + '</div>' : '') + '</span>';
+    if(yn){
+      h2 += '<span class="gr-att-yn" style="white-space:nowrap;">' +
+        '<button class="gr-att-b gr-att-yes' + (!no ? ' gr-att-on' : '') + '" onclick="grAttYes(\'' + id + '\')" title="Дошъл">✓</button>' +
+        '<button class="gr-att-b gr-att-no' + (no ? ' gr-att-on' : '') + '" onclick="grAttNo(\'' + id + '\')" title="Не е дошъл">✕</button></span>';
+    } else {
+      h2 += '<span style="text-align:right;white-space:nowrap;">' + grAttChip(st, p) + resolve + '</span>';
+    }
+    h2 += '</div>';
+    if(no){
+      var cur = st.state === 'unknown' ? '?' : st.state === 'absent' && (st.actual === 'Б' || st.actual === 'О') ? st.actual : st.state === 'present' ? '' : 'other';
+      var qb = function(val, lbl, fn){ return '<button class="gr-att-b gr-att-q' + (cur === val ? ' gr-att-on' : '') + '" data-r="' + val + '" onclick="' + fn + '">' + lbl + '</button>'; };
+      h2 += '<div class="gr-att-why" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;">' +
+        qb('Б', 'Б', 'grAttQuick(\'' + id + '\',\'Б\')') + qb('О', 'О', 'grAttQuick(\'' + id + '\',\'О\')') +
+        qb('?', '? неуточнено', 'grAttQuick(\'' + id + '\',\'?\')') + qb('other', 'Друго…', 'grAttOpen(\'' + id + '\')') + '</div>';
+    }
+    if(st.note) h2 += '<div style="font-size:12px;color:#64748b;margin-top:3px;' + (yn ? '' : 'text-align:right;') + '">' + escVal(st.note) + '</div>';
+    return h2 + '</div>';
   };
+  var miss = grAttMissing();
+  h += '<div class="card" id="gr-att-count" style="font-size:17px;padding:8px 12px;"><b>' + on.length + '</b> на смяна · <b style="color:' + (miss ? '#dc2626' : '#166534') + ';">' + miss + '</b> ' + (miss === 1 ? 'липсва' : 'липсват') + '</div>';
   var bySec = {}, order = [];
   on.forEach(function(p){ if(!bySec[p.sector]){ bySec[p.sector] = []; order.push(p.sector); } bySec[p.sector].push(p); });
   h += '<div class="card" id="gr-att-on" style="padding:6px 10px;"><div style="font-weight:700;margin-bottom:2px;">На смяна по график — ' + on.length + '</div>';
@@ -2312,13 +2347,15 @@ function grAttHtml(){
     h += '<details class="card" id="gr-att-off" style="padding:6px 10px;"' + (offDev ? ' open' : '') + '><summary style="font-weight:700;cursor:pointer;">Не са на смяна — ' + off.length + (offDev ? ' (дошли / отклонения: ' + offDev + ')' : '') + '</summary>' + off.map(row).join('') + '</details>';
   }
   if(can){
-    var dev = ppl.filter(function(p){ var s = grAttState(p).state; return s !== 'present' && s !== 'off'; }).length;
-    h += '<div class="card" id="gr-att-save-box" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
+    // Залепен за долния край; казва какво записва. След запис — сив „Записано ✓ ЧЧ:ММ“, докато нищо не се промени.
+    var saved = !!grAttSavedAt && !grAttDirty();
+    h += '<div class="card" id="gr-att-save-box" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;bottom:0;z-index:20;box-shadow:0 -4px 12px rgba(0,0,0,.12);">';
     if(grAtt.needs_reason) h += '<label style="flex-basis:100%;font-size:13px;">Основание за корекцията * <span style="color:#64748b;">(денят е извън прозореца на обекта)</span><br><input id="gr-att-reason" style="width:100%;" maxlength="300"></label>';
-    if(grAtt.late && !grAtt.needs_reason && !grAtt.daily) h += '<span style="font-size:12px;color:#92400e;">Минал ден — ще бъде записан като „късно“.</span>';
-    h += '<span style="flex:1"></span>' + (grAttDirty() ? '<button class="btn" onclick="grAttReset()">Откажи</button>' : '') +
-      '<button class="btn btn-green" id="gr-att-save" style="font-size:16px;padding:10px 18px;" onclick="grAttSave()">' +
-      (dev ? '💾 Запиши деня (' + dev + (dev === 1 ? ' отклонение' : ' отклонения') + ')' : '✓ Всички дошли — запиши') + '</button></div>';
+    if(grAtt.late && !grAtt.needs_reason && !grAtt.daily) h += '<span style="font-size:12px;color:#92400e;flex-basis:100%;">Минал ден — ще бъде записан като „късно“.</span>';
+    h += (grAttDirty() ? '<button class="btn gr-att-b" onclick="grAttReset()">Откажи</button>' : '') +
+      (saved ? '<button class="btn gr-att-b" id="gr-att-save" data-saved="1" disabled style="flex:1;font-size:16px;background:#e2e8f0;color:#475569;border-color:#cbd5e1;">Записано ✓ ' + escVal(grAttSavedAt) + '</button>'
+        : '<button class="btn btn-green gr-att-b" id="gr-att-save" style="flex:1;font-size:16px;" onclick="grAttSave()">' +
+          (miss ? 'Запиши — ' + miss + ' ' + (miss === 1 ? 'липсва' : 'липсват') : '✓ Всички дошли — запиши') + '</button>') + '</div>';
   }
   return h + '<div style="font-size:11px;color:#64748b;margin:4px 2px 12px;">Отклоненията влизат в „✎ Промени“ с основание „Дневна присъствена“. Обектът отбелязва днес и ' + (grAtt.back_days || 2) + ' дни назад; след това — регионалният.</div>';
 }
@@ -2332,7 +2369,42 @@ function grAttPick(d){
   grAttDate = d;
   return grAttLoad().then(function(){ if(grView === 'att') grRender(); });
 }
-function grAttReset(){ grAttEdit = {}; grRender(); }
+function grAttReset(){ grAttEdit = {}; grAttX = {}; grRender(); }
+// „M липсват“: хората на смяна по график, които не са в обекта (отсъствие, неуточнено, командировка).
+function grAttMissing(){
+  return ((grAtt && grAtt.people) || []).filter(function(p){ var s = grAttState(p).state; return p.on_shift && (s === 'absent' || s === 'unknown' || s === 'trip'); }).length;
+}
+// Нова отметка: същата като на сървъра → не е незаписана. Всяка промяна сваля „Записано ✓“.
+function grAttSet(id, st){
+  var p = grAttPerson(id);
+  if(!p) return;
+  var was = grAttServerState(p);
+  if(was.state === st.state && (was.actual || null) === (st.actual || null) && (was.trip_store || null) === (st.trip_store || null) && (was.note || '') === (st.note || '')) delete grAttEdit[id];
+  else grAttEdit[id] = st;
+  grAttSavedAt = '';
+}
+function grAttYes(id){
+  var p = grAttPerson(id);
+  if(!p || !grAtt.can_mark || !p.on_shift) return;
+  delete grAttX[id];
+  grAttSet(id, { state: 'present', actual: null, trip_store: null, note: grAttState(p).note || '' });
+  grRender();
+}
+function grAttNo(id){
+  var p = grAttPerson(id);
+  if(!p || !grAtt.can_mark || !p.on_shift) return;
+  if(grAttX[id]) delete grAttX[id]; else grAttX[id] = true;
+  grRender();
+}
+// Б / О / ? от реда — без прозореца; бележката (ако има) остава.
+function grAttQuick(id, r){
+  var p = grAttPerson(id);
+  if(!p || !grAtt.can_mark || !p.on_shift) return;
+  var note = grAttState(p).note || '';
+  delete grAttX[id];
+  grAttSet(id, r === '?' ? { state: 'unknown', actual: null, trip_store: null, note: note } : { state: 'absent', actual: r, trip_store: null, note: note });
+  grRender();
+}
 function grAttPerson(id){ return ((grAtt && grAtt.people) || []).filter(function(p){ return p.staff_id === id; })[0] || null; }
 /* Изборът за човек — голям списък за телефона. „Готово“ само пази избора; записът е с „Запиши деня“. */
 function grAttOpen(id){
@@ -2379,9 +2451,8 @@ function grAttApply(id){
   if(s === 'absent') st.actual = v('gr-att-abs');
   if(s === 'other_shift' || s === 'extra') st.actual = v('gr-att-shift');
   if(s === 'trip'){ st.actual = 'К'; st.trip_store = v('gr-att-trip'); if(!st.trip_store){ toast('Избери обекта на командировката.', '#dc2626'); return; } }
-  var was = grAttServerState(p);
-  if(was.state === st.state && (was.actual || null) === (st.actual || null) && (was.trip_store || null) === (st.trip_store || null) && (was.note || '') === (st.note || '')) delete grAttEdit[id];
-  else grAttEdit[id] = st;
+  delete grAttX[id];
+  grAttSet(id, st);
   closeModal('gr-att-modal');
   grRender();
 }
@@ -2408,7 +2479,8 @@ function grAttSave(){
       toast('Не е записано: ' + grErrText(res), '#dc2626');
       return;
     }
-    grAtt = res.data; grAttEdit = {};
+    var now = new Date(), p2 = function(n){ return (n < 10 ? '0' : '') + n; };
+    grAtt = res.data; grAttEdit = {}; grAttX = {}; grAttSavedAt = p2(now.getHours()) + ':' + p2(now.getMinutes());
     toast('Денят е отбелязан.');
     return grChLoad().then(function(){ if(grView === 'att') grRender(); });
   });
