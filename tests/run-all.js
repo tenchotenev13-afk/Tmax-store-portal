@@ -608,7 +608,8 @@ const TESTS = [
   'mirror-reader-key.test.js',
   'mirror-reader-audit-log.test.js',
   'mirror-reader-all.test.js',
-  'rls-server-only-schema.test.js'
+  'rls-server-only-schema.test.js',
+  'rls-spravochnici-razliki-schema.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
